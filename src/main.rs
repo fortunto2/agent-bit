@@ -21,7 +21,7 @@ struct Cli {
     #[arg(long, default_value = "bitgn/pac1-dev")]
     benchmark: String,
 
-    /// Run only this task (if not set, runs all)
+    /// Run only this task (playground mode, if not set runs all)
     #[arg(long)]
     task: Option<String>,
 
@@ -33,6 +33,10 @@ struct Cli {
     #[arg(long, env = "BITGN_URL", default_value = "https://api.bitgn.com")]
     bitgn_url: String,
 
+    /// BitGN API key (required for --run leaderboard mode)
+    #[arg(long, env = "BITGN_API_KEY")]
+    api_key: Option<String>,
+
     /// Max agent steps per task
     #[arg(long, default_value_t = 30)]
     max_steps: usize,
@@ -40,6 +44,10 @@ struct Cli {
     /// List tasks and exit
     #[arg(long)]
     list: bool,
+
+    /// Leaderboard run mode: create run, solve all trials, submit
+    #[arg(long)]
+    run: Option<String>,
 }
 
 const SYSTEM_PROMPT_TEMPLATE: &str = r#"You are a personal knowledge management agent operating in a virtual file system.
@@ -80,10 +88,16 @@ const SYSTEM_PROMPT_TEMPLATE: &str = r#"You are a personal knowledge management 
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let harness = bitgn::HarnessClient::new(&cli.bitgn_url);
+    let harness = bitgn::HarnessClient::new(&cli.bitgn_url, cli.api_key.clone());
     let status = harness.status().await?;
     eprintln!("[pac1] BitGN: {}", status);
 
+    // Leaderboard run mode
+    if let Some(ref run_name) = cli.run {
+        return run_leaderboard(&harness, &cli, run_name).await;
+    }
+
+    // Playground mode
     let benchmark = harness.get_benchmark(&cli.benchmark).await?;
     eprintln!(
         "[pac1] Benchmark: {} — {} tasks",
@@ -125,26 +139,9 @@ async fn main() -> Result<()> {
         eprintln!("  Trial: {}", trial.trial_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
+        let last_msg = run_trial(&pcm, &trial.instruction, &cli.model, cli.max_steps).await;
 
-        let last_msg = match run_agent(&pcm, &trial.instruction, &cli.model, cli.max_steps).await {
-            Ok(msg) => msg,
-            Err(e) => {
-                eprintln!("  ⚠ Agent error: {:#}", e);
-                String::new()
-            }
-        };
-
-        // Auto-submit if agent didn't call answer
-        if !pcm.answer_submitted.load(Ordering::SeqCst) {
-            let answer_text = if last_msg.is_empty() {
-                "Unable to determine answer".to_string()
-            } else {
-                last_msg.clone()
-            };
-            let outcome = guess_outcome(&answer_text);
-            eprintln!("  ⚠ Auto-answer [{}]: {}", outcome, &answer_text[..answer_text.len().min(100)]);
-            let _ = pcm.answer(&answer_text, outcome, &[]).await;
-        }
+        auto_submit_if_needed(&pcm, &last_msg).await;
 
         let result = harness.end_trial(&trial.trial_id).await?;
         if let Some(score) = result.score {
@@ -169,11 +166,112 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+// ─── Leaderboard run ─────────────────────────────────────────────────────────
+
+async fn run_leaderboard(
+    harness: &bitgn::HarnessClient,
+    cli: &Cli,
+    run_name: &str,
+) -> Result<()> {
+    if cli.api_key.is_none() {
+        anyhow::bail!("--api-key or BITGN_API_KEY required for leaderboard mode");
+    }
+
+    eprintln!("[pac1] Starting leaderboard run: {}", run_name);
+
+    let run = harness.start_run(&cli.benchmark, run_name).await?;
+    eprintln!(
+        "[pac1] Run {} created — {} trials",
+        run.run_id,
+        run.trial_ids.len()
+    );
+
+    for (i, trial_id) in run.trial_ids.iter().enumerate() {
+        let trial = harness.start_trial(trial_id).await?;
+        eprintln!(
+            "\n━━━ Trial {}/{}: {} (task {}) ━━━",
+            i + 1,
+            run.trial_ids.len(),
+            trial.trial_id,
+            trial.task_id
+        );
+
+        let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
+        let last_msg = run_trial(&pcm, &trial.instruction, &cli.model, cli.max_steps).await;
+
+        auto_submit_if_needed(&pcm, &last_msg).await;
+
+        let result = harness.end_trial(&trial.trial_id).await?;
+        if let Some(score) = result.score {
+            eprintln!("  Score: {:.2}", score);
+        }
+        for detail in &result.score_detail {
+            eprintln!("    {}", detail);
+        }
+    }
+
+    // Check run status
+    let run_status = harness.get_run(&run.run_id).await?;
+    eprintln!("\n[pac1] Run state: {}", run_status.state);
+    if let Some(score) = run_status.score {
+        eprintln!("[pac1] Run score: {:.1}%", score * 100.0);
+    }
+
+    // Submit to leaderboard
+    eprintln!("[pac1] Submitting run to leaderboard...");
+    let submit = harness.submit_run(&run.run_id).await?;
+    eprintln!("[pac1] Submitted! State: {}", submit.state);
+    eprintln!("[pac1] Run ID: {}", run.run_id);
+
+    Ok(())
+}
+
+// ─── Shared agent execution ─────────────────────────────────────────────────
+
+/// Run agent on a single trial. Returns last assistant message for fallback.
+async fn run_trial(
+    pcm: &Arc<pcm::PcmClient>,
+    instruction: &str,
+    model: &str,
+    max_steps: usize,
+) -> String {
+    match run_agent(pcm, instruction, model, max_steps).await {
+        Ok(msg) => msg,
+        Err(e) => {
+            eprintln!("  ⚠ Agent error: {:#}", e);
+            String::new()
+        }
+    }
+}
+
+async fn auto_submit_if_needed(pcm: &Arc<pcm::PcmClient>, last_msg: &str) {
+    if !pcm.answer_submitted.load(Ordering::SeqCst) {
+        let answer_text = if last_msg.is_empty() {
+            "Unable to determine answer"
+        } else {
+            last_msg
+        };
+        let outcome = guess_outcome(answer_text);
+        eprintln!(
+            "  ⚠ Auto-answer [{}]: {}",
+            outcome,
+            &answer_text[..answer_text.len().min(100)]
+        );
+        let _ = pcm.answer(answer_text, outcome, &[]).await;
+    }
+}
+
 fn guess_outcome(text: &str) -> &'static str {
     let lower = text.to_lowercase();
-    if lower.contains("unsupported") || lower.contains("cannot access") || lower.contains("external api") {
+    if lower.contains("unsupported")
+        || lower.contains("cannot access")
+        || lower.contains("external api")
+    {
         "OUTCOME_NONE_UNSUPPORTED"
-    } else if lower.contains("security") || lower.contains("injection") || lower.contains("denied") {
+    } else if lower.contains("security")
+        || lower.contains("injection")
+        || lower.contains("denied")
+    {
         "OUTCOME_DENIED_SECURITY"
     } else if lower.contains("clarif") || lower.contains("unclear") {
         "OUTCOME_NONE_CLARIFICATION"
@@ -184,14 +282,14 @@ fn guess_outcome(text: &str) -> &'static str {
     }
 }
 
-/// Run the agent loop. Returns the last assistant message text (for auto-submit fallback).
+// ─── Agent loop ──────────────────────────────────────────────────────────────
+
 async fn run_agent(
     pcm: &Arc<pcm::PcmClient>,
     instruction: &str,
     model: &str,
     max_steps: usize,
 ) -> Result<String> {
-    // Pre-ground: workspace context
     let tree = pcm
         .tree("/", 2)
         .await
@@ -199,15 +297,21 @@ async fn run_agent(
     let agents_md = pcm.read("AGENTS.md", false, 0, 0).await.unwrap_or_default();
     let time = pcm.context().await.unwrap_or_default();
 
-    eprintln!("  Grounding: tree={} bytes, agents.md={} bytes", tree.len(), agents_md.len());
-
-    // System prompt with AGENTS.md embedded
-    let system_prompt = SYSTEM_PROMPT_TEMPLATE.replace(
-        "{agents_md}",
-        if agents_md.is_empty() { "(no workspace instructions)" } else { &agents_md },
+    eprintln!(
+        "  Grounding: tree={} bytes, agents.md={} bytes",
+        tree.len(),
+        agents_md.len()
     );
 
-    // User message: workspace + task
+    let system_prompt = SYSTEM_PROMPT_TEMPLATE.replace(
+        "{agents_md}",
+        if agents_md.is_empty() {
+            "(no workspace instructions)"
+        } else {
+            &agents_md
+        },
+    );
+
     let grounding = format!(
         "## Workspace\n```\n{tree}```\n\n## Current Time\n{time}\n\n## Task\n{instruction}",
     );
@@ -229,7 +333,6 @@ async fn run_agent(
         .register(tools::AnswerTool(pcm.clone()));
 
     let agent = ToolCallingAgent::new(llm, &system_prompt);
-
     let mut ctx = AgentContext::new();
     let mut messages = vec![Message::user(&grounding)];
 
@@ -247,21 +350,19 @@ async fn run_agent(
         &mut messages,
         &loop_config,
         |event| match event {
-            LoopEvent::StepStart { step } => {
-                eprintln!("  [step {}/{}]", step, max_steps);
-            }
+            LoopEvent::StepStart { step } => eprintln!("  [step {}/{}]", step, max_steps),
             LoopEvent::Decision(ref d) => {
                 for tc in &d.tool_calls {
                     eprintln!("    → {}({})", tc.name, tc.arguments);
                 }
             }
             LoopEvent::ToolResult { name, output } => {
-                let preview: &str = if output.len() > 200 {
+                let p = if output.len() > 200 {
                     &output[..200]
                 } else {
                     &output
                 };
-                eprintln!("    {} = {}", name, preview.replace('\n', "↵"));
+                eprintln!("    {} = {}", name, p.replace('\n', "↵"));
             }
             LoopEvent::Completed { steps } => eprintln!("  ✓ Done in {} steps", steps),
             LoopEvent::LoopDetected { count } => eprintln!("  ⚠ Loop detected ({}x)", count),
@@ -272,7 +373,6 @@ async fn run_agent(
     .await
     .context("agent loop")?;
 
-    // Extract last assistant message for fallback
     let last_assistant = messages
         .iter()
         .rev()
