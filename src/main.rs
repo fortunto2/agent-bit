@@ -65,6 +65,8 @@ You are a pragmatic personal knowledge management assistant.
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let _telemetry = sgr_agent::init_telemetry(".agent", "pac1");
+
     let cli = Cli::parse();
 
     let harness = bitgn::HarnessClient::new(&cli.bitgn_url, cli.api_key.clone());
