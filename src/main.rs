@@ -407,9 +407,10 @@ async fn run_agent(
     let agent = HybridAgent::new(llm, &system_prompt);
     let mut ctx = AgentContext::new();
 
+    // Pre-grounding: tree and date already have shell-like headers from pcm.rs
+    // AGENTS.md is already in system prompt via {agents_md} template — don't duplicate
     let mut messages = vec![
-        Message::user(&format!("$ tree -L 2 /\n{}", tree_out)),
-        Message::user(&format!("$ cat AGENTS.md\n{}", agents_md)),
+        Message::user(&tree_out),
         Message::user(&format!("$ date\n{}", ctx_time)),
     ];
 
