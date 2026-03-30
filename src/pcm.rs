@@ -49,7 +49,8 @@ impl PcmClient {
         let resp = self
             .call("Tree", &json!({"root": root, "level": level}))
             .await?;
-        Ok(format_tree_entry(&resp["root"], "", true))
+        let tree_output = format_tree_entry(&resp["root"], "", true);
+        Ok(format!("$ tree -L {} {}\n{}", level, root, tree_output))
     }
 
     pub async fn list(&self, path: &str) -> Result<String> {
@@ -58,7 +59,7 @@ impl PcmClient {
             .as_array()
             .map(|a| a.as_slice())
             .unwrap_or_default();
-        let mut out = String::new();
+        let mut out = format!("$ ls {}\n", path);
         for entry in entries {
             let name = entry["name"].as_str().unwrap_or("");
             let is_dir = entry["isDir"].as_bool().unwrap_or(false);
@@ -90,7 +91,26 @@ impl PcmClient {
         }
 
         let resp = self.call("Read", &body).await?;
-        Ok(resp["content"].as_str().unwrap_or("").to_string())
+        let content = resp["content"].as_str().unwrap_or("").to_string();
+
+        // Shell-like header
+        let header = if start_line > 0 || end_line > 0 {
+            format!(
+                "$ sed -n '{},{}p' {}",
+                if start_line > 0 { start_line } else { 1 },
+                if end_line > 0 {
+                    end_line.to_string()
+                } else {
+                    "$".to_string()
+                },
+                path
+            )
+        } else if number {
+            format!("$ cat -n {}", path)
+        } else {
+            format!("$ cat {}", path)
+        };
+        Ok(format!("{}\n{}", header, content))
     }
 
     pub async fn write(
@@ -147,11 +167,12 @@ impl PcmClient {
             .as_array()
             .map(|a| a.as_slice())
             .unwrap_or_default();
-        Ok(items
+        let results = items
             .iter()
             .filter_map(|v| v.as_str())
             .collect::<Vec<_>>()
-            .join("\n"))
+            .join("\n");
+        Ok(format!("$ find {} -name '{}'\n{}", root, name, results))
     }
 
     pub async fn search(&self, root: &str, pattern: &str, limit: i32) -> Result<String> {
@@ -165,7 +186,7 @@ impl PcmClient {
             .as_array()
             .map(|a| a.as_slice())
             .unwrap_or_default();
-        let mut out = String::new();
+        let mut out = format!("$ rg -n --no-heading -e '{}' {}\n", pattern, root);
         for m in matches {
             let path = m["path"].as_str().unwrap_or("");
             let line = m["line"].as_i64().unwrap_or(0);
@@ -177,7 +198,8 @@ impl PcmClient {
 
     pub async fn context(&self) -> Result<String> {
         let resp = self.call("Context", &json!({})).await?;
-        Ok(resp["time"].as_str().unwrap_or("").to_string())
+        let time = resp["time"].as_str().unwrap_or("");
+        Ok(format!("$ date\n{}", time))
     }
 
     pub async fn answer(&self, message: &str, outcome: &str, refs: &[String]) -> Result<()> {
