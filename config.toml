@@ -33,6 +33,16 @@ model = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
 
+[providers.glm]
+model = "workers-ai/@cf/zhipuai/glm-4.7-flash"
+base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
+api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
+
+[providers.nemotron]
+model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
+base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
+api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
+
 [providers.gemini]
 model = "gemini-3.1-pro-preview"
 api_key_env = "GEMINI_API_KEY"
