@@ -1082,6 +1082,7 @@ dependencies = [
  "serde_json",
  "sgr-agent",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

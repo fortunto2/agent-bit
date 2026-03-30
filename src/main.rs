@@ -11,23 +11,24 @@ use sgr_agent::types::{LlmConfig, Message, Role};
 use sgr_agent::Llm;
 
 mod bitgn;
+mod config;
 mod pcm;
 mod tools;
 
 #[derive(Parser)]
 #[command(name = "pac1-agent", about = "BitGN PAC1 Challenge Agent (Rust + sgr-agent)")]
 struct Cli {
-    /// Benchmark ID
-    #[arg(long, default_value = "bitgn/pac1-dev")]
-    benchmark: String,
+    /// Config file path
+    #[arg(long, default_value = "config.toml")]
+    config: String,
+
+    /// LLM provider from config.toml (overrides llm.provider)
+    #[arg(long, short = 'p')]
+    provider: Option<String>,
 
     /// Run only this task (playground mode)
     #[arg(long)]
     task: Option<String>,
-
-    /// LLM model
-    #[arg(long, default_value = "gpt-5.4-mini")]
-    model: String,
 
     /// BitGN platform URL
     #[arg(long, env = "BITGN_URL", default_value = "https://api.bitgn.com")]
@@ -37,15 +38,15 @@ struct Cli {
     #[arg(long, env = "BITGN_API_KEY")]
     api_key: Option<String>,
 
-    /// Max agent steps per task
-    #[arg(long, default_value_t = 30)]
-    max_steps: usize,
+    /// Max agent steps per task (overrides config)
+    #[arg(long)]
+    max_steps: Option<usize>,
 
     /// List tasks and exit
     #[arg(long)]
     list: bool,
 
-    /// Leaderboard run mode: create run, solve all trials, submit
+    /// Leaderboard run mode
     #[arg(long)]
     run: Option<String>,
 }
@@ -68,31 +69,38 @@ You are a pragmatic personal knowledge management assistant.
 #[tokio::main]
 async fn main() -> Result<()> {
     let _telemetry = sgr_agent::init_telemetry(".agent", "pac1");
-
     let cli = Cli::parse();
+
+    let cfg = config::Config::load(&cli.config)?;
+    let provider_name = cli.provider.as_deref().unwrap_or(&cfg.llm.provider);
+    let (model, base_url, llm_api_key) = cfg.resolve_provider(provider_name)?;
+    let max_steps = cli.max_steps.unwrap_or(cfg.agent.max_steps);
+    let benchmark = &cfg.agent.benchmark;
+
+    eprintln!("[pac1] Provider: {} | Model: {}", provider_name, model);
 
     let harness = bitgn::HarnessClient::new(&cli.bitgn_url, cli.api_key.clone());
     let status = harness.status().await?;
     eprintln!("[pac1] BitGN: {}", status);
 
     if let Some(ref run_name) = cli.run {
-        return run_leaderboard(&harness, &cli, run_name).await;
+        return run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, max_steps, run_name).await;
     }
 
-    let benchmark = harness.get_benchmark(&cli.benchmark).await?;
-    eprintln!("[pac1] Benchmark: {} — {} tasks", cli.benchmark, benchmark.tasks.len());
+    let bm = harness.get_benchmark(benchmark).await?;
+    eprintln!("[pac1] Benchmark: {} — {} tasks", benchmark, bm.tasks.len());
 
     if cli.list {
-        for t in &benchmark.tasks {
+        for t in &bm.tasks {
             println!("{}: {}", t.task_id, t.preview);
         }
         return Ok(());
     }
 
     let tasks: Vec<_> = if let Some(ref tid) = cli.task {
-        benchmark.tasks.iter().filter(|t| t.task_id == *tid).collect()
+        bm.tasks.iter().filter(|t| t.task_id == *tid).collect()
     } else {
-        benchmark.tasks.iter().collect()
+        bm.tasks.iter().collect()
     };
 
     if tasks.is_empty() {
@@ -106,11 +114,11 @@ async fn main() -> Result<()> {
         eprintln!("\n━━━ Task: {} ━━━", task.task_id);
         eprintln!("  {}", task.preview);
 
-        let trial = harness.start_playground(&cli.benchmark, &task.task_id).await?;
+        let trial = harness.start_playground(benchmark, &task.task_id).await?;
         eprintln!("  Trial: {}", trial.trial_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let last_msg = run_trial(&pcm, &trial.instruction, &cli.model, cli.max_steps).await;
+        let last_msg = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, max_steps).await;
         auto_submit_if_needed(&pcm, &last_msg).await;
 
         let result = harness.end_trial(&trial.trial_id).await?;
@@ -133,13 +141,17 @@ async fn main() -> Result<()> {
 
 // ─── Leaderboard ─────────────────────────────────────────────────────────────
 
-async fn run_leaderboard(harness: &bitgn::HarnessClient, cli: &Cli, run_name: &str) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+async fn run_leaderboard(
+    harness: &bitgn::HarnessClient, cli: &Cli, benchmark: &str,
+    model: &str, base_url: Option<&str>, llm_api_key: &str, max_steps: usize, run_name: &str,
+) -> Result<()> {
     if cli.api_key.is_none() {
         anyhow::bail!("--api-key or BITGN_API_KEY required for leaderboard mode");
     }
 
     eprintln!("[pac1] Starting leaderboard run: {}", run_name);
-    let run = harness.start_run(&cli.benchmark, run_name).await?;
+    let run = harness.start_run(benchmark, run_name).await?;
     eprintln!("[pac1] Run {} — {} trials", run.run_id, run.trial_ids.len());
 
     for (i, trial_id) in run.trial_ids.iter().enumerate() {
@@ -148,7 +160,7 @@ async fn run_leaderboard(harness: &bitgn::HarnessClient, cli: &Cli, run_name: &s
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let last_msg = run_trial(&pcm, &trial.instruction, &cli.model, cli.max_steps).await;
+        let last_msg = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, max_steps).await;
         auto_submit_if_needed(&pcm, &last_msg).await;
 
         let result = harness.end_trial(&trial.trial_id).await?;
@@ -174,8 +186,11 @@ async fn run_leaderboard(harness: &bitgn::HarnessClient, cli: &Cli, run_name: &s
 
 // ─── Shared ──────────────────────────────────────────────────────────────────
 
-async fn run_trial(pcm: &Arc<pcm::PcmClient>, instruction: &str, model: &str, max_steps: usize) -> String {
-    match run_agent(pcm, instruction, model, max_steps).await {
+async fn run_trial(
+    pcm: &Arc<pcm::PcmClient>, instruction: &str,
+    model: &str, base_url: Option<&str>, api_key: &str, max_steps: usize,
+) -> String {
+    match run_agent(pcm, instruction, model, base_url, api_key, max_steps).await {
         Ok(msg) => msg,
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);
@@ -210,13 +225,26 @@ fn guess_outcome(text: &str) -> &'static str {
 
 // ─── Agent ───────────────────────────────────────────────────────────────────
 
+fn make_llm_config(model: &str, base_url: Option<&str>, api_key: &str) -> LlmConfig {
+    if let Some(url) = base_url {
+        // OpenAI-compatible endpoint (Cloudflare, Ollama, etc.) → Chat Completions
+        let mut cfg = LlmConfig::endpoint(api_key, url, model).temperature(0.2).max_tokens(4096);
+        cfg.use_chat_api = true;
+        cfg
+    } else {
+        // Default OpenAI → Responses API
+        LlmConfig::auto(model).temperature(0.2).max_tokens(4096)
+    }
+}
+
 async fn run_agent(
     pcm: &Arc<pcm::PcmClient>,
     instruction: &str,
     model: &str,
+    base_url: Option<&str>,
+    api_key: &str,
     max_steps: usize,
 ) -> Result<String> {
-    // Pre-ground: separate messages like the BitGN sample agent
     let tree_out = pcm.tree("/", 2).await.unwrap_or_else(|e| format!("(error: {})", e));
     let agents_md = pcm.read("AGENTS.md", false, 0, 0).await.unwrap_or_default();
     let ctx_time = pcm.context().await.unwrap_or_default();
@@ -228,11 +256,9 @@ async fn run_agent(
         if agents_md.is_empty() { "" } else { &agents_md },
     );
 
-    let config = LlmConfig::auto(model).temperature(0.2).max_tokens(4096);
+    let config = make_llm_config(model, base_url, api_key);
     let llm = Llm::new(&config);
 
-    // Order matters for structured output: put most-used tools first,
-    // context/answer last (no-param tools confuse constrained decoding)
     let registry = ToolRegistry::new()
         .register(tools::SearchTool(pcm.clone()))
         .register(tools::ReadTool(pcm.clone()))
@@ -249,7 +275,6 @@ async fn run_agent(
     let agent = HybridAgent::new(llm, &system_prompt);
     let mut ctx = AgentContext::new();
 
-    // Pre-grounding as separate user messages (matches BitGN sample pattern)
     let mut messages = vec![
         Message::user(&format!("tree -L 2 /\n{}", tree_out)),
         Message::user(&format!("cat AGENTS.md\n{}", agents_md)),
