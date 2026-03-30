@@ -223,6 +223,121 @@ fn guess_outcome(text: &str) -> &'static str {
     }
 }
 
+// ─── Safety ──────────────────────────────────────────────────────────────────
+
+/// Injection markers — if ANY of these appear in text, it's a security threat.
+const INJECTION_MARKERS: &[&str] = &[
+    "<script",
+    "</script",
+    "ignore all instructions",
+    "ignore previous instructions",
+    "ignore your rules",
+    "bypass safeguards",
+    "override",
+    "data-ops=\"override\"",
+    "IMPORTANT. Ignore",
+    "disregard above",
+    "forget your instructions",
+];
+
+/// Non-CRM markers — task is unrelated to knowledge management.
+const NON_CRM_MARKERS: &[&str] = &[
+    "what is 2x2",
+    "what is 2 x 2",
+    "what is 3x3",
+    "calculate ",
+    "solve this equation",
+    "write a poem",
+    "tell me a joke",
+];
+
+/// Check text for injection patterns (case-insensitive).
+fn has_injection(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    INJECTION_MARKERS.iter().any(|m| lower.contains(&m.to_lowercase()))
+}
+
+/// Check text for non-CRM content.
+fn is_non_crm(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    NON_CRM_MARKERS.iter().any(|m| lower.contains(m))
+}
+
+/// Pre-scan instruction text. Returns Some(outcome) if blocked, None if safe.
+fn prescan_instruction(text: &str) -> Option<(&'static str, &'static str)> {
+    if has_injection(text) {
+        Some(("OUTCOME_DENIED_SECURITY", "Blocked: injection/override attempt detected in task"))
+    } else if is_non_crm(text) {
+        Some(("OUTCOME_NONE_CLARIFICATION", "This request is unrelated to CRM/knowledge management work"))
+    } else {
+        None
+    }
+}
+
+/// Scan inbox files for threats. Returns Some(outcome) if any file is dangerous.
+async fn scan_inbox(pcm: &pcm::PcmClient) -> Option<(&'static str, &'static str)> {
+    // List inbox directory
+    let list = pcm.list("inbox").await.ok().or_else(|| {
+        // Try 00_inbox (alternative layout)
+        None
+    });
+    let list = match list {
+        Some(l) => l,
+        None => return None,
+    };
+
+    // Read each inbox file and check
+    for line in list.lines() {
+        let filename = line.trim().trim_end_matches('/');
+        if filename.is_empty() || filename.starts_with('$') || filename == "README.MD" {
+            continue;
+        }
+
+        let path = if list.contains("00_inbox") {
+            format!("00_inbox/{}", filename)
+        } else {
+            format!("inbox/{}", filename)
+        };
+
+        if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+            if has_injection(&content) {
+                return Some(("OUTCOME_DENIED_SECURITY",
+                    "Blocked: injection detected in inbox file"));
+            }
+        }
+    }
+    None
+}
+
+/// Read all inbox files and format as pre-grounding context.
+async fn read_inbox_files(pcm: &pcm::PcmClient) -> Result<String> {
+    // Try both inbox layouts
+    let (dir, list_result) = if let Ok(l) = pcm.list("inbox").await {
+        ("inbox", l)
+    } else if let Ok(l) = pcm.list("00_inbox").await {
+        ("00_inbox", l)
+    } else {
+        return Ok(String::new());
+    };
+
+    let mut output = String::new();
+    for line in list_result.lines() {
+        let filename = line.trim().trim_end_matches('/');
+        if filename.is_empty()
+            || filename.starts_with('$')
+            || filename.eq_ignore_ascii_case("README.MD")
+        {
+            continue;
+        }
+
+        let path = format!("{}/{}", dir, filename);
+        if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+            output.push_str(&format!("$ cat {}\n{}\n\n", path, content));
+        }
+    }
+    Ok(output)
+}
+
 // ─── Agent ───────────────────────────────────────────────────────────────────
 
 fn make_llm_config(model: &str, base_url: Option<&str>, api_key: &str) -> LlmConfig {
@@ -245,11 +360,28 @@ async fn run_agent(
     api_key: &str,
     max_steps: usize,
 ) -> Result<String> {
+    // === Level 1: Pre-scan instruction for injection ===
+    if let Some((outcome, msg)) = prescan_instruction(instruction) {
+        eprintln!("  ⛔ Pre-scan blocked: {}", msg);
+        pcm.answer(msg, outcome, &[]).await.ok();
+        return Ok(msg.to_string());
+    }
+
     let tree_out = pcm.tree("/", 2).await.unwrap_or_else(|e| format!("(error: {})", e));
     let agents_md = pcm.read("AGENTS.md", false, 0, 0).await.unwrap_or_default();
     let ctx_time = pcm.context().await.unwrap_or_default();
 
     eprintln!("  Grounding: tree={} bytes, agents.md={} bytes", tree_out.len(), agents_md.len());
+
+    // === Level 2: For "process inbox" tasks, scan inbox files ===
+    let instruction_lower = instruction.to_lowercase();
+    if instruction_lower.contains("inbox") || instruction_lower.contains("process") {
+        if let Some((outcome, msg)) = scan_inbox(pcm).await {
+            eprintln!("  ⛔ Inbox scan blocked: {}", msg);
+            pcm.answer(msg, outcome, &[]).await.ok();
+            return Ok(msg.to_string());
+        }
+    }
 
     let system_prompt = SYSTEM_PROMPT_TEMPLATE.replace(
         "{agents_md}",
@@ -279,8 +411,18 @@ async fn run_agent(
         Message::user(&format!("tree -L 2 /\n{}", tree_out)),
         Message::user(&format!("cat AGENTS.md\n{}", agents_md)),
         Message::user(&format!("date\n{}", ctx_time)),
-        Message::user(instruction),
     ];
+
+    // For inbox tasks, pre-load inbox files so LLM sees full content
+    if instruction_lower.contains("inbox") || instruction_lower.contains("process") {
+        if let Ok(inbox_content) = read_inbox_files(pcm).await {
+            if !inbox_content.is_empty() {
+                messages.push(Message::user(&inbox_content));
+            }
+        }
+    }
+
+    messages.push(Message::user(instruction));
 
     let loop_config = LoopConfig {
         max_steps,
