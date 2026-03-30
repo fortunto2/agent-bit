@@ -392,12 +392,12 @@ async fn run_agent(
     let llm = Llm::new(&config);
 
     let registry = ToolRegistry::new()
-        .register(tools::SearchTool(pcm.clone()))
         .register(tools::ReadTool(pcm.clone()))
+        .register(tools::WriteTool(pcm.clone()))
+        .register(tools::SearchTool(pcm.clone()))
         .register(tools::FindTool(pcm.clone()))
         .register(tools::ListTool(pcm.clone()))
         .register(tools::TreeTool(pcm.clone()))
-        .register(tools::WriteTool(pcm.clone()))
         .register(tools::DeleteTool(pcm.clone()))
         .register(tools::MkDirTool(pcm.clone()))
         .register(tools::MoveTool(pcm.clone()))
@@ -408,12 +408,12 @@ async fn run_agent(
     let mut ctx = AgentContext::new();
 
     let mut messages = vec![
-        Message::user(&format!("tree -L 2 /\n{}", tree_out)),
-        Message::user(&format!("cat AGENTS.md\n{}", agents_md)),
-        Message::user(&format!("date\n{}", ctx_time)),
+        Message::user(&format!("$ tree -L 2 /\n{}", tree_out)),
+        Message::user(&format!("$ cat AGENTS.md\n{}", agents_md)),
+        Message::user(&format!("$ date\n{}", ctx_time)),
     ];
 
-    // For inbox tasks, pre-load inbox files so LLM sees full content
+    // For inbox tasks, pre-load inbox files
     if instruction_lower.contains("inbox") || instruction_lower.contains("process") {
         if let Ok(inbox_content) = read_inbox_files(pcm).await {
             if !inbox_content.is_empty() {
