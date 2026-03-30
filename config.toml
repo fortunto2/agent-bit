@@ -1,0 +1,33 @@
+# PAC1 Agent Configuration
+# Switch provider: change llm.provider to any key from [providers.*]
+
+[agent]
+max_steps = 20
+benchmark = "bitgn/pac1-dev"
+
+[llm]
+provider = "openai"
+
+# --- Providers ---
+
+[providers.openai]
+model = "gpt-5.4-mini"
+api_key_env = "OPENAI_API_KEY"
+
+[providers.openai-full]
+model = "gpt-5.4"
+api_key_env = "OPENAI_API_KEY"
+
+[providers.kimi]
+model = "workers-ai/@cf/moonshotai/kimi-k2.5"
+base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
+api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
+
+[providers.llama]
+model = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
+api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
+
+[providers.gemini]
+model = "gemini-3.1-pro-preview"
+api_key_env = "GEMINI_API_KEY"
