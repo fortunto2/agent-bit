@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
 
     let cfg = config::Config::load(&cli.config)?;
     let provider_name = cli.provider.as_deref().unwrap_or(&cfg.llm.provider);
-    let (model, base_url, llm_api_key) = cfg.resolve_provider(provider_name)?;
+    let (model, base_url, llm_api_key, extra_headers) = cfg.resolve_provider(provider_name)?;
     let max_steps = cli.max_steps.unwrap_or(cfg.agent.max_steps);
     let benchmark = &cfg.agent.benchmark;
 
@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     eprintln!("[pac1] BitGN: {}", status);
 
     if let Some(ref run_name) = cli.run {
-        return run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, max_steps, run_name).await;
+        return run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, run_name).await;
     }
 
     let bm = harness.get_benchmark(benchmark).await?;
@@ -118,7 +118,7 @@ async fn main() -> Result<()> {
         eprintln!("  Trial: {}", trial.trial_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let last_msg = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, max_steps).await;
+        let last_msg = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps).await;
         auto_submit_if_needed(&pcm, &last_msg).await;
 
         let result = harness.end_trial(&trial.trial_id).await?;
@@ -142,9 +142,11 @@ async fn main() -> Result<()> {
 // ─── Leaderboard ─────────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 async fn run_leaderboard(
     harness: &bitgn::HarnessClient, cli: &Cli, benchmark: &str,
-    model: &str, base_url: Option<&str>, llm_api_key: &str, max_steps: usize, run_name: &str,
+    model: &str, base_url: Option<&str>, llm_api_key: &str,
+    extra_headers: &[(String, String)], max_steps: usize, run_name: &str,
 ) -> Result<()> {
     if cli.api_key.is_none() {
         anyhow::bail!("--api-key or BITGN_API_KEY required for leaderboard mode");
@@ -160,7 +162,7 @@ async fn run_leaderboard(
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let last_msg = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, max_steps).await;
+        let last_msg = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps).await;
         auto_submit_if_needed(&pcm, &last_msg).await;
 
         let result = harness.end_trial(&trial.trial_id).await?;
@@ -188,9 +190,10 @@ async fn run_leaderboard(
 
 async fn run_trial(
     pcm: &Arc<pcm::PcmClient>, instruction: &str,
-    model: &str, base_url: Option<&str>, api_key: &str, max_steps: usize,
+    model: &str, base_url: Option<&str>, api_key: &str,
+    extra_headers: &[(String, String)], max_steps: usize,
 ) -> String {
-    match run_agent(pcm, instruction, model, base_url, api_key, max_steps).await {
+    match run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps).await {
         Ok(msg) => msg,
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);
@@ -340,15 +343,21 @@ async fn read_inbox_files(pcm: &pcm::PcmClient) -> Result<String> {
 
 // ─── Agent ───────────────────────────────────────────────────────────────────
 
-fn make_llm_config(model: &str, base_url: Option<&str>, api_key: &str) -> LlmConfig {
+fn make_llm_config(
+    model: &str,
+    base_url: Option<&str>,
+    api_key: &str,
+    extra_headers: &[(String, String)],
+) -> LlmConfig {
     if let Some(url) = base_url {
-        // OpenAI-compatible endpoint (Cloudflare, Ollama, etc.) → Chat Completions
         let mut cfg = LlmConfig::endpoint(api_key, url, model).temperature(0.2).max_tokens(4096);
         cfg.use_chat_api = true;
+        cfg.extra_headers = extra_headers.to_vec();
         cfg
     } else {
-        // Default OpenAI → Responses API
-        LlmConfig::auto(model).temperature(0.2).max_tokens(4096)
+        let mut cfg = LlmConfig::auto(model).temperature(0.2).max_tokens(4096);
+        cfg.extra_headers = extra_headers.to_vec();
+        cfg
     }
 }
 
@@ -358,6 +367,7 @@ async fn run_agent(
     model: &str,
     base_url: Option<&str>,
     api_key: &str,
+    extra_headers: &[(String, String)],
     max_steps: usize,
 ) -> Result<String> {
     // === Level 1: Pre-scan instruction for injection ===
@@ -388,7 +398,7 @@ async fn run_agent(
         if agents_md.is_empty() { "" } else { &agents_md },
     );
 
-    let config = make_llm_config(model, base_url, api_key);
+    let config = make_llm_config(model, base_url, api_key, extra_headers);
     let llm = Llm::new(&config);
 
     let registry = ToolRegistry::new()

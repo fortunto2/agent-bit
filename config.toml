@@ -27,6 +27,8 @@ api_key = "REDACTED_CF_KEY"
 model = "workers-ai/@cf/moonshotai/kimi-k2.5"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key = "REDACTED_CF_KEY"
+[providers.kimi-gateway.headers]
+cf-aig-request-timeout = "300000"
 
 [providers.llama]
 model = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
@@ -42,6 +44,8 @@ api_key = "REDACTED_CF_KEY"
 model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key = "REDACTED_CF_KEY"
+[providers.nemotron.headers]
+cf-aig-request-timeout = "300000"
 
 [providers.gemini]
 model = "gemini-3.1-pro-preview"

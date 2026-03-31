@@ -30,6 +30,9 @@ pub struct ProviderSection {
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub api_key_env: Option<String>,
+    /// Extra HTTP headers (e.g. cf-aig-request-timeout for CF Gateway)
+    #[serde(default)]
+    pub headers: std::collections::HashMap<String, String>,
 }
 
 fn default_max_steps() -> usize { 20 }
@@ -42,9 +45,14 @@ impl Config {
         toml::from_str(&text).context("parsing config.toml")
     }
 
-    /// Resolve provider by name, return (model, base_url, api_key).
-    pub fn resolve_provider(&self, name: &str) -> Result<(String, Option<String>, String)> {
-        let p = self.providers.get(name)
+    /// Resolve provider by name, return (model, base_url, api_key, extra_headers).
+    pub fn resolve_provider(
+        &self,
+        name: &str,
+    ) -> Result<(String, Option<String>, String, Vec<(String, String)>)> {
+        let p = self
+            .providers
+            .get(name)
             .ok_or_else(|| anyhow::anyhow!("provider '{}' not found in config", name))?;
 
         let api_key = if let Some(ref key) = p.api_key {
@@ -55,10 +63,11 @@ impl Config {
                 .filter(|v| !v.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("env var {} not set for provider {}", env_var, name))?
         } else {
-            // Default: try OPENAI_API_KEY
             std::env::var("OPENAI_API_KEY").unwrap_or_default()
         };
 
-        Ok((p.model.clone(), p.base_url.clone(), api_key))
+        let headers: Vec<(String, String)> = p.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+
+        Ok((p.model.clone(), p.base_url.clone(), api_key, headers))
     }
 }
