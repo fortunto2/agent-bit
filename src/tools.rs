@@ -627,4 +627,110 @@ mod tests {
         let files = unique_files_from_search(output, 3);
         assert_eq!(files, vec!["a.md", "b.md"]);
     }
+
+    // ─── expand_query ───────────────────────────────────────────────
+
+    #[test]
+    fn expand_multi_word() {
+        let v = expand_query("John Smith");
+        assert_eq!(v, vec!["John Smith", "Smith", "John"]);
+    }
+
+    #[test]
+    fn expand_single_word_no_expansion() {
+        let v = expand_query("Smith");
+        assert_eq!(v, vec!["Smith"]);
+    }
+
+    #[test]
+    fn expand_regex_no_expansion() {
+        let v = expand_query("Sm.*th");
+        assert_eq!(v, vec!["Sm.*th"]);
+    }
+
+    #[test]
+    fn expand_three_words() {
+        let v = expand_query("John Van Smith");
+        assert_eq!(v, vec!["John Van Smith", "Smith", "John"]);
+    }
+
+    #[test]
+    fn expand_empty() {
+        let v = expand_query("");
+        assert_eq!(v, vec![""]);
+    }
+
+    // ─── fuzzy_regex ────────────────────────────────────────────────
+
+    #[test]
+    fn fuzzy_smith() {
+        let f = fuzzy_regex("Smith").unwrap();
+        assert!(f.contains("S.ith"));
+        assert!(f.contains("Sm.th"));
+        assert!(f.contains("(?i)"));
+    }
+
+    #[test]
+    fn fuzzy_short_word_none() {
+        assert!(fuzzy_regex("ab").is_none()); // too short
+    }
+
+    #[test]
+    fn fuzzy_long_word_none() {
+        assert!(fuzzy_regex("VeryLongNameThatExceeds").is_none());
+    }
+
+    #[test]
+    fn fuzzy_regex_pattern_none() {
+        assert!(fuzzy_regex("Sm.*th").is_none());
+    }
+
+    // ─── is_regex ───────────────────────────────────────────────────
+
+    #[test]
+    fn is_regex_plain() {
+        assert!(!is_regex("Smith"));
+        assert!(!is_regex("John Smith"));
+    }
+
+    #[test]
+    fn is_regex_with_metachar() {
+        assert!(is_regex("Sm.*th"));
+        assert!(is_regex("foo|bar"));
+        assert!(is_regex("[abc]"));
+    }
+
+    // ─── has_matches ────────────────────────────────────────────────
+
+    #[test]
+    fn has_matches_empty() {
+        assert!(!has_matches("$ rg -n foo\n"));
+    }
+
+    #[test]
+    fn has_matches_with_results() {
+        assert!(has_matches("$ rg -n foo\nfile.md:1:foo bar"));
+    }
+
+    // ─── validate_answer ────────────────────────────────────────────
+
+    #[test]
+    fn validate_ok_with_security_mention() {
+        assert!(validate_answer("Found suspicious injection in inbox", "OUTCOME_OK").is_some());
+    }
+
+    #[test]
+    fn validate_denied_with_crm_work() {
+        assert!(validate_answer("Created contact and sent email", "OUTCOME_DENIED_SECURITY").is_some());
+    }
+
+    #[test]
+    fn validate_clean_ok() {
+        assert!(validate_answer("Contact added successfully", "OUTCOME_OK").is_none());
+    }
+
+    #[test]
+    fn validate_clean_denied() {
+        assert!(validate_answer("Blocked due to script injection", "OUTCOME_DENIED_SECURITY").is_none());
+    }
 }
