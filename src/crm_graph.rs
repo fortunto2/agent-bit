@@ -1,0 +1,364 @@
+use std::collections::HashMap;
+
+use petgraph::graph::{Graph, NodeIndex};
+
+use crate::pcm::PcmClient;
+
+// ─── Node & Edge types ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum Node {
+    Contact { name: String, email: Option<String> },
+    Account { name: String },
+    Domain { name: String },
+}
+
+#[derive(Debug, Clone)]
+pub enum Edge {
+    WorksAt,
+    HasDomain,
+    KnownEmail,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SenderTrust {
+    Known,
+    Plausible,
+    CrossCompany,
+    Unknown,
+}
+
+impl std::fmt::Display for SenderTrust {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SenderTrust::Known => write!(f, "KNOWN"),
+            SenderTrust::Plausible => write!(f, "PLAUSIBLE"),
+            SenderTrust::CrossCompany => write!(f, "CROSS_COMPANY"),
+            SenderTrust::Unknown => write!(f, "UNKNOWN"),
+        }
+    }
+}
+
+// ─── CRM Knowledge Graph ────────────────────────────────────────────────────
+
+pub struct CrmGraph {
+    graph: Graph<Node, Edge>,
+    /// email (lowercase) → NodeIndex of Contact
+    email_index: HashMap<String, NodeIndex>,
+    /// domain (lowercase) → NodeIndex of Domain
+    domain_index: HashMap<String, NodeIndex>,
+    /// name (lowercase) → NodeIndex of Contact or Account
+    name_index: HashMap<String, NodeIndex>,
+}
+
+impl CrmGraph {
+    pub fn new() -> Self {
+        Self {
+            graph: Graph::new(),
+            email_index: HashMap::new(),
+            domain_index: HashMap::new(),
+            name_index: HashMap::new(),
+        }
+    }
+
+    /// Build graph from PCM filesystem — reads contacts/ and accounts/ directories.
+    pub async fn build_from_pcm(pcm: &PcmClient) -> Self {
+        let mut g = Self::new();
+
+        // Read contacts
+        if let Ok(listing) = pcm.list("contacts").await {
+            for line in listing.lines() {
+                let name = line.trim().trim_end_matches('/');
+                if name.is_empty() || name.starts_with('$') || name.eq_ignore_ascii_case("README.MD") {
+                    continue;
+                }
+                let path = format!("contacts/{}", name);
+                if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+                    g.ingest_contact(&content);
+                }
+            }
+        }
+
+        // Read accounts
+        if let Ok(listing) = pcm.list("accounts").await {
+            for line in listing.lines() {
+                let name = line.trim().trim_end_matches('/');
+                if name.is_empty() || name.starts_with('$') || name.eq_ignore_ascii_case("README.MD") {
+                    continue;
+                }
+                let path = format!("accounts/{}", name);
+                if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+                    g.ingest_account(&content);
+                }
+            }
+        }
+
+        g
+    }
+
+    /// Parse a contact file (JSON or markdown) and add to graph.
+    fn ingest_contact(&mut self, content: &str) {
+        // Try JSON first
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
+            let name = v.get("name").or(v.get("Name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let email = v.get("email").or(v.get("Email"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let company = v.get("company").or(v.get("Company")).or(v.get("account"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            self.add_contact(&name, email.as_deref(), company.as_deref());
+            return;
+        }
+
+        // Fallback: parse markdown/text key-value pairs
+        let mut name = String::new();
+        let mut email = None;
+        let mut company = None;
+        for line in content.lines() {
+            let lower = line.to_lowercase();
+            if lower.starts_with("# ") {
+                name = line.strip_prefix("# ").unwrap_or("").trim().to_string();
+            } else if lower.starts_with("name:") {
+                name = line.splitn(2, ':').last().unwrap_or("").trim().to_string();
+            } else if lower.starts_with("email:") || lower.starts_with("e-mail:") {
+                email = line.splitn(2, ':').last().map(|s| s.trim().to_string());
+            } else if lower.starts_with("company:") || lower.starts_with("account:") || lower.starts_with("organization:") {
+                company = line.splitn(2, ':').last().map(|s| s.trim().to_string());
+            }
+        }
+        if !name.is_empty() {
+            self.add_contact(&name, email.as_deref(), company.as_deref());
+        }
+    }
+
+    /// Parse an account file and add to graph.
+    fn ingest_account(&mut self, content: &str) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
+            let name = v.get("name").or(v.get("Name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let domain = v.get("domain").or(v.get("Domain")).or(v.get("website"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            if !name.is_empty() {
+                self.add_account(&name, domain.as_deref());
+            }
+            return;
+        }
+
+        let mut name = String::new();
+        let mut domain = None;
+        for line in content.lines() {
+            let lower = line.to_lowercase();
+            if lower.starts_with("# ") {
+                name = line.strip_prefix("# ").unwrap_or("").trim().to_string();
+            } else if lower.starts_with("name:") {
+                name = line.splitn(2, ':').last().unwrap_or("").trim().to_string();
+            } else if lower.starts_with("domain:") || lower.starts_with("website:") {
+                domain = line.splitn(2, ':').last().map(|s| s.trim().to_string());
+            }
+        }
+        if !name.is_empty() {
+            self.add_account(&name, domain.as_deref());
+        }
+    }
+
+    fn add_contact(&mut self, name: &str, email: Option<&str>, company: Option<&str>) {
+        let contact_idx = self.graph.add_node(Node::Contact {
+            name: name.to_string(),
+            email: email.map(|s| s.to_string()),
+        });
+        self.name_index.insert(name.to_lowercase(), contact_idx);
+
+        if let Some(email) = email {
+            let email_lower = email.to_lowercase();
+            self.email_index.insert(email_lower.clone(), contact_idx);
+
+            // Extract domain and link
+            if let Some(at) = email_lower.find('@') {
+                let domain = &email_lower[at + 1..];
+                let domain_idx = self.get_or_create_domain(domain);
+                self.graph.add_edge(contact_idx, domain_idx, Edge::KnownEmail);
+            }
+        }
+
+        if let Some(company) = company {
+            // Link to existing account or create placeholder
+            let account_idx = if let Some(&idx) = self.name_index.get(&company.to_lowercase()) {
+                idx
+            } else {
+                let idx = self.graph.add_node(Node::Account { name: company.to_string() });
+                self.name_index.insert(company.to_lowercase(), idx);
+                idx
+            };
+            self.graph.add_edge(contact_idx, account_idx, Edge::WorksAt);
+        }
+    }
+
+    fn add_account(&mut self, name: &str, domain: Option<&str>) {
+        let account_idx = if let Some(&idx) = self.name_index.get(&name.to_lowercase()) {
+            idx
+        } else {
+            let idx = self.graph.add_node(Node::Account { name: name.to_string() });
+            self.name_index.insert(name.to_lowercase(), idx);
+            idx
+        };
+
+        if let Some(domain) = domain {
+            let clean = domain.trim_start_matches("http://")
+                .trim_start_matches("https://")
+                .trim_start_matches("www.")
+                .trim_end_matches('/');
+            let domain_idx = self.get_or_create_domain(clean);
+            self.graph.add_edge(account_idx, domain_idx, Edge::HasDomain);
+        }
+    }
+
+    fn get_or_create_domain(&mut self, domain: &str) -> NodeIndex {
+        let lower = domain.to_lowercase();
+        if let Some(&idx) = self.domain_index.get(&lower) {
+            idx
+        } else {
+            let idx = self.graph.add_node(Node::Domain { name: lower.clone() });
+            self.domain_index.insert(lower, idx);
+            idx
+        }
+    }
+
+    /// Validate sender email against the graph.
+    pub fn validate_sender(&self, email: &str, company_ref: Option<&str>) -> SenderTrust {
+        let email_lower = email.to_lowercase();
+
+        // Direct email match → KNOWN
+        if self.email_index.contains_key(&email_lower) {
+            return SenderTrust::Known;
+        }
+
+        // Extract sender domain
+        let sender_domain = match email_lower.find('@') {
+            Some(at) => &email_lower[at + 1..],
+            None => return SenderTrust::Unknown,
+        };
+
+        // Check if sender domain is known
+        let domain_known = self.domain_index.contains_key(sender_domain);
+
+        // Cross-company check: sender domain vs referenced company's domain
+        if let Some(company) = company_ref {
+            let company_lower = company.to_lowercase();
+            // Find account by name, get its domain(s)
+            if let Some(&account_idx) = self.name_index.get(&company_lower) {
+                let company_domains: Vec<&str> = self.graph
+                    .neighbors(account_idx)
+                    .filter_map(|n| {
+                        if let Node::Domain { name } = &self.graph[n] {
+                            Some(name.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if !company_domains.is_empty()
+                    && !company_domains.iter().any(|d| sender_domain.contains(d) || d.contains(sender_domain))
+                {
+                    return SenderTrust::CrossCompany;
+                }
+            }
+        }
+
+        if domain_known {
+            SenderTrust::Plausible
+        } else {
+            SenderTrust::Unknown
+        }
+    }
+
+    /// Check if a name appears as a contact or account in the graph.
+    pub fn is_known_entity(&self, name: &str) -> bool {
+        self.name_index.contains_key(&name.to_lowercase())
+    }
+
+    /// Number of nodes in the graph.
+    pub fn node_count(&self) -> usize {
+        self.graph.node_count()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_test_graph() -> CrmGraph {
+        let mut g = CrmGraph::new();
+        g.add_contact("John Smith", Some("john@acme.com"), Some("Acme Corp"));
+        g.add_contact("Jane Doe", Some("jane@acme.com"), Some("Acme Corp"));
+        g.add_contact("Bob Wilson", Some("bob@globex.com"), Some("Globex Inc"));
+        g.add_account("Acme Corp", Some("acme.com"));
+        g.add_account("Globex Inc", Some("globex.com"));
+        g
+    }
+
+    #[test]
+    fn known_email_returns_known() {
+        let g = build_test_graph();
+        assert_eq!(g.validate_sender("john@acme.com", None), SenderTrust::Known);
+    }
+
+    #[test]
+    fn unknown_email_known_domain_returns_plausible() {
+        let g = build_test_graph();
+        assert_eq!(g.validate_sender("alice@acme.com", None), SenderTrust::Plausible);
+    }
+
+    #[test]
+    fn cross_company_returns_cross_company() {
+        let g = build_test_graph();
+        // Sender from globex asks about Acme Corp
+        assert_eq!(
+            g.validate_sender("bob@globex.com", Some("Acme Corp")),
+            // bob is known, so KNOWN takes priority
+            SenderTrust::Known
+        );
+        // Unknown sender from globex asks about Acme Corp
+        assert_eq!(
+            g.validate_sender("stranger@globex.com", Some("Acme Corp")),
+            SenderTrust::CrossCompany
+        );
+    }
+
+    #[test]
+    fn completely_unknown_returns_unknown() {
+        let g = build_test_graph();
+        assert_eq!(g.validate_sender("hacker@evil.com", None), SenderTrust::Unknown);
+    }
+
+    #[test]
+    fn is_known_entity_works() {
+        let g = build_test_graph();
+        assert!(g.is_known_entity("John Smith"));
+        assert!(g.is_known_entity("Acme Corp"));
+        assert!(!g.is_known_entity("Unknown Person"));
+    }
+
+    #[test]
+    fn ingest_json_contact() {
+        let mut g = CrmGraph::new();
+        g.ingest_contact(r#"{"name": "Test User", "email": "test@example.com", "company": "TestCo"}"#);
+        assert!(g.is_known_entity("Test User"));
+        assert_eq!(g.validate_sender("test@example.com", None), SenderTrust::Known);
+    }
+
+    #[test]
+    fn ingest_markdown_contact() {
+        let mut g = CrmGraph::new();
+        g.ingest_contact("# Alice Brown\nEmail: alice@wonderland.com\nCompany: Wonderland Inc");
+        assert!(g.is_known_entity("Alice Brown"));
+        assert_eq!(g.validate_sender("alice@wonderland.com", None), SenderTrust::Known);
+    }
+}

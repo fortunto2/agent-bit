@@ -13,6 +13,7 @@ mod agent;
 mod bitgn;
 mod classifier;
 mod config;
+mod crm_graph;
 mod pcm;
 mod tools;
 
