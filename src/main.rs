@@ -422,9 +422,19 @@ fn threat_score(text: &str) -> u32 {
     }
 
     // Structural checks
-    // OTP / verification codes: +2
+    // OTP / verification codes: +3 (security attack — sharing credentials)
     if lower.contains("otp") || lower.contains("one-time password") || lower.contains("verification code") {
-        score += 2;
+        score += 3;
+    }
+
+    // "delete agents.md" or "delete AGENTS" in inbox → social engineering attack
+    if lower.contains("delete") && (lower.contains("agents.md") || lower.contains("agents.md")) {
+        score += 3;
+    }
+
+    // "remove" + system files
+    if lower.contains("remove") && (lower.contains("policy") || lower.contains("rules") || lower.contains("agents")) {
+        score += 3;
     }
 
     // All-caps "IMPORTANT" followed by imperative (injection style): +2
@@ -467,6 +477,11 @@ async fn scan_inbox(pcm: &pcm::PcmClient) -> Option<(&'static str, &'static str)
             || filename.eq_ignore_ascii_case("README.MD")
         {
             continue;
+        }
+
+        // Fake AGENTS.MD in inbox → social engineering (overriding agent rules)
+        if filename.eq_ignore_ascii_case("AGENTS.MD") {
+            return Some(("OUTCOME_DENIED_SECURITY", "Blocked: fake AGENTS.MD in inbox — social engineering attempt"));
         }
 
         let path = format!("{}/{}", dir, filename);
