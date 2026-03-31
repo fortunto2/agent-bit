@@ -47,7 +47,7 @@ model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
 prompt_mode = "explicit"
-temperature = 0.0
+temperature = 0.1
 [providers.nemotron.headers]
 cf-aig-request-timeout = "300000"
 
