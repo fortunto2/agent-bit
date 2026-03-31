@@ -248,3 +248,57 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         tools.list().iter().map(|t| t.name().to_string()).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_str_present() {
+        let args = serde_json::json!({"task_type": "search"});
+        assert_eq!(extract_str(&args, "task_type"), "search");
+    }
+
+    #[test]
+    fn extract_str_missing() {
+        let args = serde_json::json!({});
+        assert_eq!(extract_str(&args, "task_type"), "");
+    }
+
+    #[test]
+    fn extract_str_array_present() {
+        let args = serde_json::json!({"plan": ["step1", "step2"]});
+        assert_eq!(extract_str_array(&args, "plan"), vec!["step1", "step2"]);
+    }
+
+    #[test]
+    fn extract_str_array_missing() {
+        let args = serde_json::json!({});
+        assert!(extract_str_array(&args, "plan").is_empty());
+    }
+
+    #[test]
+    fn reasoning_tool_has_required_fields() {
+        let def = reasoning_tool_def();
+        assert_eq!(def.name, "reasoning");
+        let required = def.parameters["required"].as_array().unwrap();
+        let required_names: Vec<&str> = required.iter().map(|v| v.as_str().unwrap()).collect();
+        assert!(required_names.contains(&"task_type"));
+        assert!(required_names.contains(&"security_assessment"));
+        assert!(required_names.contains(&"plan"));
+        assert!(required_names.contains(&"done"));
+    }
+
+    #[test]
+    fn reasoning_tool_task_type_enum() {
+        let def = reasoning_tool_def();
+        let task_type = &def.parameters["properties"]["task_type"];
+        let variants = task_type["enum"].as_array().unwrap();
+        assert_eq!(variants.len(), 4);
+        let names: Vec<&str> = variants.iter().map(|v| v.as_str().unwrap()).collect();
+        assert!(names.contains(&"search"));
+        assert!(names.contains(&"edit"));
+        assert!(names.contains(&"analyze"));
+        assert!(names.contains(&"security"));
+    }
+}
