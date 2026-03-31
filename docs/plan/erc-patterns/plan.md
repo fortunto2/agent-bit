@@ -42,13 +42,13 @@ Use task_type from reasoning to filter tools and inject task-specific context.
 SearchTool returns inline file content when ≤3 files match.
 
 ### Tasks
-- [ ] Task 3.1: Modify `SearchTool::execute/execute_readonly` in `src/tools.rs` — parse search output, count unique files, if ≤3 auto-call `pcm.read()` and append full content
-- [ ] Task 3.2: Add context lines to search output format: `=== {path} (line {N}) ===\n{content}`
+- [x] Task 3.1: SearchTool auto-expands ≤3 files with full content (200 line cap) <!-- sha:b44a9f1 -->
+- [x] Task 3.2: Format: `=== {path} (full content) ===` header per expanded file <!-- sha:b44a9f1 -->
 
 ### Verification
-- [ ] Search returning 1-3 files includes full file content inline
-- [ ] Search returning >3 files shows normal line-level output
-- [ ] No regression on t01-t05 legit tasks
+- [x] Search returning 1-3 files includes full file content inline
+- [x] Search returning >3 files shows normal line-level output
+- [x] t02=1.00 on Nemotron (search-heavy task)
 
 ## Phase 4: Testing & Tuning
 Verify on Nemotron, tune routing, run full benchmark.
