@@ -1,0 +1,109 @@
+# Implementation Plan: ERC Patterns for PAC1
+
+**Track ID:** erc-patterns_20260331
+**Spec:** [spec.md](./spec.md)
+**Created:** 2026-03-31
+**Status:** [ ] Not Started
+
+## Overview
+Create `Pac1Agent` wrapping HybridAgent with Router (task classification → tool filtering), Structured CoT (enriched reasoning schema), and Parent Document Retrieval (search auto-expand). All changes in agent-bit, sgr-agent untouched.
+
+## Phase 1: Pac1Agent Foundation
+Extract agent creation from main.rs into a dedicated `src/agent.rs` module with custom reasoning tool.
+
+### Tasks
+- [ ] Task 1.1: Create `src/agent.rs` — `Pac1Agent` struct wrapping `HybridAgent<Llm>`, implement `Agent` trait delegating `decide()` to inner
+- [ ] Task 1.2: Custom `reasoning_tool_def()` with enriched schema: `task_type` (enum: search, edit, analyze, security), `security_assessment` (safe/suspicious/blocked), `known_facts` (array), `plan` (array), `done` (bool)
+- [ ] Task 1.3: Override `decide_stateful()` in Pac1Agent — use custom reasoning tool in phase 1, delegate phase 2 to HybridAgent
+- [ ] Task 1.4: Wire `Pac1Agent` in `main.rs` replacing direct `HybridAgent::new()` call
+
+### Verification
+- [ ] cargo build passes
+- [ ] t01 (legit) and t09 (trap) score same as before on Nemotron
+
+## Phase 2: Router Pattern
+Use task_type from reasoning to filter tools and inject task-specific context.
+
+### Tasks
+- [ ] Task 2.1: Implement `prepare_tools()` — filter tools by task_type from `ctx.custom["task_type"]`
+  - `search` → read, search, find, list, tree, answer
+  - `edit` → read, write, delete, mkdir, move, search, answer
+  - `analyze` → read, search, find, list, tree, context, answer
+  - `security` → answer only
+- [ ] Task 2.2: Implement `prepare_context()` — extract task_type from last reasoning call, store in ctx.custom
+- [ ] Task 2.3: Dynamic max_steps per task_type — security=1, search=10, edit=20, analyze=15 (via LoopConfig or ctx state)
+
+### Verification
+- [ ] Security tasks resolve in 1-2 steps
+- [ ] Search tasks don't get write tools
+- [ ] t09 on Nemotron ≥1.00, t01 ≥0.50
+
+## Phase 3: Search Auto-Expand (Parent Document Retrieval)
+SearchTool returns inline file content when ≤3 files match.
+
+### Tasks
+- [ ] Task 3.1: Modify `SearchTool::execute/execute_readonly` in `src/tools.rs` — parse search output, count unique files, if ≤3 auto-call `pcm.read()` and append full content
+- [ ] Task 3.2: Add context lines to search output format: `=== {path} (line {N}) ===\n{content}`
+
+### Verification
+- [ ] Search returning 1-3 files includes full file content inline
+- [ ] Search returning >3 files shows normal line-level output
+- [ ] No regression on t01-t05 legit tasks
+
+## Phase 4: Testing & Tuning
+Verify on Nemotron, tune routing, run full benchmark.
+
+### Tasks
+- [ ] Task 4.1: Unit tests for Pac1Agent reasoning schema parsing (task_type extraction, security_assessment)
+- [ ] Task 4.2: Unit tests for search auto-expand (mock pcm results)
+- [ ] Task 4.3: Run full 26-task benchmark on Nemotron, record scores per task
+- [ ] Task 4.4: Tune routing thresholds if needed based on benchmark results
+
+### Verification
+- [ ] cargo test passes
+- [ ] Nemotron ≥70% on PAC1-dev
+- [ ] No false positives on legit CRM tasks
+
+## Phase 5: Docs & Cleanup
+
+### Tasks
+- [ ] Task 5.1: Update CLAUDE.md — document Pac1Agent architecture, src/agent.rs, routing
+- [ ] Task 5.2: Remove dead code — unused imports, old agent creation in main.rs
+
+### Verification
+- [ ] CLAUDE.md reflects current project state
+- [ ] cargo build + cargo test clean
+
+## Final Verification
+- [ ] All acceptance criteria from spec met
+- [ ] Nemotron ≥70% on 26 tasks
+- [ ] gpt-5.4-mini maintains 68%+
+- [ ] cargo test passes
+- [ ] cargo build clean
+
+## Context Handoff
+
+### Session Intent
+Add Router + Structured CoT + Search Auto-Expand to PAC1 agent via wrapper pattern, targeting 70%+ Nemotron score.
+
+### Key Files
+- `src/agent.rs` — NEW: Pac1Agent wrapping HybridAgent
+- `src/main.rs` — Wire Pac1Agent, remove direct HybridAgent usage
+- `src/tools.rs` — SearchTool auto-expand modification
+- `src/config.rs` — No changes expected
+- `../../shared/rust-code/crates/sgr-agent/src/agents/hybrid.rs` — READ ONLY, reference for delegation
+
+### Decisions Made
+- Wrapper pattern over modifying sgr-agent — keeps core clean for other agents
+- Pac1Agent does its OWN phase 1 (custom reasoning tool), delegates phase 2 to HybridAgent
+- task_type enum is string-based (not Rust enum) for LLM compatibility in JSON schema
+- Auto-expand threshold is 3 files — balances context size vs utility
+- security task_type → answer-only tools → forces immediate resolution
+
+### Risks
+- Pac1Agent phase 1 + HybridAgent phase 1 = 2 reasoning calls per step (double cost). Mitigation: Pac1Agent replaces HybridAgent's phase 1, not adds to it
+- task_type misclassification → wrong tools available. Mitigation: fallback to full toolkit if task_type unknown
+- Search auto-expand on large files → context overflow. Mitigation: cap at 200 lines per file
+
+---
+_Generated by /plan. Tasks marked [~] in progress and [x] complete by /build._
