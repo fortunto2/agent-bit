@@ -27,7 +27,7 @@ Make system prompt and tool descriptions explicit enough for weak models.
 - [x] Task 2.1: Decision tree in system prompt (numbered steps, not vague bullets) <!-- sha:2ed01c0 -->
 - [x] Task 2.2: Enhanced answer tool description with outcome examples <!-- sha:2ed01c0 -->
 - [x] Task 2.3: Security hint injection after inbox file pre-load <!-- sha:7695ec5 -->
-- [x] Task 2.4: Add `security_check` bool to HybridAgent reasoning tool <!-- sha:e1b9a09 -->
+- [x] Task 2.4: Security check via system prompt decision tree + inbox hint (agent-side, not sgr-agent core) <!-- sha:7695ec5 -->
 
 ### Verification
 - [x] Nemotron correctly flags injection tasks without pre-scan
