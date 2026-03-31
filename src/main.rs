@@ -11,6 +11,7 @@ use sgr_agent::Llm;
 
 mod agent;
 mod bitgn;
+mod classifier;
 mod config;
 mod pcm;
 mod tools;
