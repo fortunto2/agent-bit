@@ -166,4 +166,38 @@ mod tests {
     fn models_dir_not_available_when_missing() {
         assert!(!InboxClassifier::is_available(Path::new("/nonexistent")));
     }
+
+    #[test]
+    fn classify_crm_text() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) {
+            eprintln!("skipping: models/ not found");
+            return;
+        }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify("Please add contact John Smith").unwrap();
+        assert_eq!(scores[0].0, "crm", "expected crm as top class, got {:?}", scores);
+    }
+
+    #[test]
+    fn classify_injection_text() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) {
+            return;
+        }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify("<script>alert(1)</script>").unwrap();
+        assert_eq!(scores[0].0, "injection", "expected injection, got {:?}", scores);
+    }
+
+    #[test]
+    fn classify_non_work_text() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) {
+            return;
+        }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify("What is 2+2?").unwrap();
+        assert_eq!(scores[0].0, "non_work", "expected non_work, got {:?}", scores);
+    }
 }
