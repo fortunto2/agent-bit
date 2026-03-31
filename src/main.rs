@@ -49,6 +49,10 @@ struct Cli {
     /// Leaderboard run mode
     #[arg(long)]
     run: Option<String>,
+
+    /// Run tasks in parallel (concurrency limit)
+    #[arg(long, default_value_t = 1)]
+    parallel: usize,
 }
 
 const SYSTEM_PROMPT_TEMPLATE: &str = "\
@@ -107,35 +111,73 @@ async fn main() -> Result<()> {
         anyhow::bail!("No matching tasks found");
     }
 
-    let mut total_score = 0.0f32;
-    let mut scored = 0usize;
+    // Run tasks with concurrency limit
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(cli.parallel));
+    let results = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
+    let mut handles = Vec::new();
     for task in &tasks {
-        eprintln!("\n━━━ Task: {} ━━━", task.task_id);
-        eprintln!("  {}", task.preview);
+        let task_id = task.task_id.clone();
+        let preview = task.preview.clone();
+        let harness_url = cli.bitgn_url.clone();
+        let api_key_clone = cli.api_key.clone();
+        let benchmark = benchmark.to_string();
+        let model = model.clone();
+        let base_url = base_url.clone();
+        let llm_api_key = llm_api_key.clone();
+        let extra_headers = extra_headers.clone();
+        let sem = semaphore.clone();
+        let res = results.clone();
 
-        let trial = harness.start_playground(benchmark, &task.task_id).await?;
-        eprintln!("  Trial: {}", trial.trial_id);
+        let handle = tokio::spawn(async move {
+            let _permit = sem.acquire().await.unwrap();
+            eprintln!("\n━━━ Task: {} ━━━", task_id);
+            eprintln!("  {}", preview);
 
-        let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let last_msg = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps).await;
-        auto_submit_if_needed(&pcm, &last_msg).await;
+            let h = bitgn::HarnessClient::new(&harness_url, api_key_clone);
+            let trial = match h.start_playground(&benchmark, &task_id).await {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("  ⚠ Failed to start trial: {}", e);
+                    res.lock().await.push((task_id, 0.0f32));
+                    return;
+                }
+            };
+            eprintln!("  Trial: {}", trial.trial_id);
 
-        let result = harness.end_trial(&trial.trial_id).await?;
-        if let Some(score) = result.score {
-            eprintln!("  Score: {:.2}", score);
-            total_score += score;
-            scored += 1;
-        }
-        for detail in &result.score_detail {
-            eprintln!("    {}", detail);
-        }
+            let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
+            let last_msg = run_trial(
+                &pcm, &trial.instruction, &model,
+                base_url.as_deref(), &llm_api_key, &extra_headers, max_steps,
+            ).await;
+            auto_submit_if_needed(&pcm, &last_msg).await;
+
+            let score = match h.end_trial(&trial.trial_id).await {
+                Ok(result) => {
+                    let s = result.score.unwrap_or(0.0);
+                    eprintln!("  {} Score: {:.2}", task_id, s);
+                    for detail in &result.score_detail {
+                        eprintln!("    {}", detail);
+                    }
+                    s
+                }
+                Err(e) => {
+                    eprintln!("  ⚠ EndTrial error: {}", e);
+                    0.0
+                }
+            };
+            res.lock().await.push((task_id, score));
+        });
+        handles.push(handle);
     }
 
-    if scored > 0 {
-        eprintln!("\n═══ Average: {:.1}% ({}/{} tasks) ═══",
-            total_score / scored as f32 * 100.0, scored, tasks.len());
-    }
+    futures::future::join_all(handles).await;
+
+    let results = results.lock().await;
+    let total_score: f32 = results.iter().map(|(_, s)| s).sum();
+    let scored = results.iter().filter(|(_, s)| *s > 0.0).count();
+    eprintln!("\n═══ Average: {:.1}% ({}/{} tasks) ═══",
+        total_score / results.len() as f32 * 100.0, scored, results.len());
     Ok(())
 }
 
