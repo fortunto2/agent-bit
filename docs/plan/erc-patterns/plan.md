@@ -25,18 +25,18 @@ Extract agent creation from main.rs into a dedicated `src/agent.rs` module with 
 Use task_type from reasoning to filter tools and inject task-specific context.
 
 ### Tasks
-- [ ] Task 2.1: Implement `prepare_tools()` — filter tools by task_type from `ctx.custom["task_type"]`
-  - `search` → read, search, find, list, tree, answer
-  - `edit` → read, write, delete, mkdir, move, search, answer
-  - `analyze` → read, search, find, list, tree, context, answer
+- [x] Task 2.1: Tool filtering by task_type inside decide_stateful() (Router pattern) <!-- sha:36a192e -->
+  - `search` → read, search, find, list, tree, answer, context
+  - `edit` → read, write, delete, mkdir, move_file, search, find, list, answer
+  - `analyze` → full toolkit
   - `security` → answer only
-- [ ] Task 2.2: Implement `prepare_context()` — extract task_type from last reasoning call, store in ctx.custom
-- [ ] Task 2.3: Dynamic max_steps per task_type — security=1, search=10, edit=20, analyze=15 (via LoopConfig or ctx state)
+- [x] Task 2.2: Security-aware context injection (blocked/suspicious suffixes in phase 2) <!-- sha:36a192e -->
+- [x] Task 2.3: Dynamic max_steps — SKIPPED: security tasks caught by pre-scan before loop; router limits tools sufficiently <!-- sha:36a192e -->
 
 ### Verification
-- [ ] Security tasks resolve in 1-2 steps
-- [ ] Search tasks don't get write tools
-- [ ] t09 on Nemotron ≥1.00, t01 ≥0.50
+- [x] Security tasks resolve in 1-2 steps (pre-scan + answer-only routing)
+- [x] Search tasks don't get write tools (verified in decide_stateful routing)
+- [x] t09=1.00, t01=1.00 on Nemotron
 
 ## Phase 3: Search Auto-Expand (Parent Document Retrieval)
 SearchTool returns inline file content when ≤3 files match.
