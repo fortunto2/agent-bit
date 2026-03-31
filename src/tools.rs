@@ -322,10 +322,52 @@ struct SearchArgs {
     limit: i32,
 }
 
+/// Parse search output for unique file paths (format: "path/file:line:content").
+/// Returns up to `max` unique paths.
+fn unique_files_from_search(output: &str, max: usize) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut files = Vec::new();
+    for line in output.lines() {
+        // Skip header lines like "$ rg ..."
+        if line.starts_with('$') || line.is_empty() {
+            continue;
+        }
+        // Extract file path before first ':'
+        if let Some(path) = line.split(':').next() {
+            let path = path.trim();
+            if !path.is_empty() && seen.insert(path.to_string()) {
+                files.push(path.to_string());
+                if files.len() > max {
+                    return files; // Early exit if too many
+                }
+            }
+        }
+    }
+    files
+}
+
+/// Auto-expand search results: if ≤3 unique files, append full file content.
+async fn auto_expand_search(pcm: &PcmClient, search_output: String) -> String {
+    let files = unique_files_from_search(&search_output, 3);
+    if files.is_empty() || files.len() > 3 {
+        return search_output;
+    }
+
+    let mut expanded = search_output;
+    for path in &files {
+        if let Ok(content) = pcm.read(path, false, 0, 0).await {
+            // Cap at 200 lines to prevent context overflow
+            let capped: String = content.lines().take(200).collect::<Vec<_>>().join("\n");
+            expanded.push_str(&format!("\n\n=== {} (full content) ===\n{}", path, capped));
+        }
+    }
+    expanded
+}
+
 #[async_trait]
 impl Tool for SearchTool {
     fn name(&self) -> &str { "search" }
-    fn description(&self) -> &str { "Search file contents with regex pattern (like ripgrep)" }
+    fn description(&self) -> &str { "Search file contents with regex pattern. Auto-expands full file content when ≤3 files match." }
     fn is_read_only(&self) -> bool { true }
     fn parameters_schema(&self) -> Value {
         serde_json::json!({
@@ -340,11 +382,15 @@ impl Tool for SearchTool {
     }
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: SearchArgs = parse_args(&args)?;
-        self.0.search(&a.root, &a.pattern, a.limit).await.map(|c| ToolOutput::text(guard_content(c))).map_err(pcm_err)
+        let raw = self.0.search(&a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
+        let expanded = auto_expand_search(&self.0, raw).await;
+        Ok(ToolOutput::text(guard_content(expanded)))
     }
     async fn execute_readonly(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let a: SearchArgs = parse_args(&args)?;
-        self.0.search(&a.root, &a.pattern, a.limit).await.map(|c| ToolOutput::text(guard_content(c))).map_err(pcm_err)
+        let raw = self.0.search(&a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
+        let expanded = auto_expand_search(&self.0, raw).await;
+        Ok(ToolOutput::text(guard_content(expanded)))
     }
 }
 
