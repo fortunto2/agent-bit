@@ -36,6 +36,9 @@ pub struct ProviderSection {
     /// Prompt mode: "explicit" (numbered decision tree for weak models) or "standard" (default)
     #[serde(default)]
     pub prompt_mode: Option<String>,
+    /// LLM temperature (default 0.2). Use 0.0 for deterministic output.
+    #[serde(default)]
+    pub temperature: Option<f32>,
 }
 
 fn default_max_steps() -> usize { 20 }
@@ -48,11 +51,11 @@ impl Config {
         toml::from_str(&text).context("parsing config.toml")
     }
 
-    /// Resolve provider by name, return (model, base_url, api_key, extra_headers, prompt_mode).
+    /// Resolve provider by name, return (model, base_url, api_key, extra_headers, prompt_mode, temperature).
     pub fn resolve_provider(
         &self,
         name: &str,
-    ) -> Result<(String, Option<String>, String, Vec<(String, String)>, String)> {
+    ) -> Result<(String, Option<String>, String, Vec<(String, String)>, String, f32)> {
         let p = self
             .providers
             .get(name)
@@ -71,7 +74,8 @@ impl Config {
 
         let headers: Vec<(String, String)> = p.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         let prompt_mode = p.prompt_mode.clone().unwrap_or_else(|| "standard".into());
+        let temperature = p.temperature.unwrap_or(0.2);
 
-        Ok((p.model.clone(), p.base_url.clone(), api_key, headers, prompt_mode))
+        Ok((p.model.clone(), p.base_url.clone(), api_key, headers, prompt_mode, temperature))
     }
 }
