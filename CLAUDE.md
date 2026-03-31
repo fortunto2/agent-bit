@@ -68,7 +68,7 @@ Results tracked in `benchmarks/runs/`. After each significant change, run benchm
 |-------|--------|-------|-------|
 | gpt-5.4 | 05a4aed | **71.4%** (20/28) | +5 fixed from 64% baseline (t04,t05,t08,t14,t23) |
 | gpt-5.4-mini | 05a4aed | 100% (8/8 sample) | |
-| nemotron-120b | 75bb164 | **87.5%** (7/8 sample) | +25% from 62.5% baseline (t03,t04 fixed) |
+| nemotron-120b | 40410a3 | 60% (18/30 full), 87.5% (7/8 sample) | Non-deterministic: ±4 tasks between runs |
 
 ### Known Unsolved Tasks
 
