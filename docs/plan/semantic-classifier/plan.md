@@ -48,7 +48,7 @@ Build in-memory graph from PCM filesystem to validate sender identity.
 Replace threat_score + quarantine with classifier + graph in inbox pre-load.
 
 ### Tasks
-- [ ] Task 3.1: Create `classify_inbox_file(content, graph, classifier) -> FileClassification` struct:
+- [~] Task 3.1: Create `classify_inbox_file(content, graph, classifier) -> FileClassification` struct:
   - `label: String` (crm/injection/non_crm/social_engineering/credential)
   - `confidence: f32`
   - `sender_trust: SenderTrust`
