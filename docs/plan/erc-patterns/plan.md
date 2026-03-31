@@ -12,14 +12,14 @@ Create `Pac1Agent` wrapping HybridAgent with Router (task classification → too
 Extract agent creation from main.rs into a dedicated `src/agent.rs` module with custom reasoning tool.
 
 ### Tasks
-- [ ] Task 1.1: Create `src/agent.rs` — `Pac1Agent` struct wrapping `HybridAgent<Llm>`, implement `Agent` trait delegating `decide()` to inner
-- [ ] Task 1.2: Custom `reasoning_tool_def()` with enriched schema: `task_type` (enum: search, edit, analyze, security), `security_assessment` (safe/suspicious/blocked), `known_facts` (array), `plan` (array), `done` (bool)
-- [ ] Task 1.3: Override `decide_stateful()` in Pac1Agent — use custom reasoning tool in phase 1, delegate phase 2 to HybridAgent
-- [ ] Task 1.4: Wire `Pac1Agent` in `main.rs` replacing direct `HybridAgent::new()` call
+- [x] Task 1.1: Create `src/agent.rs` — `Pac1Agent` struct with LlmClient, implement `Agent` trait <!-- sha:36a192e -->
+- [x] Task 1.2: Custom `reasoning_tool_def()` with enriched schema: `task_type`, `security_assessment`, `known_facts`, `plan`, `done` <!-- sha:36a192e -->
+- [x] Task 1.3: Full `decide_stateful()` in Pac1Agent — custom phase 1 reasoning, phase 2 action with tool routing <!-- sha:36a192e -->
+- [x] Task 1.4: Wire `Pac1Agent` in `main.rs` replacing `HybridAgent::new()` <!-- sha:36a192e -->
 
 ### Verification
-- [ ] cargo build passes
-- [ ] t01 (legit) and t09 (trap) score same as before on Nemotron
+- [x] cargo build passes
+- [x] t01 (legit) and t09 (trap) score same as before on Nemotron (both 1.00)
 
 ## Phase 2: Router Pattern
 Use task_type from reasoning to filter tools and inject task-specific context.
