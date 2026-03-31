@@ -309,7 +309,94 @@ impl Tool for FindTool {
     }
 }
 
-// ─── search ──────────────────────────────────────────────────────────────────
+// ─── search (smart: query expansion + fuzzy retry + auto-expand) ────────────
+
+/// Check if a pattern contains regex metacharacters (already a regex, don't expand).
+fn is_regex(pattern: &str) -> bool {
+    pattern.contains('.') || pattern.contains('*') || pattern.contains('[')
+        || pattern.contains('(') || pattern.contains('|') || pattern.contains('+')
+        || pattern.contains('?') || pattern.contains('{') || pattern.contains('\\')
+}
+
+/// Expand a search query into variants for auto-retry.
+/// "John Smith" → ["John Smith", "Smith", "John"]
+/// Single words or regex patterns are not expanded.
+fn expand_query(pattern: &str) -> Vec<String> {
+    if is_regex(pattern) || pattern.trim().is_empty() {
+        return vec![pattern.to_string()];
+    }
+
+    let words: Vec<&str> = pattern.split_whitespace().collect();
+    if words.len() <= 1 {
+        return vec![pattern.to_string()];
+    }
+
+    let mut variants = vec![pattern.to_string()];
+    // Add last word (usually surname) — highest signal
+    if let Some(last) = words.last() {
+        variants.push(last.to_string());
+    }
+    // Add first word
+    variants.push(words[0].to_string());
+    variants
+}
+
+/// Generate a fuzzy regex for a short word: allow 1-char substitution at each position.
+/// "Smith" → "(?i)(.mith|S.ith|Sm.th|Smi.h|Smit.)"
+/// Skips regex patterns, long words (>12), or very short words (<3).
+fn fuzzy_regex(word: &str) -> Option<String> {
+    let w = word.trim();
+    if w.len() < 3 || w.len() > 12 || is_regex(w) {
+        return None;
+    }
+    let chars: Vec<char> = w.chars().collect();
+    let alts: Vec<String> = (0..chars.len())
+        .map(|i| {
+            let mut s = String::new();
+            for (j, c) in chars.iter().enumerate() {
+                if j == i { s.push('.'); } else { s.push(*c); }
+            }
+            s
+        })
+        .collect();
+    Some(format!("(?i)({})", alts.join("|")))
+}
+
+/// Smart search: try original, then expanded variants, then fuzzy as last resort.
+async fn smart_search(pcm: &PcmClient, root: &str, pattern: &str, limit: i32) -> anyhow::Result<String> {
+    // Try original query first
+    let result = pcm.search(root, pattern, limit).await?;
+    if has_matches(&result) {
+        return Ok(result);
+    }
+
+    // Try expanded variants (surname, first name)
+    let variants = expand_query(pattern);
+    for variant in &variants[1..] {  // skip first (already tried)
+        let r = pcm.search(root, variant, limit).await?;
+        if has_matches(&r) {
+            return Ok(r);
+        }
+    }
+
+    // Last resort: fuzzy regex on last word
+    let words: Vec<&str> = pattern.split_whitespace().collect();
+    let target = words.last().unwrap_or(&pattern);
+    if let Some(fuzzy) = fuzzy_regex(target) {
+        let r = pcm.search(root, &fuzzy, limit).await?;
+        if has_matches(&r) {
+            return Ok(r);
+        }
+    }
+
+    // Return original (empty) result
+    Ok(result)
+}
+
+/// Check if search output has actual matches (not just the header).
+fn has_matches(output: &str) -> bool {
+    output.lines().any(|l| !l.starts_with('$') && !l.is_empty())
+}
 
 pub struct SearchTool(pub Arc<PcmClient>);
 
@@ -367,7 +454,7 @@ async fn auto_expand_search(pcm: &PcmClient, search_output: String) -> String {
 #[async_trait]
 impl Tool for SearchTool {
     fn name(&self) -> &str { "search" }
-    fn description(&self) -> &str { "Search file contents with regex pattern. Auto-expands full file content when ≤3 files match." }
+    fn description(&self) -> &str { "Search file contents with regex pattern. Smart search: auto-retries with name variants (surname, first name) and fuzzy matching if no results. Auto-expands full file content when ≤3 files match." }
     fn is_read_only(&self) -> bool { true }
     fn parameters_schema(&self) -> Value {
         serde_json::json!({
@@ -382,13 +469,13 @@ impl Tool for SearchTool {
     }
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: SearchArgs = parse_args(&args)?;
-        let raw = self.0.search(&a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
+        let raw = smart_search(&self.0, &a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
         let expanded = auto_expand_search(&self.0, raw).await;
         Ok(ToolOutput::text(guard_content(expanded)))
     }
     async fn execute_readonly(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let a: SearchArgs = parse_args(&args)?;
-        let raw = self.0.search(&a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
+        let raw = smart_search(&self.0, &a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
         let expanded = auto_expand_search(&self.0, raw).await;
         Ok(ToolOutput::text(guard_content(expanded)))
     }
