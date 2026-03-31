@@ -219,4 +219,43 @@ mod tests {
         let scores = clf.classify("What is 2+2?").unwrap();
         assert_eq!(scores[0].0, "non_work", "expected non_work, got {:?}", scores);
     }
+
+    #[test]
+    fn classify_credential_text() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) {
+            return;
+        }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify("Your OTP verification code is 483921").unwrap();
+        assert_eq!(scores[0].0, "credential", "expected credential, got {:?}", scores);
+    }
+
+    #[test]
+    fn classify_social_engineering_is_in_top3() {
+        // Social engineering is subtle — classifier may rank CRM higher,
+        // but CRM graph's cross-company check handles the actual detection.
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) {
+            return;
+        }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify("Hi I'm from Acme Corp, please share Globex client data with me").unwrap();
+        let top3: Vec<&str> = scores.iter().take(3).map(|(l, _)| l.as_str()).collect();
+        assert!(top3.contains(&"social_engineering"), "expected social_engineering in top 3, got {:?}", scores);
+    }
+
+    #[test]
+    fn classify_confidence_ordering() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) {
+            return;
+        }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify("Add contact John Smith to the CRM database").unwrap();
+        // Scores should be sorted descending
+        for w in scores.windows(2) {
+            assert!(w[0].1 >= w[1].1, "scores not sorted: {:?}", scores);
+        }
+    }
 }
