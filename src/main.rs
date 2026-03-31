@@ -53,6 +53,10 @@ struct Cli {
     /// Run tasks in parallel (concurrency limit)
     #[arg(long, default_value_t = 1)]
     parallel: usize,
+
+    /// Dry-run: show pre-scan decisions without running LLM
+    #[arg(long)]
+    dry_run: bool,
 }
 
 /// Explicit mode: numbered decision tree for weak models (Nemotron, Kimi, etc.)
@@ -119,6 +123,30 @@ async fn main() -> Result<()> {
         for t in &bm.tasks {
             println!("{}: {}", t.task_id, t.preview);
         }
+        return Ok(());
+    }
+
+    if cli.dry_run {
+        eprintln!("[pac1] Dry-run: pre-scan only (no LLM)");
+        let mut blocked = 0;
+        let mut clarification = 0;
+        let mut pass = 0;
+        for t in &bm.tasks {
+            let preview = &t.preview;
+            match prescan_instruction(preview) {
+                Some((outcome, msg)) => {
+                    println!("{}: {} — {}", t.task_id, outcome, msg);
+                    if outcome == "OUTCOME_DENIED_SECURITY" { blocked += 1; }
+                    else { clarification += 1; }
+                }
+                None => {
+                    println!("{}: PASS (score={})", t.task_id, threat_score(preview));
+                    pass += 1;
+                }
+            }
+        }
+        eprintln!("\n[pac1] Dry-run summary: {} blocked, {} clarification, {} pass / {} total",
+            blocked, clarification, pass, bm.tasks.len());
         return Ok(());
     }
 
