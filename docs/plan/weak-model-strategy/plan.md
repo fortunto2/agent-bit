@@ -11,10 +11,10 @@ Improve PAC1 agent from 60% to 80%+ on weak models (Nemotron 120B, Kimi K2.5) vi
 Highest ROI — catches traps deterministically, benefits ALL models.
 
 ### Tasks
-- [~] Task 1.1: Always scan inbox (remove keyword gate `inbox`/`process`)
-- [ ] Task 1.2: Expand injection markers (proximity patterns, HTML attrs, social engineering)
-- [ ] Task 1.3: Expand non-CRM markers (OTP, math + digits, trivia patterns)
-- [ ] Task 1.4: Add threat scoring (3=DENIED, 2=CLARIFICATION, 1=warn)
+- [x] Task 1.1: Always scan inbox (remove keyword gate `inbox`/`process`) <!-- sha:2ed01c0 -->
+- [x] Task 1.2: Expand injection markers (proximity patterns, HTML attrs, social engineering) <!-- sha:2ed01c0 -->
+- [x] Task 1.3: Expand non-CRM markers (OTP, math + digits, trivia patterns) <!-- sha:2ed01c0 -->
+- [x] Task 1.4: Add threat scoring (3=DENIED, 2=CLARIFICATION, 1=warn) <!-- sha:2ed01c0 -->
 
 ### Verification
 - [ ] Pre-scan catches t09 (script injection), t21 (math puzzle)
@@ -24,14 +24,14 @@ Highest ROI — catches traps deterministically, benefits ALL models.
 Make system prompt and tool descriptions explicit enough for weak models.
 
 ### Tasks
-- [ ] Task 2.1: Decision tree in system prompt (numbered steps, not vague bullets)
-- [ ] Task 2.2: Enhanced answer tool description with outcome examples
-- [ ] Task 2.3: Security hint injection after inbox file pre-load
-- [ ] Task 2.4: Add `security_check` bool to HybridAgent reasoning tool
+- [x] Task 2.1: Decision tree in system prompt (numbered steps, not vague bullets) <!-- sha:2ed01c0 -->
+- [x] Task 2.2: Enhanced answer tool description with outcome examples <!-- sha:2ed01c0 -->
+- [x] Task 2.3: Security hint injection after inbox file pre-load <!-- sha:7695ec5 -->
+- [x] Task 2.4: Add `security_check` bool to HybridAgent reasoning tool <!-- sha:e1b9a09 -->
 
 ### Verification
-- [ ] Nemotron correctly flags injection tasks without pre-scan
-- [ ] Answer tool outcomes match expected for trap tasks
+- [x] Nemotron correctly flags injection tasks without pre-scan
+- [x] Answer tool outcomes match expected for trap tasks
 
 ## Phase 3: Defense in Depth
 
