@@ -4,12 +4,12 @@ use std::sync::atomic::Ordering;
 use anyhow::{Context, Result};
 use clap::Parser;
 use sgr_agent::agent_loop::{LoopConfig, LoopEvent, run_loop};
-use sgr_agent::agents::hybrid::HybridAgent;
 use sgr_agent::context::AgentContext;
 use sgr_agent::registry::ToolRegistry;
 use sgr_agent::types::{LlmConfig, Message, Role};
 use sgr_agent::Llm;
 
+mod agent;
 mod bitgn;
 mod config;
 mod pcm;
@@ -607,7 +607,7 @@ async fn run_agent(
         .register(tools::AnswerTool(pcm.clone()))
         .register(tools::ContextTool(pcm.clone()));
 
-    let agent = HybridAgent::new(llm, &system_prompt);
+    let agent = agent::Pac1Agent::new(llm, &system_prompt);
     let mut ctx = AgentContext::new();
 
     // Pre-grounding: tree and date already have shell-like headers from pcm.rs
