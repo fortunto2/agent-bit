@@ -466,3 +466,46 @@ impl Tool for AnswerTool {
         Ok(ToolOutput::done(format!("Answer submitted: {}", a.message)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unique_files_empty() {
+        assert!(unique_files_from_search("", 3).is_empty());
+    }
+
+    #[test]
+    fn unique_files_header_only() {
+        assert!(unique_files_from_search("$ rg -n foo\n", 3).is_empty());
+    }
+
+    #[test]
+    fn unique_files_one_file() {
+        let output = "$ rg -n pattern dir\ncontacts.md:5:John Smith\ncontacts.md:12:Jane Smith";
+        let files = unique_files_from_search(output, 3);
+        assert_eq!(files, vec!["contacts.md"]);
+    }
+
+    #[test]
+    fn unique_files_three_files() {
+        let output = "a.md:1:x\nb.md:2:y\nc.md:3:z";
+        let files = unique_files_from_search(output, 3);
+        assert_eq!(files.len(), 3);
+    }
+
+    #[test]
+    fn unique_files_four_exceeds_max() {
+        let output = "a.md:1:x\nb.md:2:y\nc.md:3:z\nd.md:4:w";
+        let files = unique_files_from_search(output, 3);
+        assert_eq!(files.len(), 4); // Returns 4, caller checks > 3
+    }
+
+    #[test]
+    fn unique_files_deduplicates() {
+        let output = "a.md:1:x\na.md:5:y\nb.md:2:z\na.md:10:w";
+        let files = unique_files_from_search(output, 3);
+        assert_eq!(files, vec!["a.md", "b.md"]);
+    }
+}
