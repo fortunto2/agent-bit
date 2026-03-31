@@ -48,26 +48,20 @@ Build in-memory graph from PCM filesystem to validate sender identity.
 Replace threat_score + quarantine with classifier + graph in inbox pre-load.
 
 ### Tasks
-- [~] Task 3.1: Create `classify_inbox_file(content, graph, classifier) -> FileClassification` struct:
+- [x] Task 3.1: Create `classify_inbox_file(content, graph, classifier) -> FileClassification` struct: <!-- sha:f9ba894 -->
   - `label: String` (crm/injection/non_crm/social_engineering/credential)
   - `confidence: f32`
   - `sender_trust: SenderTrust`
   - `recommendation: String` (human-readable for LLM)
-- [ ] Task 3.2: Update `read_inbox_files()` to use classifier + graph instead of quarantine. Each file gets metadata header:
-  ```
-  $ cat inbox/msg_001.txt
-  [CLASSIFICATION: crm (0.92) | sender: KNOWN | recommendation: process normally]
-  From: John Smith <john@known-company.com>
-  ...full content...
-  ```
-- [ ] Task 3.3: Reduce `threat_score()` to minimal universal checks: only `<script>`, `<iframe>`, `javascript:` (actual code injection that no classifier should miss). Remove all pattern lists (INJECTION_PROXIMITY, NON_CRM_MARKERS)
-- [ ] Task 3.4: Update `analyze_inbox_content()` to use classification results instead of rule-based signals
+- [x] Task 3.2: Update `read_inbox_files()` to use classifier + graph instead of quarantine. <!-- sha:f9ba894 -->
+- [x] Task 3.3: Reduce `threat_score()` to minimal universal checks: only `<script>`, `<iframe>`, `javascript:`. Removed INJECTION_PROXIMITY, NON_CRM_MARKERS <!-- sha:f9ba894 -->
+- [x] Task 3.4: Update `analyze_inbox_content()` to use classification results instead of rule-based signals <!-- sha:f9ba894 -->
 
 ### Verification
-- [ ] Inbox files show classification labels in pre-load
-- [ ] No rule-based patterns except HTML injection
-- [ ] t24 (OTP alone) classified as CRM or credential (not attack)
-- [ ] t25 (OTP + command) classified as injection/attack
+- [x] Inbox files show classification labels in pre-load
+- [x] No rule-based patterns except HTML injection
+- [ ] t24 (OTP alone) classified as CRM or credential (not attack) — needs live test
+- [ ] t25 (OTP + command) classified as injection/attack — needs live test
 
 ## Phase 4: Testing & Benchmark
 
