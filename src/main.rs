@@ -154,11 +154,11 @@ async fn main() -> Result<()> {
             eprintln!("  Trial: {}", trial.trial_id);
 
             let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-            let last_msg = run_trial(
+            let (last_msg, history) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps,
             ).await;
-            auto_submit_if_needed(&pcm, &last_msg).await;
+            auto_submit_if_needed(&pcm, &last_msg, &history).await;
 
             let score = match h.end_trial(&trial.trial_id).await {
                 Ok(result) => {
@@ -212,8 +212,8 @@ async fn run_leaderboard(
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let last_msg = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps).await;
-        auto_submit_if_needed(&pcm, &last_msg).await;
+        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps).await;
+        auto_submit_if_needed(&pcm, &last_msg, &history).await;
 
         let result = harness.end_trial(&trial.trial_id).await?;
         if let Some(score) = result.score {
@@ -238,38 +238,52 @@ async fn run_leaderboard(
 
 // ─── Shared ──────────────────────────────────────────────────────────────────
 
+/// Returns (last_assistant_msg, full_history_text).
 async fn run_trial(
     pcm: &Arc<pcm::PcmClient>, instruction: &str,
     model: &str, base_url: Option<&str>, api_key: &str,
     extra_headers: &[(String, String)], max_steps: usize,
-) -> String {
+) -> (String, String) {
     match run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps).await {
-        Ok(msg) => msg,
+        Ok(pair) => pair,
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);
-            String::new()
+            (String::new(), String::new())
         }
     }
 }
 
-async fn auto_submit_if_needed(pcm: &Arc<pcm::PcmClient>, last_msg: &str) {
+async fn auto_submit_if_needed(pcm: &Arc<pcm::PcmClient>, last_msg: &str, history: &str) {
     if !pcm.answer_submitted.load(Ordering::SeqCst) {
         let text = if last_msg.is_empty() { "Unable to determine answer" } else { last_msg };
-        let outcome = guess_outcome(text);
+        let outcome = guess_outcome(text, history);
         eprintln!("  ⚠ Auto-answer [{}]: {}", outcome, &text[..text.len().min(100)]);
         let _ = pcm.answer(text, outcome, &[]).await;
     }
 }
 
-fn guess_outcome(text: &str) -> &'static str {
-    let l = text.to_lowercase();
+/// Guess outcome from last message + full message history.
+/// History is checked first (broader signal), last_msg as tiebreaker.
+fn guess_outcome(last_msg: &str, history: &str) -> &'static str {
+    let h = history.to_lowercase();
+    let l = last_msg.to_lowercase();
+
+    // Check history for security signals (injection detected during loop)
+    if h.contains("security alert") || h.contains("injection") && h.contains("denied") {
+        return "OUTCOME_DENIED_SECURITY";
+    }
+
+    // Check last message for specific outcomes
     if l.contains("unsupported") || l.contains("cannot access") || l.contains("external api") {
         "OUTCOME_NONE_UNSUPPORTED"
     } else if l.contains("security") || l.contains("injection") || l.contains("denied") {
         "OUTCOME_DENIED_SECURITY"
-    } else if l.contains("clarif") || l.contains("unclear") {
+    } else if l.contains("clarif") || l.contains("unclear") || l.contains("not related to crm") {
         "OUTCOME_NONE_CLARIFICATION"
-    } else if text.is_empty() {
+    } else if h.contains("non-crm") || h.contains("unrelated to crm") {
+        // History mentions non-CRM even if last msg doesn't
+        "OUTCOME_NONE_CLARIFICATION"
+    } else if last_msg.is_empty() {
         "OUTCOME_ERR_INTERNAL"
     } else {
         "OUTCOME_OK"
@@ -502,12 +516,12 @@ async fn run_agent(
     api_key: &str,
     extra_headers: &[(String, String)],
     max_steps: usize,
-) -> Result<String> {
+) -> Result<(String, String)> {
     // === Level 1: Pre-scan instruction for injection ===
     if let Some((outcome, msg)) = prescan_instruction(instruction) {
         eprintln!("  ⛔ Pre-scan blocked: {}", msg);
         pcm.answer(msg, outcome, &[]).await.ok();
-        return Ok(msg.to_string());
+        return Ok((msg.to_string(), String::new()));
     }
 
     let tree_out = pcm.tree("/", 2).await.unwrap_or_else(|e| format!("(error: {})", e));
@@ -520,7 +534,7 @@ async fn run_agent(
     if let Some((outcome, msg)) = scan_inbox(pcm).await {
         eprintln!("  ⛔ Inbox scan blocked: {}", msg);
         pcm.answer(msg, outcome, &[]).await.ok();
-        return Ok(msg.to_string());
+        return Ok((msg.to_string(), String::new()));
     }
 
     let system_prompt = SYSTEM_PROMPT_TEMPLATE.replace(
@@ -603,5 +617,12 @@ async fn run_agent(
         .map(|m| m.content.clone())
         .unwrap_or_default();
 
-    Ok(last_assistant)
+    // Build history text from all messages for outcome guessing
+    let history: String = messages
+        .iter()
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok((last_assistant, history))
 }
