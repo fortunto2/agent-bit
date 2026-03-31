@@ -2,7 +2,7 @@
 
 **Track ID:** weak-model-strategy_20260331
 **Created:** 2026-03-31
-**Status:** [ ] Not Started
+**Status:** [x] Complete
 
 ## Overview
 Improve PAC1 agent from 60% to 80%+ on weak models (Nemotron 120B, Kimi K2.5) via rule-based pre-scan hardening, explicit prompts, and defense-in-depth architecture.
@@ -47,12 +47,12 @@ Make system prompt and tool descriptions explicit enough for weak models.
 ## Phase 4: Testing
 
 ### Tasks
-- [ ] Task 4.1: Unit tests for security scanner (patterns, edge cases, false positives)
-- [ ] Task 4.2: --dry-run mode for pre-scan testing without LLM
+- [x] Task 4.1: Unit tests for security scanner (patterns, edge cases, false positives) <!-- sha:0fd0f90 -->
+- [x] Task 4.2: --dry-run mode for pre-scan testing without LLM <!-- sha:a95eb56 -->
 
 ### Verification
-- [ ] cargo test passes
-- [ ] --dry-run shows correct pre-scan decisions for all 25 tasks
+- [x] cargo test passes (24/24)
+- [x] --dry-run shows correct pre-scan decisions for all 26 tasks
 
 ## Final Verification
 - [ ] Nemotron 120B: 70%+ on 25 tasks
