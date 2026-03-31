@@ -36,13 +36,13 @@ Make system prompt and tool descriptions explicit enough for weak models.
 ## Phase 3: Defense in Depth
 
 ### Tasks
-- [ ] Task 3.1: Post-read security guard in agent loop (check read results for injection)
-- [ ] Task 3.2: Improve guess_outcome — scan full message history
-- [ ] Task 3.3: Model-specific prompt_mode in config.toml (explicit vs standard)
+- [x] Task 3.1: Post-read security guard in agent loop (check read results for injection) <!-- sha:113c99d -->
+- [x] Task 3.2: Improve guess_outcome — scan full message history <!-- sha:28c116d -->
+- [x] Task 3.3: Model-specific prompt_mode in config.toml (explicit vs standard) <!-- sha:2314eca -->
 
 ### Verification
-- [ ] Agent catches injection discovered mid-loop (not in pre-scan)
-- [ ] Auto-answer fallback picks correct outcome
+- [x] Agent catches injection discovered mid-loop (not in pre-scan)
+- [x] Auto-answer fallback picks correct outcome
 
 ## Phase 4: Testing
 
