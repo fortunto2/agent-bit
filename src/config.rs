@@ -33,6 +33,9 @@ pub struct ProviderSection {
     /// Extra HTTP headers (e.g. cf-aig-request-timeout for CF Gateway)
     #[serde(default)]
     pub headers: std::collections::HashMap<String, String>,
+    /// Prompt mode: "explicit" (numbered decision tree for weak models) or "standard" (default)
+    #[serde(default)]
+    pub prompt_mode: Option<String>,
 }
 
 fn default_max_steps() -> usize { 20 }
@@ -45,11 +48,11 @@ impl Config {
         toml::from_str(&text).context("parsing config.toml")
     }
 
-    /// Resolve provider by name, return (model, base_url, api_key, extra_headers).
+    /// Resolve provider by name, return (model, base_url, api_key, extra_headers, prompt_mode).
     pub fn resolve_provider(
         &self,
         name: &str,
-    ) -> Result<(String, Option<String>, String, Vec<(String, String)>)> {
+    ) -> Result<(String, Option<String>, String, Vec<(String, String)>, String)> {
         let p = self
             .providers
             .get(name)
@@ -67,7 +70,8 @@ impl Config {
         };
 
         let headers: Vec<(String, String)> = p.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let prompt_mode = p.prompt_mode.clone().unwrap_or_else(|| "standard".into());
 
-        Ok((p.model.clone(), p.base_url.clone(), api_key, headers))
+        Ok((p.model.clone(), p.base_url.clone(), api_key, headers, prompt_mode))
     }
 }
