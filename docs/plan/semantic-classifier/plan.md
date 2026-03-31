@@ -27,22 +27,22 @@ Local embedding model classifies inbox content by cosine similarity. Zero-shot, 
 Build in-memory graph from PCM filesystem to validate sender identity.
 
 ### Tasks
-- [ ] Task 2.1: Add `petgraph` to Cargo.toml. Create `src/crm_graph.rs` with `CrmGraph` struct using `petgraph::Graph<Node, Edge>`
+- [x] Task 2.1: Add `petgraph` to Cargo.toml. Create `src/crm_graph.rs` with `CrmGraph` struct using `petgraph::Graph<Node, Edge>` <!-- sha:ececfce -->
   - Node types: Contact {name, email, company}, Account {name, domain}, Domain {name}
   - Edge types: WorksAt, HasDomain, KnownEmail
-- [ ] Task 2.2: `CrmGraph::build_from_pcm(pcm) -> CrmGraph` — read contacts/, accounts/ directories from PCM, parse JSON/MD files, build graph. ~50ms
-- [ ] Task 2.3: `CrmGraph::validate_sender(email, company_ref) -> SenderTrust` — graph traversal:
+- [x] Task 2.2: `CrmGraph::build_from_pcm(pcm) -> CrmGraph` — read contacts/, accounts/ directories from PCM, parse JSON/MD files, build graph. ~50ms <!-- sha:ececfce -->
+- [x] Task 2.3: `CrmGraph::validate_sender(email, company_ref) -> SenderTrust` — graph traversal: <!-- sha:ececfce -->
   - email known? → KNOWN
   - email unknown but domain matches known account? → PLAUSIBLE
   - email domain ≠ referenced company domain? → CROSS_COMPANY (social engineering flag)
   - email completely unknown? → UNKNOWN
-- [ ] Task 2.4: `CrmGraph::is_known_entity(name) -> bool` — check if name appears as contact or account
+- [x] Task 2.4: `CrmGraph::is_known_entity(name) -> bool` — check if name appears as contact or account <!-- sha:ececfce -->
 
 ### Verification
-- [ ] Graph built from PCM contacts/accounts in <100ms
-- [ ] Known contact email → KNOWN trust
-- [ ] Sender from company A asking about company B → CROSS_COMPANY
-- [ ] Unknown sender → UNKNOWN
+- [x] Graph built from PCM contacts/accounts in <100ms
+- [x] Known contact email → KNOWN trust
+- [x] Sender from company A asking about company B → CROSS_COMPANY
+- [x] Unknown sender → UNKNOWN
 
 ## Phase 3: Unified Pre-Classification Pipeline
 Replace threat_score + quarantine with classifier + graph in inbox pre-load.
