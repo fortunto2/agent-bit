@@ -132,6 +132,25 @@ impl InboxClassifier {
             && models_dir.join("tokenizer.json").exists()
             && models_dir.join("class_embeddings.json").exists()
     }
+
+    /// Load classifier if models are available, otherwise return None with a warning.
+    pub fn try_load(models_dir: &Path) -> Option<Self> {
+        if Self::is_available(models_dir) {
+            match Self::load(models_dir) {
+                Ok(clf) => Some(clf),
+                Err(e) => {
+                    tracing::warn!("Failed to load classifier: {:#}", e);
+                    None
+                }
+            }
+        } else {
+            tracing::info!(
+                "Classifier models not found at {}. Run: uv run --with sentence-transformers --with onnxruntime --with onnx --with onnxscript scripts/export_model.py",
+                models_dir.display()
+            );
+            None
+        }
+    }
 }
 
 /// Cosine similarity between two L2-normalized vectors (dot product).
