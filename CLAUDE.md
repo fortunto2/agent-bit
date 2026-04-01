@@ -72,6 +72,7 @@ Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep)
 
 Providers in `config.toml`. Key fields per provider:
 - `model`, `base_url`, `api_key` / `api_key_env`
+- `auth` — "keychain" for Claude Code subscription (macOS Keychain OAuth token)
 - `prompt_mode` — "explicit" (weak models) or "standard" (default)
 - `headers` — extra HTTP headers (e.g. CF Gateway timeout)
 
@@ -86,6 +87,7 @@ Results tracked in `benchmarks/runs/`. After each significant change, run benchm
 | gpt-5.4 | 05a4aed | **71.4%** (20/28) | +5 fixed from 64% baseline (t04,t05,t08,t14,t23) |
 | gpt-5.4-mini | 05a4aed | 100% (8/8 sample) | |
 | nemotron-120b | 40410a3 | 60% (18/30 full), 87.5% (7/8 sample) | Non-deterministic: ±4 tasks between runs |
+| claude-haiku-4.5 | 12e54a6 | 48.3% (14/29) | Via keychain sub. Over-cautious + token expired mid-bench |
 
 ### Known Unsolved Tasks
 

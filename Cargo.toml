@@ -10,7 +10,7 @@ name = "pac1"
 path = "src/main.rs"
 
 [dependencies]
-sgr-agent = { path = "../../shared/rust-code/crates/sgr-agent", default-features = false, features = ["agent", "oxide", "telemetry"] }
+sgr-agent = { path = "../../shared/rust-code/crates/sgr-agent", default-features = false, features = ["agent", "oxide", "genai", "providers", "telemetry"] }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }

@@ -274,6 +274,17 @@ async fn main() -> Result<()> {
                     for detail in &result.score_detail {
                         eprintln!("    {}", detail);
                     }
+                    // Fetch full trial logs for debugging when score < 1.0
+                    if s < 1.0 {
+                        if let Ok(trial_detail) = h.get_trial(&trial.trial_id).await {
+                            if !trial_detail.logs.is_empty() {
+                                eprintln!("  --- Trial logs ---");
+                                for log in &trial_detail.logs {
+                                    eprintln!("  [{}] {}: {}", log.time, log.kind, &log.text[..log.text.len().min(200)]);
+                                }
+                            }
+                        }
+                    }
                     s
                 }
                 Err(e) => {
@@ -747,14 +758,16 @@ async fn collect_account_domains(pcm: &pcm::PcmClient) -> Vec<(String, String)> 
         let filename = line.trim().trim_end_matches('/');
         if filename.is_empty() || filename.starts_with('$')
             || filename.eq_ignore_ascii_case("README.MD")
-            || !filename.ends_with(".json")
         {
             continue;
         }
         let path = format!("accounts/{}", filename);
         if let Ok(content) = pcm.read(&path, false, 0, 0).await {
             // Try JSON parse for structured account data
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(
+                // Strip PCM "$ cat ..." header if present
+                if content.starts_with("$ ") { content.splitn(2, '\n').nth(1).unwrap_or(&content) } else { &content }
+            ) {
                 let name = v.get("name").or(v.get("Name"))
                     .and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let domain = v.as_object().and_then(|obj| {
@@ -856,7 +869,29 @@ fn check_sender_domain_match(
         return "mismatch";
     }
 
-    "unknown" // referenced company not found in CRM
+    // Fallback: no CRM account matched. Check if sender domain stem matches
+    // any company/organization name mentioned in the email BODY (not From: header).
+    // e.g. sender "silverline-retail.example.com" + body mentions "Silverline Retail" → self-consistent
+    let body: String = content.lines()
+        .filter(|l| {
+            let t = l.trim().to_lowercase();
+            !t.starts_with("from:") && !t.starts_with("to:") && !t.starts_with("subject:")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    let all_stem_words: Vec<&str> = sender_stem.split_whitespace()
+        .filter(|w| w.len() > 2)
+        .collect();
+    if !all_stem_words.is_empty() {
+        let matched = all_stem_words.iter().filter(|w| body.contains(*w)).count();
+        let ratio = matched as f64 / all_stem_words.len() as f64;
+        if ratio >= 0.5 {
+            return "match"; // sender domain is self-consistent with body content
+        }
+    }
+
+    "unknown"
 }
 
 /// Read all inbox files with semantic classification.
@@ -902,7 +937,6 @@ async fn read_inbox_files(
             let fc = semantic_classify_inbox_file(&content, classifier.as_deref_mut(), graph);
             eprintln!("  📋 {}: {} ({:.2}) | sender: {} | {}",
                 path, fc.label, fc.confidence, fc.sender_trust, fc.recommendation);
-
             // Sender trust annotation from domain matching
             let sender_warning = if let Some(sender_domain) = extract_sender_domain(&content) {
                 match check_sender_domain_match(&sender_domain, &content, &known_domains) {
@@ -1042,6 +1076,12 @@ fn make_llm_config(
         let mut cfg = LlmConfig::endpoint(api_key, url, model).temperature(temperature as f64).max_tokens(4096);
         cfg.use_chat_api = true;
         cfg.extra_headers = extra_headers.to_vec();
+        cfg
+    } else if !api_key.is_empty() {
+        let mut cfg = LlmConfig::with_key(api_key, model).temperature(temperature as f64).max_tokens(4096);
+        cfg.extra_headers = extra_headers.to_vec();
+        // Native API providers (Anthropic, Gemini) need genai backend
+        cfg.use_genai = model.starts_with("claude") || model.starts_with("gemini");
         cfg
     } else {
         let mut cfg = LlmConfig::auto(model).temperature(temperature as f64).max_tokens(4096);
@@ -1508,5 +1548,23 @@ mod tests {
         let accounts: Vec<(String, String)> = vec![];
         let content = "From: test@unknown.com\nHello world";
         assert_eq!(check_sender_domain_match("unknown.com", content, &accounts), "unknown");
+    }
+
+    #[test]
+    fn sender_domain_self_consistent_fallback() {
+        // No CRM accounts, but sender domain matches company name in body
+        let accounts: Vec<(String, String)> = vec![];
+        let content = "From: nienke@silverline-retail.example.com\nHi, can you resend the invoice for Silverline Retail?";
+        assert_eq!(check_sender_domain_match("silverline-retail.example.com", content, &accounts), "match");
+    }
+
+    #[test]
+    fn sender_domain_mismatch_with_crm_data() {
+        // Sender domain stem overlaps with company name, but CRM has different real domain
+        let accounts = vec![
+            ("Silverline Retail".to_string(), "silverline.nl".to_string()),
+        ];
+        let content = "From: sara@silverline-retail.biz\nResend invoices for Silverline Retail";
+        assert_eq!(check_sender_domain_match("silverline-retail.biz", content, &accounts), "mismatch");
     }
 }

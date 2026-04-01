@@ -51,6 +51,18 @@ temperature = 0.1
 [providers.nemotron.headers]
 cf-aig-request-timeout = "300000"
 
+# AI-NOTE: Keychain auth uses Claude Code subscription OAuth token (sk-ant-oat01-...).
+# Haiku works. Sonnet/opus get 429 (subscription rate limit on premium models).
+# Token expires ~8h — restart agent if you get 401. See sgr-agent/providers/CLAUDE_PROXY_RESEARCH.md.
+[providers.claude]
+model = "claude-sonnet-4-6"
+auth = "keychain"
+
+[providers.claude-haiku]
+model = "claude-haiku-4-5-20251001"
+auth = "keychain"
+prompt_mode = "explicit"
+
 [providers.gemini]
 model = "gemini-3.1-pro-preview"
 api_key_env = "GEMINI_API_KEY"

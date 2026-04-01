@@ -30,6 +30,9 @@ pub struct ProviderSection {
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub api_key_env: Option<String>,
+    /// Auth method: "keychain" for Claude Code subscription (macOS Keychain OAuth token)
+    #[serde(default)]
+    pub auth: Option<String>,
     /// Extra HTTP headers (e.g. cf-aig-request-timeout for CF Gateway)
     #[serde(default)]
     pub headers: std::collections::HashMap<String, String>,
@@ -61,7 +64,10 @@ impl Config {
             .get(name)
             .ok_or_else(|| anyhow::anyhow!("provider '{}' not found in config", name))?;
 
-        let api_key = if let Some(ref key) = p.api_key {
+        let api_key = if p.auth.as_deref() == Some("keychain") {
+            sgr_agent::providers::load_claude_keychain_token()
+                .map_err(|e| anyhow::anyhow!("Claude keychain auth failed: {}", e))?
+        } else if let Some(ref key) = p.api_key {
             key.clone()
         } else if let Some(ref env_var) = p.api_key_env {
             std::env::var(env_var)
