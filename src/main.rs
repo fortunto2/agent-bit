@@ -811,7 +811,7 @@ async fn run_agent(
 
     let loop_config = LoopConfig {
         max_steps,
-        loop_abort_threshold: 10,
+        loop_abort_threshold: 6,
         max_messages: 80,
         auto_complete_threshold: 5,
     };
