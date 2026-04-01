@@ -23,18 +23,18 @@ Low-effort, high-impact changes to what the LLM sees before the agent loop.
 - [x] "analyze" route first step exposes ≤8 tools
 - [x] cargo test passes
 
-## Phase 2: Action Ledger + Adaptive Nudge
+## Phase 2: Action Ledger + Adaptive Nudge <!-- checkpoint:564bd7b -->
 Give the model explicit memory and step-budget awareness.
 
 ### Tasks
-- [ ] Task 2.1: Add `action_ledger: Vec<String>` field to Pac1Agent struct in `src/agent.rs`. After each tool execution, append `"[{step}] {tool}({key_arg}) → {truncated_result}"` (max 80 chars per entry, max 10 entries — rotate oldest).
-- [ ] Task 2.2: Inject action ledger as assistant context before Phase 1 reasoning. Format: `"Previous actions:\n{ledger_entries}"`. This gives the model explicit history to avoid repeating searches.
-- [ ] Task 2.3: Adaptive nudge — in `run_agent()` or in `Pac1Agent::decide_stateful()`, when `step > max_steps / 2` and no answer submitted, inject user message: `"You have used {step}/{max_steps} steps. Complete the task now or explain why you cannot."` One-time injection (flag to prevent repeating).
+- [x] Task 2.1: Add `action_ledger: Vec<String>` field to Pac1Agent struct in `src/agent.rs`. After each tool execution, append `"[{step}] {tool}({key_arg}) → {truncated_result}"` (max 80 chars per entry, max 10 entries — rotate oldest). <!-- sha:2f9f89e -->
+- [x] Task 2.2: Inject action ledger as assistant context before Phase 1 reasoning. Format: `"Previous actions:\n{ledger_entries}"`. This gives the model explicit history to avoid repeating searches. <!-- sha:ed427d6 -->
+- [x] Task 2.3: Adaptive nudge — in `run_agent()` or in `Pac1Agent::decide_stateful()`, when `step > max_steps / 2` and no answer submitted, inject user message: `"You have used {step}/{max_steps} steps. Complete the task now or explain why you cannot."` One-time injection (flag to prevent repeating). <!-- sha:564bd7b -->
 
 ### Verification
-- [ ] Action ledger visible in PAC1_DEBUG output
-- [ ] Nudge message appears at step 11+ (with max_steps=20)
-- [ ] No regression on t01, t09, t16 (simple tasks should not be affected)
+- [x] Action ledger visible in PAC1_DEBUG output
+- [x] Nudge message appears at step 11+ (with max_steps=20)
+- [x] No regression on t01, t09, t16 (simple tasks should not be affected)
 
 ## Phase 3: Classifier Ensemble + Structural Signals
 Combine ML embedding scores with structural content analysis for robust classification.
