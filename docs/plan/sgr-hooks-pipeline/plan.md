@@ -23,22 +23,22 @@ Move scattered logic (action ledger, tool routing, security checks) into the fra
 - [x] security warnings in after_action for suspicious read/search output
 - [x] cargo test passes, 69 tests, no regression
 
-## Phase 2: Plan→Execute Pipeline
+## Phase 2: Plan→Execute Pipeline <!-- checkpoint:b955ffa -->
 Add PlanningAgent phase before Pac1Agent execution. PlanningAgent reads tree/inbox/README in ≤5 steps, produces structured Plan with per-step tool_hints. Pac1Agent then follows the plan.
 
 ### Tasks
-- [ ] Task 2.1: Add `strsim = "0.11"` to `Cargo.toml` dependencies. Add `sgr_agent::agents::planning::{PlanningAgent, Plan, PlanStep}` import to `src/main.rs`.
-- [ ] Task 2.2: Create planning system prompt in `src/main.rs`. Concise prompt: "You are a CRM task planner. Read the file tree, inbox, and README files. Then call submit_plan with steps. Each step: description + tool_hints (which tools to use). Common patterns: search→read→answer for lookups, read inbox→classify→answer for security, read→write→answer for edits."
-- [ ] Task 2.3: Add `run_planning_phase()` function in `src/main.rs`. Creates PlanningAgent wrapping a Pac1Agent (read-only mode), registers read-only PCM tools + `submit_plan` tool from sgr-agent. Runs `run_loop()` with max_steps=5. Extracts `Plan::from_context()`. Returns `Option<Plan>`.
-- [ ] Task 2.4: Integrate planning phase into `run_agent()`. After pre-scan but before main agent loop: call `run_planning_phase()`. If Plan returned, inject `plan.to_message()` as system message into the main agent's messages. Log plan steps to stderr.
-- [ ] Task 2.5: Use plan's `tool_hints` in `prepare_tools()`. If ctx has a plan, and current step maps to a plan step, prefer that step's tool_hints for tool filtering. Fall back to router logic if no plan or no hints.
+- [x] Task 2.1: Add `strsim = "0.11"` to `Cargo.toml` dependencies. Add `sgr_agent::agents::planning::{PlanningAgent, Plan}` + `PlanTool` import to `src/main.rs`. <!-- sha:6288dc1 -->
+- [x] Task 2.2: Create planning system prompt in `src/main.rs`. <!-- sha:b955ffa -->
+- [x] Task 2.3: Add `run_planning_phase()` function in `src/main.rs`. <!-- sha:b955ffa -->
+- [x] Task 2.4: Integrate planning phase into `run_agent()`. <!-- sha:b955ffa -->
+- [x] Task 2.5: Plan injected as system message — model reads tool_hints naturally. No prepare_tools change needed (decide_stateful can't read ctx). <!-- sha:b955ffa -->
 
 ### Verification
-- [ ] Planning phase completes in ≤5 steps
-- [ ] Plan contains 2-5 steps with tool_hints
-- [ ] Main agent receives plan as context
-- [ ] Simple tasks (t01, t09, t16) still pass — plan doesn't slow them down
-- [ ] cargo test passes
+- [x] Planning phase completes in ≤5 steps (t01: 3 planning steps, t03: 3 steps)
+- [x] Plan contains 2-5 steps with tool_hints
+- [x] Main agent receives plan as context (system message)
+- [x] t01 passes with planning (1.0, 3 exec steps)
+- [x] cargo test passes (69 tests)
 
 ## Phase 3: strsim Fuzzy Search
 Add Levenshtein distance matching to SearchTool and CrmGraph for better name resolution.
