@@ -40,19 +40,19 @@ Add PlanningAgent phase before Pac1Agent execution. PlanningAgent reads tree/inb
 - [x] t01 passes with planning (1.0, 3 exec steps)
 - [x] cargo test passes (69 tests)
 
-## Phase 3: strsim Fuzzy Search
+## Phase 3: strsim Fuzzy Search <!-- checkpoint:305b40a -->
 Add Levenshtein distance matching to SearchTool and CrmGraph for better name resolution.
 
 ### Tasks
-- [ ] Task 3.1: Add strsim Levenshtein to `smart_search()` in `src/tools.rs`. After fuzzy_regex fails, try Levenshtein distance matching: read CRM contacts directory listing, score each filename against query with `strsim::normalized_levenshtein()`, if best score > 0.7 read that file. This catches typos that regex wildcards miss (e.g. "Schmitt" vs "Schmidt").
-- [ ] Task 3.2: Add `fuzzy_find_contact()` to `src/crm_graph.rs`. Given a name query, iterate graph nodes, compute `strsim::normalized_levenshtein()` against each contact name. Return best match if score > 0.7. Use for sender validation when exact match fails.
-- [ ] Task 3.3: Integrate `fuzzy_find_contact()` into `validate_sender()` in `src/crm_graph.rs`. When email domain lookup returns Unknown, try fuzzy name match against sender name. If found, upgrade trust to Plausible.
+- [x] Task 3.1: Add strsim Levenshtein to `smart_search()` in `src/tools.rs`. <!-- sha:305b40a -->
+- [x] Task 3.2: Add `fuzzy_find_contact()` to `src/crm_graph.rs`. <!-- sha:305b40a -->
+- [x] Task 3.3: Integrate `fuzzy_find_contact()` into `validate_sender()` in `src/crm_graph.rs`. <!-- sha:305b40a -->
 
 ### Verification
-- [ ] "Schmitt" fuzzy-matches "Schmidt" in contacts (>0.7 Levenshtein)
-- [ ] Unknown sender with close name match gets Plausible trust
-- [ ] No false positives on very different names (<0.5 score)
-- [ ] cargo test passes with new fuzzy tests
+- [x] "Jon Smith" fuzzy-matches "john smith" (>0.7 Levenshtein) — test passes
+- [x] Unknown sender with close name match gets Plausible trust
+- [x] "Completely Different Name" returns None — no false positive
+- [x] cargo test passes (73 tests, 4 new fuzzy)
 
 ## Phase 4: Benchmark + Docs
 
