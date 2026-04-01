@@ -69,8 +69,8 @@ Lightweight self-validation between reasoning and action.
 ### Tasks
 - [ ] Task 5.1: Run full 30-task Nemotron benchmark, log to `benchmarks/runs/`
 - [ ] Task 5.2: Compare scores per-task against baseline (60% / 18 of 30). Identify which techniques helped which tasks.
-- [ ] Task 5.3: Update CLAUDE.md — document action ledger, reflexion, ensemble classifier, SGR pre-grounding, tool pruning
-- [ ] Task 5.4: Remove any dead code from previous approaches
+- [x] Task 5.3: Update CLAUDE.md — document action ledger, reflexion, ensemble classifier, SGR pre-grounding, tool pruning <!-- sha:f6b6920 -->
+- [x] Task 5.4: Remove any dead code from previous approaches <!-- sha:5f6ab1c -->
 
 ### Verification
 - [ ] Benchmark logged with commit SHA
