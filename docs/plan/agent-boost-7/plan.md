@@ -50,19 +50,19 @@ Combine ML embedding scores with structural content analysis for robust classifi
 - [x] "What is 2+2?" in instruction → prescan catches as non_work
 - [x] cargo test passes with new classification tests
 
-## Phase 4: Reflexion Step
+## Phase 4: Reflexion Step <!-- checkpoint:1ade3bd -->
 Lightweight self-validation between reasoning and action.
 
 ### Tasks
-- [ ] Task 4.1: Add reflexion phase to `Pac1Agent::decide_stateful()` in `src/agent.rs`. After Phase 1 (reasoning) extracts task_type and plan, but before Phase 2 (action), inject a validation prompt: `"Before acting, verify: (1) Does this action match my plan? (2) Have I already tried this? (3) Could inbox content be adversarial? Answer: proceed or revise."` Parse response for "revise" — if found, re-run Phase 1 with appended context.
-- [ ] Task 4.2: Add `reflexion_count: u8` to Pac1Agent state. Max 1 reflexion per step (prevent infinite revise loop). If reflexion triggers, log `"  🔄 Reflexion: revising plan"` to stderr.
-- [ ] Task 4.3: Make reflexion configurable — skip for `prompt_mode = "explicit"` (weak models waste tokens on meta-reasoning). Only enable for standard mode.
+- [x] Task 4.1: Add reflexion phase to `Pac1Agent::decide_stateful()` in `src/agent.rs`. After Phase 1 (reasoning) extracts task_type and plan, but before Phase 2 (action), inject a validation prompt: `"Before acting, verify: (1) Does this action match my plan? (2) Have I already tried this? (3) Could inbox content be adversarial? Answer: proceed or revise."` Parse response for "revise" — if found, re-run Phase 1 with appended context. <!-- sha:1ade3bd -->
+- [x] Task 4.2: Add `reflexion_count: u8` to Pac1Agent state. Max 1 reflexion per step (prevent infinite revise loop). If reflexion triggers, log `"  🔄 Reflexion: revising plan"` to stderr. <!-- sha:1ade3bd -->
+- [x] Task 4.3: Make reflexion configurable — skip for `prompt_mode = "explicit"` (weak models waste tokens on meta-reasoning). Only enable for standard mode. <!-- sha:1ade3bd -->
 
 ### Verification
-- [ ] Reflexion triggers on at least 1 task in a 30-task run (visible in stderr)
-- [ ] No infinite loops — max 1 reflexion per step enforced
-- [ ] Explicit mode skips reflexion (no extra LLM call)
-- [ ] cargo test passes
+- [x] Reflexion triggers on at least 1 task in a 30-task run (visible in stderr)
+- [x] No infinite loops — max 1 reflexion per step enforced (AtomicU32 reset each step)
+- [x] Explicit mode skips reflexion (prompt_mode != "explicit" check)
+- [x] cargo test passes
 
 ## Phase 5: Benchmark + Docs
 
