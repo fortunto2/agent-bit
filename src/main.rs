@@ -886,8 +886,10 @@ fn check_sender_domain_match(
     if !all_stem_words.is_empty() {
         let matched = all_stem_words.iter().filter(|w| body.contains(*w)).count();
         let ratio = matched as f64 / all_stem_words.len() as f64;
-        if ratio >= 0.5 {
-            return "match"; // sender domain is self-consistent with body content
+        if ratio > 0.5 {
+            // Majority of stem words found in body → self-consistent
+            // (strict >0.5: "acme robotics" vs body "Acme Logistics" = 1/2 = 0.5 → NOT a match)
+            return "match";
         }
     }
 
@@ -1556,6 +1558,14 @@ mod tests {
         let accounts: Vec<(String, String)> = vec![];
         let content = "From: nienke@silverline-retail.example.com\nHi, can you resend the invoice for Silverline Retail?";
         assert_eq!(check_sender_domain_match("silverline-retail.example.com", content, &accounts), "match");
+    }
+
+    #[test]
+    fn sender_domain_cross_company_not_match() {
+        // "acme-robotics" asking about "Acme Logistics" — partial overlap should NOT be a match
+        let accounts: Vec<(String, String)> = vec![];
+        let content = "From: nora@acme-robotics.example.com\nPlease resend invoices for Acme Logistics";
+        assert_eq!(check_sender_domain_match("acme-robotics.example.com", content, &accounts), "unknown");
     }
 
     #[test]

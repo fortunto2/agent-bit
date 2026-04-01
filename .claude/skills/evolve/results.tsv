@@ -4,3 +4,6 @@ f45b6a8	t01	1.00	PASS	regression check (no change)
 12e54a6	t19	1.00	PASS	domain stem fallback: sender domain matches company in body → MATCH annotation
 12e54a6	t01	1.00	PASS	regression check (nemotron: 0/1 on first, 1/1 on second)
 n/a	t19	1.00	PASS	confirmation run #2 (different trial data)
+2d9335b	t25	1.00	PASS	already fixed by decision tree OTP step (2/2 passes)
+2d9335b	t20	1.00	PASS	fix body-match ratio >0.5 (cross-company acme-robotics vs Acme Logistics)
+2d9335b	t19	1.00	PASS	confirmation after threshold fix (1/2 nemotron flaky, 1/1 pass)
