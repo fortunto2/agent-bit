@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 26 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider nemotron --dry-run       # pre-scan only (no LLM)
-cargo test                                        # 62 unit tests
+cargo test                                        # 69 unit tests
 ```
 
 ## Architecture
@@ -33,16 +33,24 @@ Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep)
 
 ## Key Design Decisions
 
-- **Pac1Agent** — custom Agent impl with 2-phase flow: structured CoT reasoning → routed action
+- **Pac1Agent** — custom Agent impl with 3-phase flow: structured CoT reasoning → reflexion → routed action
 - **Router pattern** — task_type (search/edit/analyze/security) filters available tools per step
+- **Tool pruning** — "analyze" route uses read-only tools on first step, full toolkit after ≥1 read
 - **Structured CoT** — reasoning tool requires task_type, security_assessment, known_facts, plan, done
+- **Reflexion** — validation step between reasoning and action (standard mode only). Asks model to verify plan before acting. Max 1 reflexion per step.
+- **Action ledger** — compact history of previous tool calls (max 10, 80 chars each) injected as context before reasoning. Prevents repeat searches.
+- **Adaptive nudge** — one-time "complete now" message injected when step > 50% budget without answer
+- **Few-shot trajectories** — 4 tool-call examples in both system prompts (CRM lookup, injection, OTP, non-CRM)
+- **SGR pre-grounding** — README.md from tree directories loaded as "CRM Schema" context (max 2000 chars)
 - **Search auto-expand** — SearchTool auto-reads ≤3 matching files inline (parent document retrieval)
-- **Semantic classifier** — ONNX all-MiniLM-L6-v2 embeddings classify inbox files into 5 categories (injection/crm/non_work/social_engineering/credential) via cosine similarity. Zero-shot, no training needed.
+- **Classifier ensemble** — ONNX ML classifier + structural signal detection (imperatives, system refs, base64, zero-width unicode). Weighted: 0.7*ML + 0.3*structural. ≥2 structural signals boost injection to min 0.5.
+- **Instruction classifier** — ML+structural ensemble also runs on task instruction text, blocking injection >0.5 and non_work >0.5 before agent loop
 - **CRM knowledge graph** — petgraph builds in-memory graph from PCM contacts/accounts at trial start. Validates sender email domain → SenderTrust (KNOWN/PLAUSIBLE/CROSS_COMPANY/UNKNOWN).
 - **Pre-scan security** — minimal threat_score (only HTML injection: `<script>`, `<iframe>`, `javascript:`). All semantic patterns handled by classifier.
 - **Post-read guard** — ReadTool/SearchTool append warnings on suspicious content
-- **prompt_mode** — "explicit" (decision tree) for weak models, "standard" for strong models
-- **Pre-grounding** — tree + AGENTS.md + classified inbox files + classification summary loaded before LLM loop
+- **prompt_mode** — "explicit" (decision tree, no reflexion) for weak models, "standard" (with reflexion) for strong models
+- **Pre-grounding** — tree + AGENTS.md + CRM schema + classified inbox files + classification summary loaded before LLM loop
+- **Loop threshold** — abort after 6 repeated actions (down from 10, PAC1 tasks are short)
 - **Auto-submit fallback** — guess_outcome scans full message history
 
 ## CLI Flags
