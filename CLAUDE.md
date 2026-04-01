@@ -33,6 +33,9 @@ Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep)
 
 ## Key Design Decisions
 
+- **Plan→Execute pipeline** — PlanningAgent (≤5 read-only steps) decomposes task into Plan{steps, tool_hints}, injected as system context for main executor
+- **Agent hooks** — `after_action()` records action ledger + runs structural injection check on read/search output. `prepare_context()` exposes step_count + ledger in ctx.custom
+- **Fuzzy search (strsim)** — Levenshtein distance matching in SearchTool (filename fallback) and CrmGraph (contact name fuzzy-find, sender trust upgrade)
 - **Pac1Agent** — custom Agent impl with 3-phase flow: structured CoT reasoning → reflexion → routed action
 - **Router pattern** — task_type (search/edit/analyze/security) filters available tools per step
 - **Tool pruning** — "analyze" route uses read-only tools on first step, full toolkit after ≥1 read
