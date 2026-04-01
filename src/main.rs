@@ -776,6 +776,25 @@ async fn run_agent(
         return Ok((msg.to_string(), String::new()));
     }
 
+    // === Level 1b: Classify instruction with ML + structural ensemble ===
+    {
+        let mut clf = classifier::InboxClassifier::try_load(&classifier::InboxClassifier::models_dir());
+        let fc = semantic_classify_inbox_file(instruction, clf.as_mut(), None);
+        eprintln!("  Instruction class: {} ({:.2})", fc.label, fc.confidence);
+        if fc.label == "injection" && fc.confidence > 0.5 {
+            let msg = "Blocked: instruction classified as injection attempt";
+            eprintln!("  ⛔ Instruction blocked: {}", msg);
+            pcm.answer(msg, "OUTCOME_DENIED_SECURITY", &[]).await.ok();
+            return Ok((msg.to_string(), String::new()));
+        }
+        if fc.label == "non_work" && fc.confidence > 0.5 {
+            let msg = "This request is unrelated to CRM/knowledge management work";
+            eprintln!("  ⛔ Instruction blocked: {}", msg);
+            pcm.answer(msg, "OUTCOME_NONE_CLARIFICATION", &[]).await.ok();
+            return Ok((msg.to_string(), String::new()));
+        }
+    }
+
     let tree_out = pcm.tree("/", 2).await.unwrap_or_else(|e| format!("(error: {})", e));
     let agents_md = pcm.read("AGENTS.md", false, 0, 0).await.unwrap_or_default();
     let ctx_time = pcm.context().await.unwrap_or_default();
