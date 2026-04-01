@@ -506,13 +506,17 @@ impl Tool for SearchTool {
         let a: SearchArgs = parse_args(&args)?;
         let raw = smart_search(&self.0, &a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
         let expanded = auto_expand_search(&self.0, raw).await;
-        Ok(ToolOutput::text(guard_content(expanded)))
+        let guarded = guard_content(expanded);
+        let match_count = guarded.lines().filter(|l| !l.is_empty() && !l.starts_with("$ ")).count();
+        Ok(ToolOutput::text(format!("{}\n\n[{} matching lines]", guarded, match_count)))
     }
     async fn execute_readonly(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let a: SearchArgs = parse_args(&args)?;
         let raw = smart_search(&self.0, &a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
         let expanded = auto_expand_search(&self.0, raw).await;
-        Ok(ToolOutput::text(guard_content(expanded)))
+        let guarded = guard_content(expanded);
+        let match_count = guarded.lines().filter(|l| !l.is_empty() && !l.starts_with("$ ")).count();
+        Ok(ToolOutput::text(format!("{}\n\n[{} matching lines]", guarded, match_count)))
     }
 }
 
