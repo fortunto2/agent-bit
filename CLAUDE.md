@@ -11,18 +11,22 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 26 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider nemotron --dry-run       # pre-scan only (no LLM)
-cargo test                                        # 36 unit tests
+cargo test                                        # 62 unit tests
 ```
 
 ## Architecture
 
 ```
-src/main.rs   — CLI, orchestration, pre-scan security, system prompts
-src/agent.rs  — Pac1Agent (Router + Structured CoT reasoning)
-src/bitgn.rs  — HarnessService client (Connect-RPC/JSON)
-src/pcm.rs    — PcmRuntime client (11 file-system RPCs)
-src/tools.rs  — 11 Tool implementations + security guard + search auto-expand
-src/config.rs — Provider config with prompt_mode (explicit/standard)
+src/main.rs       — CLI, orchestration, pre-scan security, system prompts
+src/agent.rs      — Pac1Agent (Router + Structured CoT reasoning)
+src/bitgn.rs      — HarnessService client (Connect-RPC/JSON)
+src/pcm.rs        — PcmRuntime client (11 file-system RPCs)
+src/tools.rs      — 11 Tool implementations + security guard + search auto-expand
+src/config.rs     — Provider config with prompt_mode (explicit/standard)
+src/classifier.rs — ONNX embedding classifier (all-MiniLM-L6-v2, cosine similarity)
+src/crm_graph.rs  — petgraph CRM knowledge graph (contacts, accounts, sender trust)
+scripts/export_model.py — Export ONNX model + tokenizer + class embeddings
+models/           — ONNX model files (gitignored, ~90MB, run export_model.py)
 ```
 
 Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep).
@@ -33,10 +37,12 @@ Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep)
 - **Router pattern** — task_type (search/edit/analyze/security) filters available tools per step
 - **Structured CoT** — reasoning tool requires task_type, security_assessment, known_facts, plan, done
 - **Search auto-expand** — SearchTool auto-reads ≤3 matching files inline (parent document retrieval)
-- **Pre-scan security** — rule-based threat_score before LLM (injection/non-CRM detection)
+- **Semantic classifier** — ONNX all-MiniLM-L6-v2 embeddings classify inbox files into 5 categories (injection/crm/non_work/social_engineering/credential) via cosine similarity. Zero-shot, no training needed.
+- **CRM knowledge graph** — petgraph builds in-memory graph from PCM contacts/accounts at trial start. Validates sender email domain → SenderTrust (KNOWN/PLAUSIBLE/CROSS_COMPANY/UNKNOWN).
+- **Pre-scan security** — minimal threat_score (only HTML injection: `<script>`, `<iframe>`, `javascript:`). All semantic patterns handled by classifier.
 - **Post-read guard** — ReadTool/SearchTool append warnings on suspicious content
 - **prompt_mode** — "explicit" (decision tree) for weak models, "standard" for strong models
-- **Pre-grounding** — tree + AGENTS.md + inbox files + security hints loaded before LLM loop
+- **Pre-grounding** — tree + AGENTS.md + classified inbox files + classification summary loaded before LLM loop
 - **Auto-submit fallback** — guess_outcome scans full message history
 
 ## CLI Flags
