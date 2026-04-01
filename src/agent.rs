@@ -5,6 +5,8 @@
 //! - Task-type based tool filtering (Router pattern)
 //! - Security-aware phase 2 context injection
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use sgr_agent::agent::{Agent, AgentError, Decision};
 use sgr_agent::client::LlmClient;
 use sgr_agent::context::AgentContext;
@@ -16,6 +18,8 @@ use sgr_agent::types::{Message, Role};
 pub struct Pac1Agent<C: LlmClient> {
     client: C,
     system_prompt: String,
+    /// Step counter for tool pruning (analyze route: read-only first, then full)
+    step_count: AtomicU32,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -23,6 +27,7 @@ impl<C: LlmClient> Pac1Agent<C> {
         Self {
             client,
             system_prompt: system_prompt.into(),
+            step_count: AtomicU32::new(0),
         }
     }
 }
@@ -179,6 +184,7 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         ));
 
         // ── Router: filter tools by task_type ──────────────────────────
+        let step = self.step_count.fetch_add(1, Ordering::SeqCst);
         let all_defs = tools.to_defs();
         let filtered: Vec<ToolDef> = match task_type.as_str() {
             "security" => all_defs
@@ -211,7 +217,17 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
                     )
                 })
                 .collect(),
-            // "analyze" or unknown → full toolkit
+            // "analyze" → read-only first pass, then full toolkit after ≥1 step
+            "analyze" | _ if task_type == "analyze" && step == 0 => all_defs
+                .into_iter()
+                .filter(|t| {
+                    matches!(
+                        t.name.as_str(),
+                        "read" | "search" | "find" | "list" | "tree" | "context" | "answer"
+                    )
+                })
+                .collect(),
+            // unknown or analyze with step > 0 → full toolkit
             _ => all_defs,
         };
 
