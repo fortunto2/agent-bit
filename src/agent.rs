@@ -5,6 +5,7 @@
 //! - Task-type based tool filtering (Router pattern)
 //! - Security-aware phase 2 context injection
 
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use sgr_agent::agent::{Agent, AgentError, Decision};
@@ -14,12 +15,17 @@ use sgr_agent::registry::ToolRegistry;
 use sgr_agent::tool::ToolDef;
 use sgr_agent::types::{Message, Role};
 
+/// Max entries in the action ledger (rotates oldest when full).
+const LEDGER_MAX: usize = 10;
+
 /// PAC1 agent with Router + Structured CoT.
 pub struct Pac1Agent<C: LlmClient> {
     client: C,
     system_prompt: String,
     /// Step counter for tool pruning (analyze route: read-only first, then full)
     step_count: AtomicU32,
+    /// Compact history of previous tool calls for LLM context
+    action_ledger: Mutex<Vec<String>>,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -28,6 +34,37 @@ impl<C: LlmClient> Pac1Agent<C> {
             client,
             system_prompt: system_prompt.into(),
             step_count: AtomicU32::new(0),
+            action_ledger: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Record a tool call in the action ledger.
+    pub fn record_action(&self, step: u32, tool_name: &str, key_arg: &str, result: &str) {
+        let mut ledger = self.action_ledger.lock().unwrap();
+        let mut entry = format!("[{}] {}({})", step, tool_name, key_arg);
+        if !result.is_empty() {
+            entry.push_str(" → ");
+            let remaining = 80usize.saturating_sub(entry.len());
+            if result.len() > remaining {
+                entry.push_str(&result[..remaining]);
+            } else {
+                entry.push_str(result);
+            }
+        }
+        entry.truncate(80);
+        if ledger.len() >= LEDGER_MAX {
+            ledger.remove(0);
+        }
+        ledger.push(entry);
+    }
+
+    /// Get formatted action ledger for injection into messages.
+    pub fn ledger_text(&self) -> Option<String> {
+        let ledger = self.action_ledger.lock().unwrap();
+        if ledger.is_empty() {
+            None
+        } else {
+            Some(format!("Previous actions:\n{}", ledger.join("\n")))
         }
     }
 }
