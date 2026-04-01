@@ -866,7 +866,7 @@ async fn run_agent(
         .register(tools::AnswerTool(pcm.clone()))
         .register(tools::ContextTool(pcm.clone()));
 
-    let agent = agent::Pac1Agent::with_max_steps(llm, &system_prompt, max_steps as u32);
+    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode);
     let mut ctx = AgentContext::new();
 
     // Pre-grounding: tree and date already have shell-like headers from pcm.rs
