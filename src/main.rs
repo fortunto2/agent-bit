@@ -900,14 +900,10 @@ async fn run_agent(
         auto_complete_threshold: 5,
     };
 
-    let mut current_step = 0u32;
     run_loop(
         &agent, &registry, &mut ctx, &mut messages, &loop_config,
         |event| match event {
-            LoopEvent::StepStart { step } => {
-                current_step = step as u32;
-                eprintln!("  [step {}/{}]", step, max_steps);
-            }
+            LoopEvent::StepStart { step } => eprintln!("  [step {}/{}]", step, max_steps),
             LoopEvent::Decision(ref d) => {
                 for tc in &d.tool_calls {
                     let args_str = tc.arguments.to_string();
@@ -916,11 +912,9 @@ async fn run_agent(
                 }
             }
             LoopEvent::ToolResult { name, output } => {
+                // Action ledger recording moved to after_action hook in Pac1Agent
                 let p = if output.len() > 150 { &output[..150] } else { &output };
                 eprintln!("    {} = {}", name, p.replace('\n', "↵"));
-                // Record in action ledger
-                let key_arg = &output[..output.len().min(40)];
-                agent.record_action(current_step, &name, "", key_arg);
             }
             LoopEvent::Completed { steps } => eprintln!("  ✓ Done in {} steps", steps),
             LoopEvent::LoopDetected { count } => eprintln!("  ⚠ Loop detected ({}x)", count),
