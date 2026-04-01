@@ -154,6 +154,11 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         }
         msgs.extend_from_slice(messages);
 
+        // Inject action ledger for context (helps avoid repeating searches)
+        if let Some(ledger) = self.ledger_text() {
+            msgs.push(Message::assistant(&ledger));
+        }
+
         // ── Phase 1: Structured CoT reasoning ──────────────────────────
         let reasoning_defs = vec![reasoning_tool_def()];
         let reasoning_calls = self.client.tools_call(&msgs, &reasoning_defs).await?;
