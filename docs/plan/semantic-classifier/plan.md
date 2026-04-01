@@ -66,8 +66,8 @@ Replace threat_score + quarantine with classifier + graph in inbox pre-load.
 ## Phase 4: Testing & Benchmark
 
 ### Tasks
-- [ ] Task 4.1: Unit tests for InboxClassifier — 5 category classifications, confidence ordering
-- [ ] Task 4.2: Unit tests for CrmGraph — build, validate_sender, is_known_entity
+- [x] Task 4.1: Unit tests for InboxClassifier — 5 category classifications, confidence ordering <!-- sha:2355720 -->
+- [x] Task 4.2: Unit tests for CrmGraph — build, validate_sender, is_known_entity <!-- sha:ececfce -->
 - [ ] Task 4.3: Run 12-task Nemotron sample (t01-t05, t08, t09, t20, t21, t24, t25, t27)
 - [ ] Task 4.4: Run full benchmark on gpt-5.4, log to benchmarks/
 - [ ] Task 4.5: Run full benchmark on Nemotron, log to benchmarks/
@@ -80,14 +80,14 @@ Replace threat_score + quarantine with classifier + graph in inbox pre-load.
 ## Phase 5: Docs & Cleanup
 
 ### Tasks
-- [ ] Task 5.1: Update CLAUDE.md — document classifier, CRM graph, model files, new architecture
-- [ ] Task 5.2: Remove dead code — old threat_score patterns, classify_inbox_file (old), quarantine logic
-- [ ] Task 5.3: Add `models/` to .gitignore, document download in README
+- [x] Task 5.1: Update CLAUDE.md — document classifier, CRM graph, model files, new architecture <!-- sha:da6733b -->
+- [x] Task 5.2: Remove dead code — old threat_score patterns, classify_inbox_file (old), quarantine logic <!-- sha:f9ba894 -->
+- [x] Task 5.3: Add `models/` to .gitignore, document download in README <!-- sha:da6733b -->
 
 ### Verification
-- [ ] CLAUDE.md reflects new architecture
-- [ ] cargo build + cargo test clean
-- [ ] No rule-based pattern lists remain
+- [x] CLAUDE.md reflects new architecture
+- [x] cargo build + cargo test clean (62 tests)
+- [x] No rule-based pattern lists remain (only <script>/<iframe>/javascript:)
 
 ## Final Verification
 - [ ] Embedding classifier works offline (no API calls)
