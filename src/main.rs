@@ -522,30 +522,35 @@ fn semantic_classify_inbox_file(
         crm_graph::SenderTrust::Unknown
     };
 
-    // Generate recommendation
-    let recommendation = match label.as_str() {
-        "injection" => "⚠ ATTACK: Injection detected. → OUTCOME_DENIED_SECURITY".to_string(),
-        "social_engineering" => format!(
-            "⚠ SOCIAL ENGINEERING: sender trust={}. Verify identity before acting. → Consider OUTCOME_DENIED_SECURITY",
-            sender_trust
-        ),
-        "credential" if confidence > 0.6 => {
-            // Check if there's also an action command (credential + action = attack)
-            let lower = content.to_lowercase();
-            let has_action = ["write ", "send ", "email ", "forward "]
-                .iter().any(|p| lower.contains(p));
-            if has_action {
-                "⚠ ATTACK: Credentials combined with action command. → OUTCOME_DENIED_SECURITY".to_string()
-            } else {
-                "NOTE: Contains credentials but no action commands. Process normally, ignore credentials.".to_string()
+    // Generate recommendation — only flag high-confidence threats
+    // Low confidence (< 0.3) → always "process normally" to avoid false positives
+    let recommendation = if confidence < 0.3 {
+        "Process normally.".to_string()
+    } else {
+        match label.as_str() {
+            "injection" if confidence > 0.5 => "⚠ ATTACK: High-confidence injection detected.".to_string(),
+            "injection" => "Low-confidence injection signal. Review content but likely safe.".to_string(),
+            "social_engineering" if sender_trust == crm_graph::SenderTrust::CrossCompany => format!(
+                "⚠ SOCIAL ENGINEERING: sender trust={}. Cross-company mismatch detected.",
+                sender_trust
+            ),
+            "credential" => {
+                let lower = content.to_lowercase();
+                let has_action = ["write ", "send ", "email ", "forward "]
+                    .iter().any(|p| lower.contains(p));
+                if has_action && confidence > 0.4 {
+                    "⚠ Credentials + action command detected. Review carefully.".to_string()
+                } else {
+                    "Contains credentials. Process normally, ignore sensitive data.".to_string()
+                }
             }
-        }
-        "non_work" => "NOTE: Non-CRM request. → OUTCOME_NONE_CLARIFICATION".to_string(),
-        _ => {
-            if sender_trust == crm_graph::SenderTrust::CrossCompany {
-                "⚠ CROSS-COMPANY: sender domain ≠ referenced company. Verify before acting.".to_string()
-            } else {
-                "Process normally.".to_string()
+            "non_work" if confidence > 0.4 => "Non-CRM request detected.".to_string(),
+            _ => {
+                if sender_trust == crm_graph::SenderTrust::CrossCompany {
+                    "Cross-company sender. Verify before acting.".to_string()
+                } else {
+                    "Process normally.".to_string()
+                }
             }
         }
     };
