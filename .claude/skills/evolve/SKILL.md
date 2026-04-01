@@ -5,7 +5,7 @@ license: MIT
 metadata:
   author: fortunto2
   version: "1.0.0"
-allowed-tools: Read, Grep, Bash, Glob, Write, Edit, Agent
+allowed-tools: Read, Grep, Bash, Glob, Write, Edit, TaskCreate, TaskUpdate
 argument-hint: "<task-id> [--provider nemotron] [--max-iterations 10]"
 ---
 
@@ -41,16 +41,24 @@ Takes a failing task, iteratively generates hypotheses, patches code, runs the t
 4. **Build before run** — always `cargo build` after patching. Compilation errors waste an iteration.
 5. **Planning phase doubles latency** — if the task is simple, the planning phase adds overhead. Consider whether the task actually needs planning or would benefit from classifier/prompt changes instead.
 
+## Scripts
+
+- `scripts/run-task.sh <provider> <task-id>` — build + run + extract score, logs to `/tmp/evolve-{task-id}.log`
+- `scripts/revert.sh` — discard all uncommitted changes (failed hypothesis)
+
 ## Loop
 
-Parse arguments: `$ARGUMENTS` → task_id (required), provider (default: nemotron), max_iterations (default: 10).
+Parse arguments: `$ARGUMENTS` → task_id (required), provider, max_iterations.
+Read `config.json` for defaults (provider, max_iterations, regression_tasks, score_threshold).
 
 ### Setup
 
-1. Read `references/strategies.md` for the hypothesis catalog
-2. Read `results.tsv` if it exists (prior evolution runs)
-3. Run the task once to establish baseline score
-4. Log baseline to `results.tsv`
+1. Read `config.json` for defaults
+2. Read `references/strategies.md` for the hypothesis catalog
+3. Read `results.tsv` if it exists (prior evolution runs)
+4. Run the task once to establish baseline: `bash scripts/run-task.sh {provider} {task_id}`
+5. Log baseline to `results.tsv`
+6. Create a TaskCreate for tracking: "Evolve {task_id}: {max_iterations} iterations"
 
 ### Iterate
 
@@ -67,19 +75,20 @@ LOOP (max_iterations):
    - cargo build — if fails, fix or discard immediately
 
 3. TEST — Run the target task:
-   cargo run -- --provider {provider} --task {task_id} 2>&1 | tee /tmp/evolve-{task_id}.log
+   bash scripts/run-task.sh {provider} {task_id}
    Extract score from output.
 
 4. EVALUATE
    - Score 1.0 → KEEP. Commit with message "evolve({task_id}): {hypothesis}". 
      Run t01 as regression check. If t01 fails → revert, discard.
    - Score 0.0 → run once more (Nemotron non-determinism check)
-     - Still 0.0 → DISCARD. git checkout -- . Revert all changes.
+     - Still 0.0 → DISCARD. bash scripts/revert.sh
    
 5. LOG — Append to results.tsv:
    commit/n-a  score  status(keep/discard/crash)  hypothesis-description
 
-6. If KEEP: celebrate, continue iterating for more improvements
+6. TaskUpdate iteration progress
+   If KEEP: continue iterating for more improvements
    If DISCARD: try next hypothesis from catalog
 ```
 

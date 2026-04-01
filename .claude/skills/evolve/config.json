@@ -1,0 +1,7 @@
+{
+  "default_provider": "nemotron",
+  "max_iterations": 10,
+  "regression_tasks": ["t01"],
+  "score_threshold": 1.0,
+  "double_check_on_fail": true
+}
