@@ -578,7 +578,7 @@ fn semantic_classify_inbox_file(
     graph: Option<&crm_graph::CrmGraph>,
 ) -> FileClassification {
     // ML classification
-    let (label, confidence) = if let Some(clf) = classifier {
+    let (ml_label, ml_confidence) = if let Some(clf) = classifier {
         match clf.classify(content) {
             Ok(scores) if !scores.is_empty() => (scores[0].0.clone(), scores[0].1),
             _ => ("crm".to_string(), 0.5), // fallback
@@ -593,6 +593,25 @@ fn semantic_classify_inbox_file(
         } else {
             ("crm".to_string(), 0.6)
         }
+    };
+
+    // Structural signal detection
+    let structural_score = structural_injection_score(content);
+
+    // Weighted ensemble: 0.7 * ML + 0.3 * structural
+    // If ≥2 structural signals (score ≥ 0.30), boost injection to min 0.5
+    let (label, confidence) = if structural_score >= 0.30 && ml_label != "injection" {
+        // Strong structural signals override ML — likely injection
+        let boosted = (0.7 * ml_confidence + 0.3 * structural_score).max(0.5);
+        ("injection".to_string(), boosted)
+    } else if ml_label == "injection" {
+        // ML says injection — blend with structural
+        let blended = 0.7 * ml_confidence + 0.3 * structural_score;
+        ("injection".to_string(), blended)
+    } else {
+        // No injection signals — use ML result with minor structural adjustment
+        let blended = 0.7 * ml_confidence + 0.3 * (1.0 - structural_score);
+        (ml_label, blended.min(ml_confidence)) // don't inflate non-injection confidence
     };
 
     // Sender trust from graph
