@@ -275,6 +275,15 @@ impl CrmGraph {
         if domain_known {
             SenderTrust::Plausible
         } else {
+            // Fuzzy name match: if sender name closely matches a known contact, upgrade to Plausible
+            let sender_name = email.split('@').next().unwrap_or("")
+                .replace('.', " ").replace('_', " ").replace('-', " ");
+            if sender_name.len() >= 3 {
+                if let Some((matched, score)) = self.fuzzy_find_contact(&sender_name) {
+                    eprintln!("    🔍 Fuzzy sender match: {} ≈ {} ({:.2})", sender_name, matched, score);
+                    return SenderTrust::Plausible;
+                }
+            }
             SenderTrust::Unknown
         }
     }
@@ -282,6 +291,23 @@ impl CrmGraph {
     /// Check if a name appears as a contact or account in the graph.
     pub fn is_known_entity(&self, name: &str) -> bool {
         self.name_index.contains_key(&name.to_lowercase())
+    }
+
+    /// Fuzzy find a contact by name using Levenshtein distance.
+    /// Returns (name, score) if best match > threshold (default 0.7).
+    pub fn fuzzy_find_contact(&self, query: &str) -> Option<(String, f64)> {
+        if query.len() < 3 {
+            return None;
+        }
+        let query_lower = query.to_lowercase();
+        let mut best: Option<(String, f64)> = None;
+        for name in self.name_index.keys() {
+            let score = strsim::normalized_levenshtein(&query_lower, name);
+            if score > 0.7 && (best.is_none() || score > best.as_ref().unwrap().1) {
+                best = Some((name.clone(), score));
+            }
+        }
+        best
     }
 
     /// Number of nodes in the graph.
@@ -352,6 +378,35 @@ mod tests {
         g.ingest_contact(r#"{"name": "Test User", "email": "test@example.com", "company": "TestCo"}"#);
         assert!(g.is_known_entity("Test User"));
         assert_eq!(g.validate_sender("test@example.com", None), SenderTrust::Known);
+    }
+
+    #[test]
+    fn fuzzy_find_exact_match() {
+        let g = build_test_graph();
+        let result = g.fuzzy_find_contact("john smith");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().0, "john smith");
+    }
+
+    #[test]
+    fn fuzzy_find_close_match() {
+        let g = build_test_graph();
+        // "Jon Smith" vs "john smith" — Levenshtein should be > 0.7
+        let result = g.fuzzy_find_contact("Jon Smith");
+        assert!(result.is_some(), "Jon Smith should fuzzy-match John Smith");
+    }
+
+    #[test]
+    fn fuzzy_find_no_match() {
+        let g = build_test_graph();
+        let result = g.fuzzy_find_contact("Completely Different Name");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn fuzzy_find_short_query_none() {
+        let g = build_test_graph();
+        assert!(g.fuzzy_find_contact("Jo").is_none());
     }
 
     #[test]
