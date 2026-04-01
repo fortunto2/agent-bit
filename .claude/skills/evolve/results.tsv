@@ -1,3 +1,5 @@
 commit	task	score	status	description
 f45b6a8	t30	1.00	PASS	decision tree: data queries on external platforms = CRM work + search match count + channel hint
 f45b6a8	t01	1.00	PASS	regression check (no change)
+12e54a6	t19	1.00	PASS	domain stem fallback: sender domain matches company in body → MATCH annotation
+12e54a6	t01	1.00	PASS	regression check (nemotron: 0/1 on first, 1/1 on second)
