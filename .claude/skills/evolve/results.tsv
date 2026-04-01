@@ -1,1 +1,3 @@
 commit	task	score	status	description
+f45b6a8	t30	1.00	PASS	decision tree: data queries on external platforms = CRM work + search match count + channel hint
+f45b6a8	t01	1.00	PASS	regression check (no change)
