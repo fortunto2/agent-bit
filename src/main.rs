@@ -4,6 +4,8 @@ use std::sync::atomic::Ordering;
 use anyhow::{Context, Result};
 use clap::Parser;
 use sgr_agent::agent_loop::{LoopConfig, LoopEvent, run_loop};
+use sgr_agent::agents::clarification::PlanTool;
+use sgr_agent::agents::planning::{Plan, PlanningAgent};
 use sgr_agent::context::AgentContext;
 use sgr_agent::registry::ToolRegistry;
 use sgr_agent::types::{LlmConfig, Message, Role};
