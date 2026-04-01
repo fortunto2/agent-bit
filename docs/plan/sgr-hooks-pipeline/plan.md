@@ -57,9 +57,9 @@ Add Levenshtein distance matching to SearchTool and CrmGraph for better name res
 ## Phase 4: Benchmark + Docs
 
 ### Tasks
-- [ ] Task 4.1: Run 8-task quick sample on Nemotron, verify no regression
-- [ ] Task 4.2: Update CLAUDE.md — document hooks, planning pipeline, fuzzy search
-- [ ] Task 4.3: Remove dead code — any inline logic that was moved to hooks
+- [~] Task 4.1: Run 8-task quick sample on Nemotron — in progress (2/8 done: t01=1.0, t02=1.0, planning phase ~2x slower)
+- [x] Task 4.2: Update CLAUDE.md — document hooks, planning pipeline, fuzzy search <!-- sha:54a8af2 -->
+- [x] Task 4.3: No dead code to remove — hooks add new logic, don't replace inline (Agent trait limitation) <!-- sha:54a8af2 -->
 
 ### Verification
 - [ ] Nemotron sample ≥ 6/8
