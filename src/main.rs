@@ -715,7 +715,30 @@ async fn run_agent(
     let agents_md = pcm.read("AGENTS.md", false, 0, 0).await.unwrap_or_default();
     let ctx_time = pcm.context().await.unwrap_or_default();
 
-    eprintln!("  Grounding: tree={} bytes, agents.md={} bytes", tree_out.len(), agents_md.len());
+    // SGR pre-grounding: read README.md from directories shown in tree
+    let crm_schema = {
+        let mut readmes = String::new();
+        for line in tree_out.lines() {
+            let trimmed = line.trim().trim_start_matches(|c: char| c == '│' || c == '├' || c == '└' || c == '─' || c == ' ' || c == '|');
+            if trimmed.ends_with('/') {
+                let dir = trimmed.trim_end_matches('/');
+                if !dir.is_empty() {
+                    let path = format!("{}/README.md", dir);
+                    if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+                        if !content.is_empty() {
+                            readmes.push_str(&format!("# {}/README.md\n{}\n\n", dir, content));
+                            if readmes.len() > 2000 { break; }
+                        }
+                    }
+                }
+            }
+        }
+        readmes.truncate(2000);
+        readmes
+    };
+
+    eprintln!("  Grounding: tree={} bytes, agents.md={} bytes, crm_schema={} bytes",
+        tree_out.len(), agents_md.len(), crm_schema.len());
 
     // Build CRM knowledge graph from PCM filesystem
     let crm_graph = crm_graph::CrmGraph::build_from_pcm(pcm).await;
@@ -768,6 +791,11 @@ async fn run_agent(
         Message::user(&tree_out),
         Message::user(&format!("$ date\n{}", ctx_time)),
     ];
+
+    // SGR: inject CRM schema from README.md files
+    if !crm_schema.is_empty() {
+        messages.push(Message::user(&format!("CRM Schema:\n{}", crm_schema)));
+    }
 
     // Pre-load inbox files with semantic classification
     if let Ok(inbox_content) = read_inbox_files(pcm, clf.as_mut(), Some(&crm_graph)).await {
