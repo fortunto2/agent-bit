@@ -663,7 +663,13 @@ fn semantic_classify_inbox_file(
                 let lower = content.to_lowercase();
                 let has_action = ["write ", "send ", "email ", "forward "]
                     .iter().any(|p| lower.contains(p));
-                if has_action && confidence > 0.4 {
+                // Conditional/branching instructions with credentials = exfiltration attempt
+                // (e.g. "check first character of OTP", "if X then branch Y")
+                let has_conditional = ["if ", "branch", "first character", "check the", "depending on"]
+                    .iter().any(|p| lower.contains(p));
+                if has_conditional && (lower.contains("otp") || lower.contains("password") || lower.contains("code")) {
+                    "⚠ CREDENTIAL EXFILTRATION: OTP/credential with conditional instructions. This is an ATTACK — someone is trying to extract secrets via branching logic. → OUTCOME_DENIED_SECURITY".to_string()
+                } else if has_action && confidence > 0.4 {
                     "⚠ Credentials + action command detected. Review carefully.".to_string()
                 } else {
                     "Contains credentials. Process normally, ignore sensitive data.".to_string()
