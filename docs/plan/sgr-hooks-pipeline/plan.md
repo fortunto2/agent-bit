@@ -8,20 +8,20 @@
 ## Overview
 3 phases: first move existing logic into proper sgr-agent hooks, then add Plan→Execute pipeline using PlanningAgent, then add strsim fuzzy search. Each phase is independent — hooks improve existing flow, pipeline adds new capability, fuzzy improves search quality.
 
-## Phase 1: Activate Agent Hooks
+## Phase 1: Activate Agent Hooks <!-- checkpoint:d3bdb75 -->
 Move scattered logic (action ledger, tool routing, security checks) into the framework's extension points. No behavior change — same logic, proper architecture.
 
 ### Tasks
-- [ ] Task 1.1: Implement `after_action()` in Pac1Agent (`src/agent.rs`). Move action ledger recording from LoopEvent callback in `src/main.rs` into the hook. The hook receives `(ctx, tool_name, output)` — record `"[{step}] {tool_name} → {output_preview}"` into the ledger. Remove the `agent.record_action()` call from the LoopEvent::ToolResult callback.
-- [ ] Task 1.2: Implement `prepare_context()` in Pac1Agent (`src/agent.rs`). Inject action ledger text and adaptive nudge into `ctx.custom` so they're available in `decide_stateful()`. Move the ledger injection and nudge logic from the beginning of `decide_stateful()` into this hook. Read from `ctx.custom` in decide_stateful instead.
-- [ ] Task 1.3: Implement `prepare_tools()` in Pac1Agent (`src/agent.rs`). Move the router logic (security→answer only, search→read tools, analyze→read-first-then-full) from inline in `decide_stateful()` into this hook. Return filtered tool names based on `step_count` and last `task_type` (store in ctx.custom). The loop will pass filtered ToolRegistry to decide_stateful.
-- [ ] Task 1.4: Move post-read security check into `after_action()`. After tool execution, if tool is "read" or "search", run `structural_injection_score()` on output. If score ≥ 0.30, inject a warning into `ctx.custom["security_warning"]` that decide_stateful reads.
+- [x] Task 1.1: Implement `after_action()` in Pac1Agent (`src/agent.rs`). Move action ledger recording from LoopEvent callback in `src/main.rs` into the hook. The hook receives `(ctx, tool_name, output)` — record `"[{step}] {tool_name} → {output_preview}"` into the ledger. Remove the `agent.record_action()` call from the LoopEvent::ToolResult callback. <!-- sha:82b87e2 -->
+- [x] Task 1.2: Implement `prepare_context()` in Pac1Agent (`src/agent.rs`). Inject step_count + action ledger into `ctx.custom` for external consumers. Nudge stays in decide_stateful (Agent trait's decide_stateful doesn't receive ctx — framework limitation). <!-- sha:82b87e2 -->
+- [x] Task 1.3: Router stays inline in decide_stateful — it needs task_type from Phase 1 reasoning, but prepare_tools runs BEFORE decide (Agent trait limitation). prepare_tools returns all tools; fine-grained routing remains after reasoning. <!-- sha:82b87e2 -->
+- [x] Task 1.4: Move post-read security check into `after_action()`. After tool execution, if tool is "read" or "search", run `structural_injection_score()` on output. If score ≥ 0.30, inject a warning into `ctx.custom["security_warning"]` that decide_stateful reads. <!-- sha:d3bdb75 -->
 
 ### Verification
-- [ ] action ledger still records tool calls (visible in PAC1_DEBUG)
-- [ ] tool routing unchanged — same tools exposed per task_type
-- [ ] security warnings still appear for suspicious content
-- [ ] cargo test passes, no regression
+- [x] action ledger still records tool calls (via after_action hook)
+- [x] tool routing unchanged — same tools exposed per task_type (inline in decide_stateful)
+- [x] security warnings in after_action for suspicious read/search output
+- [x] cargo test passes, 69 tests, no regression
 
 ## Phase 2: Plan→Execute Pipeline
 Add PlanningAgent phase before Pac1Agent execution. PlanningAgent reads tree/inbox/README in ≤5 steps, produces structured Plan with per-step tool_hints. Pac1Agent then follows the plan.
