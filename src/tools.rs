@@ -121,7 +121,7 @@ struct ReadArgs {
 #[async_trait]
 impl Tool for ReadTool {
     fn name(&self) -> &str { "read" }
-    fn description(&self) -> &str { "Read file contents. Supports line ranges with start_line/end_line and line numbers with number=true" }
+    fn description(&self) -> &str { "Read file contents. Use number=true to see line numbers (like cat -n). Use start_line/end_line to read a specific range (like sed -n '5,10p'). For large files: first read with number=true, then read specific ranges." }
     fn is_read_only(&self) -> bool { true }
     fn parameters_schema(&self) -> Value {
         serde_json::json!({
@@ -162,15 +162,15 @@ struct WriteArgs {
 #[async_trait]
 impl Tool for WriteTool {
     fn name(&self) -> &str { "write" }
-    fn description(&self) -> &str { "Write content to a file. Use start_line/end_line for partial replacement" }
+    fn description(&self) -> &str { "Write content to a file. Without start_line/end_line: overwrites entire file. With start_line and end_line: replaces only those lines (like sed). Example: start_line=5, end_line=7 replaces lines 5-7 with content. Use read with number=true first to see line numbers." }
     fn parameters_schema(&self) -> Value {
         serde_json::json!({
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "File path" },
                 "content": { "type": "string", "description": "Content to write" },
-                "start_line": { "type": "integer", "description": "Replace from line (0 = full overwrite)" },
-                "end_line": { "type": "integer", "description": "Replace to line" }
+                "start_line": { "type": "integer", "description": "First line to replace (1-indexed). Omit for full overwrite." },
+                "end_line": { "type": "integer", "description": "Last line to replace (inclusive). Use with start_line for partial edits." }
             },
             "required": ["path", "content"]
         })
@@ -178,7 +178,14 @@ impl Tool for WriteTool {
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: WriteArgs = parse_args(&args)?;
         self.0.write(&a.path, &a.content, a.start_line, a.end_line).await.map_err(pcm_err)?;
-        Ok(ToolOutput::text(format!("Written to {}", a.path)))
+        let msg = if a.start_line > 0 && a.end_line > 0 {
+            format!("Replaced lines {}-{} in {}", a.start_line, a.end_line, a.path)
+        } else if a.start_line > 0 {
+            format!("Replaced from line {} in {}", a.start_line, a.path)
+        } else {
+            format!("Written to {}", a.path)
+        };
+        Ok(ToolOutput::text(msg))
     }
 }
 
