@@ -35,14 +35,6 @@ pub struct Pac1Agent<C: LlmClient> {
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
-    pub fn new(client: C, system_prompt: impl Into<String>) -> Self {
-        Self::with_max_steps(client, system_prompt, 20)
-    }
-
-    pub fn with_max_steps(client: C, system_prompt: impl Into<String>, max_steps: u32) -> Self {
-        Self::with_config(client, system_prompt, max_steps, "standard")
-    }
-
     pub fn with_config(client: C, system_prompt: impl Into<String>, max_steps: u32, prompt_mode: &str) -> Self {
         Self {
             client,
