@@ -8,20 +8,20 @@
 ## Overview
 7 techniques implemented in 4 phases. Each phase is independently testable. Order: cheapest wins first (prompts, context), then agent loop changes, then ensemble/reflexion.
 
-## Phase 1: Context Engineering (Few-shot + SGR + Pruning)
+## Phase 1: Context Engineering (Few-shot + SGR + Pruning) <!-- checkpoint:1e51666 -->
 Low-effort, high-impact changes to what the LLM sees before the agent loop.
 
 ### Tasks
-- [ ] Task 1.1: Add few-shot tool-call trajectories to both system prompts in `src/main.rs`. 4 trajectories: (a) CRM lookup: search→read→answer OK, (b) injection detection: read inbox→answer DENIED, (c) OTP without action: read inbox→answer OK, (d) non-CRM: answer CLARIFICATION. Include actual tool names and JSON args.
-- [ ] Task 1.2: SGR pre-grounding — in `run_agent()` (`src/main.rs`), after tree but before inbox, read README.md from every directory shown in tree output. Concat as `"CRM Schema:\n{readmes}"` message. Cap at 2000 chars total to avoid context bloat.
-- [ ] Task 1.3: Split "analyze" route in `src/agent.rs` into two sub-phases. First pass: read-only tools (read, search, find, list, tree, context) + answer. If agent calls write/delete/mkdir/move → inject hint "Use read/search first to understand the data, then plan edits." Second pass (after ≥1 read): full edit tools available. Implement via step counter in Pac1Agent state.
-- [ ] Task 1.4: Reduce `LoopConfig.loop_abort_threshold` from 10 to 6 in `src/main.rs` (PAC1 tasks are short, 10 is too generous for 20-step budget).
+- [x] Task 1.1: Add few-shot tool-call trajectories to both system prompts in `src/main.rs`. 4 trajectories: (a) CRM lookup: search→read→answer OK, (b) injection detection: read inbox→answer DENIED, (c) OTP without action: read inbox→answer OK, (d) non-CRM: answer CLARIFICATION. Include actual tool names and JSON args. <!-- sha:49d4ed7 -->
+- [x] Task 1.2: SGR pre-grounding — in `run_agent()` (`src/main.rs`), after tree but before inbox, read README.md from every directory shown in tree output. Concat as `"CRM Schema:\n{readmes}"` message. Cap at 2000 chars total to avoid context bloat. <!-- sha:c12afa2 -->
+- [x] Task 1.3: Split "analyze" route in `src/agent.rs` into two sub-phases. First pass: read-only tools (read, search, find, list, tree, context) + answer. If agent calls write/delete/mkdir/move → inject hint "Use read/search first to understand the data, then plan edits." Second pass (after ≥1 read): full edit tools available. Implement via step counter in Pac1Agent state. <!-- sha:c4c51f5 -->
+- [x] Task 1.4: Reduce `LoopConfig.loop_abort_threshold` from 10 to 6 in `src/main.rs` (PAC1 tasks are short, 10 is too generous for 20-step budget). <!-- sha:1e51666 -->
 
 ### Verification
-- [ ] Both prompts contain 4 trajectory examples with tool names
-- [ ] README.md content appears in pre-grounding messages (verify with PAC1_DEBUG=1)
-- [ ] "analyze" route first step exposes ≤8 tools
-- [ ] cargo test passes
+- [x] Both prompts contain 4 trajectory examples with tool names
+- [x] README.md content appears in pre-grounding messages (verify with PAC1_DEBUG=1)
+- [x] "analyze" route first step exposes ≤8 tools
+- [x] cargo test passes
 
 ## Phase 2: Action Ledger + Adaptive Nudge
 Give the model explicit memory and step-budget awareness.
