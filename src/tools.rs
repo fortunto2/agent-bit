@@ -396,6 +396,34 @@ async fn smart_search(pcm: &PcmClient, root: &str, pattern: &str, limit: i32) ->
         }
     }
 
+    // Final fallback: Levenshtein distance on directory listing filenames
+    if !is_regex(pattern) && pattern.len() >= 3 {
+        if let Ok(listing) = pcm.list(root).await {
+            let query_lower = pattern.to_lowercase();
+            let mut best_match: Option<(String, f64)> = None;
+            for line in listing.lines() {
+                let filename = line.trim().trim_end_matches('/');
+                if filename.is_empty() || filename.starts_with('$') {
+                    continue;
+                }
+                // Compare query against filename (without extension)
+                let name_part = filename.rsplit('.').last().unwrap_or(filename);
+                let name_lower = name_part.to_lowercase().replace('-', " ").replace('_', " ");
+                let score = strsim::normalized_levenshtein(&query_lower, &name_lower);
+                if score > 0.7 && (best_match.is_none() || score > best_match.as_ref().unwrap().1) {
+                    best_match = Some((format!("{}/{}", root, filename), score));
+                }
+            }
+            if let Some((path, score)) = best_match {
+                eprintln!("    🔍 strsim match: {} (score={:.2})", path, score);
+                let r = pcm.search(root, &path.rsplit('/').next().unwrap_or(&path).replace(".md", ""), limit).await?;
+                if has_matches(&r) {
+                    return Ok(r);
+                }
+            }
+        }
+    }
+
     // Return original (empty) result
     Ok(result)
 }
