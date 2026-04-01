@@ -104,6 +104,28 @@ pub struct SubmitRunResponse {
     pub state: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTrialResponse {
+    pub trial_id: String,
+    pub instruction: String,
+    pub task_id: String,
+    pub score: Option<f32>,
+    #[serde(default)]
+    pub score_detail: Vec<String>,
+    pub state: String,
+    #[serde(default)]
+    pub logs: Vec<TrialLog>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrialLog {
+    pub time: String,
+    pub text: String,
+    pub kind: String,
+}
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 impl HarnessClient {
@@ -202,5 +224,10 @@ impl HarnessClient {
 
     pub async fn submit_run(&self, run_id: &str) -> Result<SubmitRunResponse> {
         self.call("SubmitRun", &json!({"runId": run_id})).await
+    }
+
+    /// Get trial details including activity logs (for debugging).
+    pub async fn get_trial(&self, trial_id: &str) -> Result<GetTrialResponse> {
+        self.call("GetTrial", &json!({"trialId": trial_id})).await
     }
 }

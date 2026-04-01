@@ -934,10 +934,14 @@ async fn run_agent(
     } else {
         SYSTEM_PROMPT_STANDARD
     };
-    let system_prompt = template.replace(
+    let hint = std::env::var("HINT").unwrap_or_default();
+    let mut system_prompt = template.replace(
         "{agents_md}",
         if agents_md.is_empty() { "" } else { &agents_md },
     );
+    if !hint.is_empty() {
+        system_prompt.push_str(&format!("\n\n{}", hint));
+    }
 
     let config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
     let llm = Llm::new(&config);
