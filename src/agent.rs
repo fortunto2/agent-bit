@@ -22,19 +22,28 @@ const LEDGER_MAX: usize = 10;
 pub struct Pac1Agent<C: LlmClient> {
     client: C,
     system_prompt: String,
+    max_steps: u32,
     /// Step counter for tool pruning (analyze route: read-only first, then full)
     step_count: AtomicU32,
     /// Compact history of previous tool calls for LLM context
     action_ledger: Mutex<Vec<String>>,
+    /// Whether the adaptive nudge has been injected (one-time)
+    nudge_sent: AtomicU32, // 0 = not sent, 1 = sent
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
     pub fn new(client: C, system_prompt: impl Into<String>) -> Self {
+        Self::with_max_steps(client, system_prompt, 20)
+    }
+
+    pub fn with_max_steps(client: C, system_prompt: impl Into<String>, max_steps: u32) -> Self {
         Self {
             client,
             system_prompt: system_prompt.into(),
+            max_steps,
             step_count: AtomicU32::new(0),
             action_ledger: Mutex::new(Vec::new()),
+            nudge_sent: AtomicU32::new(0),
         }
     }
 
@@ -157,6 +166,19 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         // Inject action ledger for context (helps avoid repeating searches)
         if let Some(ledger) = self.ledger_text() {
             msgs.push(Message::assistant(&ledger));
+        }
+
+        // Adaptive nudge at >50% budget (one-time)
+        let step = self.step_count.load(Ordering::SeqCst);
+        if step > self.max_steps / 2
+            && self.nudge_sent.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+        {
+            let nudge = format!(
+                "You have used {}/{} steps. Complete the task now or explain why you cannot.",
+                step, self.max_steps
+            );
+            eprintln!("  ⏰ Nudge: {}", nudge);
+            msgs.push(Message::user(&nudge));
         }
 
         // ── Phase 1: Structured CoT reasoning ──────────────────────────
