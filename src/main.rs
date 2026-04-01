@@ -7,6 +7,7 @@ use sgr_agent::agent_loop::{LoopConfig, LoopEvent, run_loop};
 use sgr_agent::agents::clarification::PlanTool;
 use sgr_agent::agents::planning::{Plan, PlanningAgent};
 use sgr_agent::context::AgentContext;
+use sgr_agent::evolution::{self, EvolutionEntry, RunStats};
 use sgr_agent::registry::ToolRegistry;
 use sgr_agent::types::{LlmConfig, Message, Role};
 use sgr_agent::Llm;
@@ -999,10 +1000,15 @@ async fn run_agent(
         auto_complete_threshold: 5,
     };
 
-    run_loop(
+    // Collect RunStats from loop events for evolution tracking
+    let mut run_stats = RunStats::default();
+    let result = run_loop(
         &agent, &registry, &mut ctx, &mut messages, &loop_config,
         |event| match event {
-            LoopEvent::StepStart { step } => eprintln!("  [step {}/{}]", step, max_steps),
+            LoopEvent::StepStart { step } => {
+                run_stats.steps = step;
+                eprintln!("  [step {}/{}]", step, max_steps);
+            }
             LoopEvent::Decision(ref d) => {
                 for tc in &d.tool_calls {
                     let args_str = tc.arguments.to_string();
@@ -1011,18 +1017,57 @@ async fn run_agent(
                 }
             }
             LoopEvent::ToolResult { name, output } => {
-                // Action ledger recording moved to after_action hook in Pac1Agent
                 let p = if output.len() > 150 { &output[..150] } else { &output };
                 eprintln!("    {} = {}", name, p.replace('\n', "↵"));
+                run_stats.successful_calls += 1;
+                run_stats.cost_chars += output.len();
             }
-            LoopEvent::Completed { steps } => eprintln!("  ✓ Done in {} steps", steps),
-            LoopEvent::LoopDetected { count } => eprintln!("  ⚠ Loop detected ({}x)", count),
-            LoopEvent::Error(e) => eprintln!("  ⚠ Error: {}", e),
+            LoopEvent::Completed { steps } => {
+                run_stats.completed = true;
+                run_stats.steps = steps;
+                eprintln!("  ✓ Done in {} steps", steps);
+            }
+            LoopEvent::LoopDetected { count } => {
+                run_stats.loop_warnings += 1;
+                if count >= loop_config.loop_abort_threshold {
+                    run_stats.loop_aborts += 1;
+                }
+                eprintln!("  ⚠ Loop detected ({}x)", count);
+            }
+            LoopEvent::Error(e) => {
+                run_stats.tool_errors += 1;
+                eprintln!("  ⚠ Error: {}", e);
+            }
             _ => {}
         },
     )
-    .await
-    .context("agent loop")?;
+    .await;
+
+    // Evolution: score + evaluate + log
+    let eff_score = evolution::score(&run_stats);
+    let improvements = evolution::evaluate(&run_stats);
+    eprintln!("  📊 Efficiency: {:.2} | steps={} errors={} loops={}",
+        eff_score, run_stats.steps, run_stats.tool_errors, run_stats.loop_warnings);
+    for imp in &improvements {
+        eprintln!("  💡 [P{}] {}: {}", imp.priority, imp.title, imp.reason);
+    }
+
+    // Log to evolution.jsonl
+    let _ = evolution::log_evolution(".agent", &EvolutionEntry {
+        ts: {
+            use std::time::SystemTime;
+            let secs = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+            format!("{}", secs)
+        },
+        commit: String::new(), // filled by /evolve skill if running
+        title: instruction[..instruction.len().min(80)].to_string(),
+        score_before: evolution::baseline_score(".agent"),
+        score_after: eff_score,
+        status: if run_stats.completed { "complete" } else { "incomplete" }.into(),
+        stats: run_stats,
+    });
+
+    result.context("agent loop")?;
 
     let last_assistant = messages
         .iter().rev()
