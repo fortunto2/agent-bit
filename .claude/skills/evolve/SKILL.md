@@ -56,9 +56,13 @@ Read `config.json` for defaults (provider, max_iterations, regression_tasks, sco
 1. Read `config.json` for defaults
 2. Read `references/strategies.md` for the hypothesis catalog
 3. Read `results.tsv` if it exists (prior evolution runs)
-4. Run the task once to establish baseline: `bash scripts/run-task.sh {provider} {task_id}`
-5. Log baseline to `results.tsv`
-6. Create a TaskCreate for tracking: "Evolve {task_id}: {max_iterations} iterations"
+4. Read `.agent/evolution.jsonl` if it exists — sgr-agent auto-logs RunStats (steps, errors, loops, efficiency score) and Improvement[] suggestions after each task run. Use these to inform hypotheses.
+5. Run the task once to establish baseline: `bash scripts/run-task.sh {provider} {task_id}`
+6. After baseline run, read `.agent/evolution.jsonl` — the last entry has auto-diagnostics:
+   - `score_after` < 0.5 → agent is inefficient (too many steps/errors)
+   - Check stderr for `💡` lines — these are auto-suggested improvements from `evolution::evaluate()`
+7. Log baseline to `results.tsv`
+8. Create a TaskCreate for tracking: "Evolve {task_id}: {max_iterations} iterations"
 
 ### Iterate
 
