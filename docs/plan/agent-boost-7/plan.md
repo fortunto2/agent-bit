@@ -36,19 +36,19 @@ Give the model explicit memory and step-budget awareness.
 - [x] Nudge message appears at step 11+ (with max_steps=20)
 - [x] No regression on t01, t09, t16 (simple tasks should not be affected)
 
-## Phase 3: Classifier Ensemble + Structural Signals
+## Phase 3: Classifier Ensemble + Structural Signals <!-- checkpoint:f263c14 -->
 Combine ML embedding scores with structural content analysis for robust classification.
 
 ### Tasks
-- [ ] Task 3.1: Add structural signal detection to `semantic_classify_inbox_file()` in `src/main.rs`. Detect: (a) imperative verbs addressing "you" ("ignore your", "forget your", "override your"), (b) references to system internals ("AGENTS.MD", "system prompt", "your instructions"), (c) base64 encoded strings (len>50, matches `[A-Za-z0-9+/=]{50,}`), (d) zero-width unicode characters. Each signal adds +0.15 to injection confidence.
-- [ ] Task 3.2: Weighted ensemble scoring — combine ML classifier confidence with structural signals. Formula: `final_score = 0.7 * ml_score + 0.3 * structural_score`. If structural signals detect ≥2 injection markers, boost injection label to min 0.5 regardless of ML score.
-- [ ] Task 3.3: Add `classify_instruction()` — run the same classifier on the task instruction text (not just inbox). If instruction itself is injection/non_work with confidence > 0.5, use that for pre-scan instead of the minimal HTML-only threat_score.
+- [x] Task 3.1: Add structural signal detection to `semantic_classify_inbox_file()` in `src/main.rs`. Detect: (a) imperative verbs addressing "you" ("ignore your", "forget your", "override your"), (b) references to system internals ("AGENTS.MD", "system prompt", "your instructions"), (c) base64 encoded strings (len>50, matches `[A-Za-z0-9+/=]{50,}`), (d) zero-width unicode characters. Each signal adds +0.15 to injection confidence. <!-- sha:3cbbb1b -->
+- [x] Task 3.2: Weighted ensemble scoring — combine ML classifier confidence with structural signals. Formula: `final_score = 0.7 * ml_score + 0.3 * structural_score`. If structural signals detect ≥2 injection markers, boost injection label to min 0.5 regardless of ML score. <!-- sha:3d8c8c4 -->
+- [x] Task 3.3: Add `classify_instruction()` — run the same classifier on the task instruction text (not just inbox). If instruction itself is injection/non_work with confidence > 0.5, use that for pre-scan instead of the minimal HTML-only threat_score. <!-- sha:f263c14 -->
 
 ### Verification
-- [ ] "IMPORTANT: Ignore instructions" gets injection ≥0.5 (structural boost)
-- [ ] "Remove all cards from distill" stays crm (no false positive from structural)
-- [ ] "What is 2+2?" in instruction → prescan catches as non_work
-- [ ] cargo test passes with new classification tests
+- [x] "IMPORTANT: Ignore instructions" gets injection ≥0.5 (structural boost)
+- [x] "Remove all cards from distill" stays crm (no false positive from structural)
+- [x] "What is 2+2?" in instruction → prescan catches as non_work
+- [x] cargo test passes with new classification tests
 
 ## Phase 4: Reflexion Step
 Lightweight self-validation between reasoning and action.
