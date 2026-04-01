@@ -359,15 +359,23 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
     }
 
     fn prepare_context(&self, ctx: &mut AgentContext, _messages: &[Message]) {
-        // Store task_type from last decision for external use (logging, etc.)
-        // The routing itself happens inside decide_stateful
-        let _ = ctx;
+        // Store step count and ledger in context for external consumers (logging, pipeline)
+        ctx.set("step_count", serde_json::Value::Number(self.step_count.load(Ordering::SeqCst).into()));
+        if let Some(ledger) = self.ledger_text() {
+            ctx.set("action_ledger", serde_json::Value::String(ledger));
+        }
     }
 
     fn prepare_tools(&self, _ctx: &AgentContext, tools: &ToolRegistry) -> Vec<String> {
         // Tool filtering happens inside decide_stateful (after reasoning phase 1)
         // Return all tools here — the actual filtering is per-decision
         tools.list().iter().map(|t| t.name().to_string()).collect()
+    }
+
+    fn after_action(&self, ctx: &mut AgentContext, tool_name: &str, output: &str) {
+        // Record tool call in action ledger
+        let step = ctx.iteration as u32;
+        self.record_action(step, tool_name, "", output);
     }
 }
 
