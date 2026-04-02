@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use ndarray::{Array1, ArrayView1};
@@ -253,8 +254,11 @@ struct LabeledEmbedding {
 /// 2. Validator embeds templated message, runs k-NN against seed + adaptive stores
 /// 3. If k-NN disagrees → warning (non-blocking)
 /// 4. After trial scores 1.0 → `learn(message, outcome)` adds to adaptive store
+/// Shared classifier type used across parallel trials.
+pub type SharedClassifier = Arc<std::sync::Mutex<Option<InboxClassifier>>>;
+
 pub struct OutcomeValidator {
-    classifier: std::sync::Mutex<InboxClassifier>,
+    classifier: SharedClassifier,
     seed_store: Vec<LabeledEmbedding>,
     adaptive_store: std::sync::Mutex<Vec<LabeledEmbedding>>,
     store_path: PathBuf,
@@ -262,8 +266,8 @@ pub struct OutcomeValidator {
 
 impl OutcomeValidator {
     /// Build validator: embed seed examples + load adaptive store from disk.
+    /// Takes ownership of classifier (original constructor).
     pub fn new(mut classifier: InboxClassifier, store_path: PathBuf) -> Result<Self> {
-        // Embed seed examples with hypothesis template
         let mut seed_store = Vec::new();
         for (outcome, example) in OUTCOME_EXAMPLES {
             let text = format!("{}{}", HYPOTHESIS_TEMPLATE, example);
@@ -273,16 +277,39 @@ impl OutcomeValidator {
                 embedding: emb,
             });
         }
-
-        // Load adaptive store from disk (if exists)
         let adaptive_store = Self::load_store(&store_path);
         let adaptive_count = adaptive_store.len();
-
         eprintln!("  OutcomeValidator: {} seed + {} adaptive examples",
             seed_store.len(), adaptive_count);
-
         Ok(Self {
-            classifier: std::sync::Mutex::new(classifier),
+            classifier: Arc::new(std::sync::Mutex::new(Some(classifier))),
+            seed_store,
+            adaptive_store: std::sync::Mutex::new(adaptive_store),
+            store_path,
+        })
+    }
+
+    /// Build from a shared classifier (no ownership transfer).
+    pub fn from_shared(shared: SharedClassifier, store_path: PathBuf) -> Result<Self> {
+        let mut seed_store = Vec::new();
+        {
+            let mut guard = shared.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?;
+            if let Some(ref mut clf) = *guard {
+                for (outcome, example) in OUTCOME_EXAMPLES {
+                    let text = format!("{}{}", HYPOTHESIS_TEMPLATE, example);
+                    let emb = clf.encode(&text)?;
+                    seed_store.push(LabeledEmbedding {
+                        outcome: outcome.to_string(),
+                        embedding: emb,
+                    });
+                }
+            }
+        }
+        let adaptive_store = Self::load_store(&store_path);
+        eprintln!("  OutcomeValidator: {} seed + {} adaptive examples (shared classifier)",
+            seed_store.len(), adaptive_store.len());
+        Ok(Self {
+            classifier: shared,
             seed_store,
             adaptive_store: std::sync::Mutex::new(adaptive_store),
             store_path,
@@ -292,7 +319,8 @@ impl OutcomeValidator {
     /// Embed a message using the hypothesis template.
     fn embed_message(&self, message: &str) -> Option<Array1<f32>> {
         let text = format!("{}{}", HYPOTHESIS_TEMPLATE, message);
-        self.classifier.lock().ok()?.encode(&text).ok()
+        let mut guard = self.classifier.lock().ok()?;
+        guard.as_mut()?.encode(&text).ok()
     }
 
     /// Validate answer: k-NN vote across seed + adaptive stores.

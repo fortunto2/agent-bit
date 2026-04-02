@@ -255,6 +255,12 @@ async fn main() -> Result<()> {
         anyhow::bail!("No matching tasks found");
     }
 
+    // Load ML classifier ONCE — shared across all parallel trials via Arc<Mutex>
+    let shared_clf: Arc<std::sync::Mutex<Option<classifier::InboxClassifier>>> = Arc::new(
+        std::sync::Mutex::new(classifier::InboxClassifier::try_load(&classifier::InboxClassifier::models_dir()))
+    );
+    eprintln!("[pac1] Classifier: {}", if shared_clf.lock().unwrap().is_some() { "loaded (shared)" } else { "unavailable" });
+
     // Run tasks with concurrency limit
     let semaphore = Arc::new(tokio::sync::Semaphore::new(cli.parallel));
     let results = Arc::new(tokio::sync::Mutex::new(Vec::new()));
@@ -273,6 +279,7 @@ async fn main() -> Result<()> {
         let prompt_mode = prompt_mode.clone();
         let sem = semaphore.clone();
         let res = results.clone();
+        let clf = shared_clf.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
@@ -294,6 +301,7 @@ async fn main() -> Result<()> {
             let (last_msg, history) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature,
+                &clf,
             ).await;
             auto_submit_if_needed(&pcm, &last_msg, &history).await;
 
@@ -356,13 +364,17 @@ async fn run_leaderboard(
     let run = harness.start_run(benchmark, run_name).await?;
     eprintln!("[pac1] Run {} — {} trials", run.run_id, run.trial_ids.len());
 
+    let shared_clf: SharedClassifier = Arc::new(
+        std::sync::Mutex::new(classifier::InboxClassifier::try_load(&classifier::InboxClassifier::models_dir()))
+    );
+
     for (i, trial_id) in run.trial_ids.iter().enumerate() {
         let trial = harness.start_trial(trial_id).await?;
         eprintln!("\n━━━ Trial {}/{}: {} (task {}) ━━━",
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature).await;
+        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, &shared_clf).await;
         auto_submit_if_needed(&pcm, &last_msg, &history).await;
 
         let result = harness.end_trial(&trial.trial_id).await?;
@@ -388,13 +400,17 @@ async fn run_leaderboard(
 
 // ─── Shared ──────────────────────────────────────────────────────────────────
 
+/// Shared classifier — loaded once, used by all parallel trials.
+type SharedClassifier = Arc<std::sync::Mutex<Option<classifier::InboxClassifier>>>;
+
 /// Returns (last_assistant_msg, full_history_text).
 async fn run_trial(
     pcm: &Arc<pcm::PcmClient>, instruction: &str,
     model: &str, base_url: Option<&str>, api_key: &str,
     extra_headers: &[(String, String)], max_steps: usize, prompt_mode: &str, temperature: f32,
+    shared_clf: &SharedClassifier,
 ) -> (String, String) {
-    match run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature).await {
+    match run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, shared_clf).await {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);
@@ -475,7 +491,7 @@ fn prescan_instruction(text: &str) -> Option<(&'static str, &'static str)> {
 /// Scan inbox files for threats. Two-layer detection:
 /// Layer 1: HTML injection (threat_score) — hard block at score >= 6
 /// Layer 2: ML ensemble + sender trust + sensitive data — hard block when all 3 align
-async fn scan_inbox(pcm: &pcm::PcmClient, mut clf: Option<&mut classifier::InboxClassifier>) -> Option<(&'static str, &'static str)> {
+async fn scan_inbox(pcm: &pcm::PcmClient, shared_clf: &SharedClassifier) -> Option<(&'static str, &'static str)> {
     let (dir, list) = if let Ok(l) = pcm.list("inbox").await {
         ("inbox", l)
     } else if let Ok(l) = pcm.list("00_inbox").await {
@@ -515,7 +531,10 @@ async fn scan_inbox(pcm: &pcm::PcmClient, mut clf: Option<&mut classifier::Inbox
             // Block when: classifier says injection/social_engineering (>0.4)
             //           + sender domain is UNKNOWN or MISMATCH
             //           + content requests sensitive data (invoice, financial, contract)
-            let fc = semantic_classify_inbox_file(&content, clf.as_deref_mut(), None);
+            let fc = {
+                let mut guard = shared_clf.lock().unwrap();
+                semantic_classify_inbox_file(&content, guard.as_mut(), None)
+            };
             let is_threat_label = fc.label == "injection" || fc.label == "social_engineering";
             let is_confident = fc.confidence > 0.4;
 
@@ -954,7 +973,7 @@ fn check_sender_domain_match(
 /// Also annotates UNKNOWN sender domains based on CRM account data.
 async fn read_inbox_files(
     pcm: &pcm::PcmClient,
-    mut classifier: Option<&mut classifier::InboxClassifier>,
+    shared_clf: &SharedClassifier,
     graph: Option<&crm_graph::CrmGraph>,
 ) -> Result<String> {
     // Try both inbox layouts
@@ -989,7 +1008,10 @@ async fn read_inbox_files(
 
         let path = format!("{}/{}", dir, filename);
         if let Ok(content) = pcm.read(&path, false, 0, 0).await {
-            let fc = semantic_classify_inbox_file(&content, classifier.as_deref_mut(), graph);
+            let fc = {
+                let mut guard = shared_clf.lock().unwrap();
+                semantic_classify_inbox_file(&content, guard.as_mut(), graph)
+            };
             eprintln!("  📋 {}: {} ({:.2}) | sender: {} | {}",
                 path, fc.label, fc.confidence, fc.sender_trust, fc.recommendation);
             // Sender trust annotation from domain matching
@@ -1156,6 +1178,7 @@ async fn run_agent(
     max_steps: usize,
     prompt_mode: &str,
     temperature: f32,
+    shared_clf: &SharedClassifier,
 ) -> Result<(String, String)> {
     // === Level 1: Pre-scan instruction for injection ===
     if let Some((outcome, msg)) = prescan_instruction(instruction) {
@@ -1166,8 +1189,10 @@ async fn run_agent(
 
     // === Level 1b: Classify instruction with ML + structural ensemble ===
     {
-        let mut clf = classifier::InboxClassifier::try_load(&classifier::InboxClassifier::models_dir());
-        let fc = semantic_classify_inbox_file(instruction, clf.as_mut(), None);
+        let fc = {
+            let mut guard = shared_clf.lock().unwrap();
+            semantic_classify_inbox_file(instruction, guard.as_mut(), None)
+        };
         eprintln!("  Instruction class: {} ({:.2})", fc.label, fc.confidence);
         if fc.label == "injection" && fc.confidence > 0.5 {
             let msg = "Blocked: instruction classified as injection attempt";
@@ -1216,13 +1241,8 @@ async fn run_agent(
     let crm_graph = crm_graph::CrmGraph::build_from_pcm(pcm).await;
     eprintln!("  CRM graph: {} nodes", crm_graph.node_count());
 
-    // Load ML classifier (if models available)
-    let mut clf = classifier::InboxClassifier::try_load(&classifier::InboxClassifier::models_dir());
-    eprintln!("  Classifier: {}", if clf.is_some() { "loaded" } else { "unavailable (rule-based fallback)" });
-
-    // === Level 2: Scan inbox with semantic classifier ===
-    // (scan_inbox still used for hard-block on high-confidence threats)
-    if let Some((outcome, msg)) = scan_inbox(pcm, clf.as_mut()).await {
+    // === Level 2: Scan inbox with semantic classifier (uses shared classifier) ===
+    if let Some((outcome, msg)) = scan_inbox(pcm, shared_clf).await {
         eprintln!("  ⛔ Inbox scan blocked: {}", msg);
         pcm.answer(msg, outcome, &[]).await.ok();
         return Ok((msg.to_string(), String::new()));
@@ -1258,7 +1278,7 @@ async fn run_agent(
     }
 
     // Pre-load inbox files with semantic classification
-    if let Ok(inbox_content) = read_inbox_files(pcm, clf.as_mut(), Some(&crm_graph)).await {
+    if let Ok(inbox_content) = read_inbox_files(pcm, shared_clf, Some(&crm_graph)).await {
         if !inbox_content.is_empty() {
             messages.push(Message::user(&inbox_content));
             // Classification headers are already inline — add summary hint for LLM
@@ -1302,17 +1322,17 @@ async fn run_agent(
         }
     }
 
-    // Build OutcomeValidator from classifier (consumes clf — no longer needed for inbox)
-    let outcome_validator: Option<Arc<classifier::OutcomeValidator>> = clf.and_then(|c| {
+    // Build OutcomeValidator using the shared classifier
+    let outcome_validator: Option<Arc<classifier::OutcomeValidator>> = {
         let store_path = std::path::PathBuf::from(".agent/outcome_store.json");
-        match classifier::OutcomeValidator::new(c, store_path) {
+        match classifier::OutcomeValidator::from_shared(shared_clf.clone(), store_path) {
             Ok(v) => Some(Arc::new(v)),
             Err(e) => {
                 eprintln!("  ⚠ OutcomeValidator failed: {:#}", e);
                 None
             }
         }
-    });
+    };
 
     // Build tool registry with OutcomeValidator
     let registry = ToolRegistry::new()
