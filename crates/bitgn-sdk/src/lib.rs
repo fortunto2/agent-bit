@@ -32,11 +32,11 @@ pub use connectrpc;
 /// Uses `plaintext` for http://, `with_tls` (ring + webpki-roots) for https://.
 pub fn make_http_client(url: &str) -> connectrpc::client::HttpClient {
     if url.starts_with("https://") {
-        let _ = connectrpc::rustls::crypto::ring::default_provider().install_default();
-        let roots = connectrpc::rustls::RootCertStore::from_iter(
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let roots = rustls::RootCertStore::from_iter(
             webpki_roots::TLS_SERVER_ROOTS.iter().cloned()
         );
-        let tls = connectrpc::rustls::ClientConfig::builder()
+        let tls = rustls::ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
         connectrpc::client::HttpClient::with_tls(std::sync::Arc::new(tls))
