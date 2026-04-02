@@ -119,7 +119,7 @@ pcm.answer(AnswerRequest {
 
 ## How It Works
 
-Proto files from [buf.build/bitgn/api](https://buf.build/bitgn/api) are compiled at build time via `build.rs` using `connectrpc-build`. This generates typed Rust structs and async client methods for all RPC services. Connect-RPC sends JSON over HTTP -- no gRPC/HTTP2 required.
+Proto files from [buf.build/bitgn/api](https://buf.build/bitgn/api) are compiled at build time via `build.rs` using `connectrpc-build`. This generates typed Rust structs and async client methods for all RPC services.
 
 ```
 buf.build/bitgn/api (proto source)
@@ -131,6 +131,29 @@ buf.build/bitgn/api (proto source)
   Connect-RPC / JSON over HTTPS
         |
   BitGN Platform API
+```
+
+## Wire Protocol
+
+Default is **Connect protocol with JSON** encoding — human-readable, easy to debug, works with `curl`. The BitGN server supports three wire formats via the same proto definitions:
+
+| Protocol | Format | When to use |
+|----------|--------|-------------|
+| Connect (default) | JSON | Development, debugging |
+| Connect | Protobuf | Production (~30% smaller payload) |
+| gRPC | Protobuf | If you need gRPC ecosystem tooling |
+
+Switch encoding:
+```rust
+// JSON (default — human-readable, good for debugging)
+let config = ClientConfig::new(uri);
+
+// Protobuf binary (smaller, faster)
+let config = ClientConfig::new(uri).proto();
+
+// gRPC protocol (HTTP/2 + protobuf)
+use connectrpc::client::Protocol;
+let config = ClientConfig::new(uri).protocol(Protocol::Grpc).proto();
 ```
 
 Pre-generated code is available in [`src/generated/`](src/generated/) for browsing without building.
