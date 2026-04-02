@@ -180,6 +180,44 @@ impl InboxClassifier {
     }
 }
 
+/// Structural injection signal detection.
+/// Detects: (a) imperative override verbs, (b) system refs, (c) base64, (d) zero-width unicode.
+/// Returns 0.0-0.60 (each signal adds 0.15).
+pub fn structural_injection_score(text: &str) -> f32 {
+    let lower = text.to_lowercase();
+    let mut signals = 0u32;
+
+    // (a) Imperative verbs addressing "you"
+    for phrase in &[
+        "ignore your", "forget your", "override your",
+        "disregard your", "bypass your", "forget all",
+        "ignore all", "disregard all previous",
+    ] {
+        if lower.contains(phrase) { signals += 1; break; }
+    }
+
+    // (b) References to system internals
+    for term in &["agents.md", "system prompt", "your instructions", "your rules", "your policy"] {
+        if lower.contains(term) { signals += 1; break; }
+    }
+
+    // (c) Base64 encoded strings (len>50)
+    for word in text.split_whitespace() {
+        if word.len() > 50 && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=') {
+            signals += 1; break;
+        }
+    }
+
+    // (d) Zero-width unicode characters
+    for c in text.chars() {
+        if matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' | '\u{2060}') {
+            signals += 1; break;
+        }
+    }
+
+    (signals as f32) * 0.15
+}
+
 /// Cosine similarity between two L2-normalized vectors (dot product).
 pub fn cosine_similarity(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
     a.dot(&b)

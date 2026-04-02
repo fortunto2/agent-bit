@@ -80,32 +80,9 @@ impl<C: LlmClient> Pac1Agent<C> {
 }
 
 /// Inline structural injection score — detects adversarial patterns in tool output.
-/// Same logic as main.rs structural_injection_score but self-contained for use in hooks.
+/// Structural injection signal detection — delegates to canonical impl in classifier.rs.
 fn structural_injection_score_inline(text: &str) -> f32 {
-    let lower = text.to_lowercase();
-    let mut signals = 0u32;
-
-    // Imperative verbs addressing "you"
-    for phrase in &["ignore your", "forget your", "override your", "disregard your", "bypass your"] {
-        if lower.contains(phrase) { signals += 1; break; }
-    }
-    // References to system internals
-    for term in &["agents.md", "system prompt", "your instructions", "your rules"] {
-        if lower.contains(term) { signals += 1; break; }
-    }
-    // Base64 (>50 chars)
-    for word in text.split_whitespace() {
-        if word.len() > 50 && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=') {
-            signals += 1; break;
-        }
-    }
-    // Zero-width unicode
-    for c in text.chars() {
-        if matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' | '\u{2060}') {
-            signals += 1; break;
-        }
-    }
-    (signals as f32) * 0.15
+    crate::classifier::structural_injection_score(text)
 }
 
 /// SGR Cascade reasoning tool — function calling with cascade field order.

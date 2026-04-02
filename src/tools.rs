@@ -649,11 +649,8 @@ impl Tool for AnswerTool {
         }
 
         self.pcm.answer(&a.message, &a.outcome, &a.refs).await.map_err(pcm_err)?;
-        // Adaptive learning: add this (message, outcome) to the store.
-        // Wrong answers are minority and get diluted by kNN voting over time.
-        if let Some(ref validator) = self.validator {
-            validator.learn(&a.message, &a.outcome);
-        }
+        // AI-NOTE: learn() disabled — was poisoning store with wrong answers.
+        // Re-enable only with score-gated feedback (learn after trial scores 1.0).
         Ok(ToolOutput::done(format!("Answer submitted: {}", a.message)))
     }
 }
