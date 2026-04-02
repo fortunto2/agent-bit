@@ -553,7 +553,7 @@ fn analyze_inbox_content(inbox_content: &str) -> String {
 fn extract_company_ref(text: &str) -> Option<String> {
     let lower = text.to_lowercase();
     // Look for "invoice for X" or "resend ... for X"
-    for pattern in &["invoice for ", "resend ", " for "] {
+    for pattern in &["invoice for ", "invoices for ", "resend invoice"] {
         if let Some(pos) = lower.find(pattern) {
             let after = &text[pos + pattern.len()..];
             // Take until period, question mark, or newline
@@ -573,47 +573,9 @@ fn extract_company_ref(text: &str) -> Option<String> {
 /// Detect structural injection signals in text.
 /// Returns a score between 0.0 and 1.0 based on number of signals found.
 /// Each signal adds 0.15 to the score.
+/// Structural injection signal detection — delegates to canonical impl in classifier.rs.
 fn structural_injection_score(text: &str) -> f32 {
-    let lower = text.to_lowercase();
-    let mut signals = 0u32;
-
-    // (a) Imperative verbs addressing "you"
-    for phrase in &[
-        "ignore your", "forget your", "override your",
-        "disregard your", "bypass your", "forget all",
-        "ignore all", "disregard all previous",
-    ] {
-        if lower.contains(phrase) {
-            signals += 1;
-            break; // count this category once
-        }
-    }
-
-    // (b) References to system internals
-    for term in &["agents.md", "system prompt", "your instructions", "your rules", "your policy"] {
-        if lower.contains(term) {
-            signals += 1;
-            break;
-        }
-    }
-
-    // (c) Base64 encoded strings (len>50)
-    for word in text.split_whitespace() {
-        if word.len() > 50 && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=') {
-            signals += 1;
-            break;
-        }
-    }
-
-    // (d) Zero-width unicode characters
-    for c in text.chars() {
-        if matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' | '\u{2060}') {
-            signals += 1;
-            break;
-        }
-    }
-
-    (signals as f32) * 0.15
+    classifier::structural_injection_score(text)
 }
 
 /// Semantic classification result for a single inbox file.
