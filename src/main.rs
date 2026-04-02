@@ -475,7 +475,7 @@ fn prescan_instruction(text: &str) -> Option<(&'static str, &'static str)> {
 /// Scan inbox files for threats. Two-layer detection:
 /// Layer 1: HTML injection (threat_score) — hard block at score >= 6
 /// Layer 2: ML ensemble + sender trust + sensitive data — hard block when all 3 align
-async fn scan_inbox(pcm: &pcm::PcmClient) -> Option<(&'static str, &'static str)> {
+async fn scan_inbox(pcm: &pcm::PcmClient, mut clf: Option<&mut classifier::InboxClassifier>) -> Option<(&'static str, &'static str)> {
     let (dir, list) = if let Ok(l) = pcm.list("inbox").await {
         ("inbox", l)
     } else if let Ok(l) = pcm.list("00_inbox").await {
@@ -486,7 +486,6 @@ async fn scan_inbox(pcm: &pcm::PcmClient) -> Option<(&'static str, &'static str)
 
     // Collect known account domains for sender trust
     let known_domains = collect_account_domains(pcm).await;
-    let mut clf = classifier::InboxClassifier::try_load(&classifier::InboxClassifier::models_dir());
 
     let mut max_score = 0u32;
 
@@ -516,7 +515,7 @@ async fn scan_inbox(pcm: &pcm::PcmClient) -> Option<(&'static str, &'static str)
             // Block when: classifier says injection/social_engineering (>0.4)
             //           + sender domain is UNKNOWN or MISMATCH
             //           + content requests sensitive data (invoice, financial, contract)
-            let fc = semantic_classify_inbox_file(&content, clf.as_mut(), None);
+            let fc = semantic_classify_inbox_file(&content, clf.as_deref_mut(), None);
             let is_threat_label = fc.label == "injection" || fc.label == "social_engineering";
             let is_confident = fc.confidence > 0.4;
 
@@ -1223,7 +1222,7 @@ async fn run_agent(
 
     // === Level 2: Scan inbox with semantic classifier ===
     // (scan_inbox still used for hard-block on high-confidence threats)
-    if let Some((outcome, msg)) = scan_inbox(pcm).await {
+    if let Some((outcome, msg)) = scan_inbox(pcm, clf.as_mut()).await {
         eprintln!("  ⛔ Inbox scan blocked: {}", msg);
         pcm.answer(msg, outcome, &[]).await.ok();
         return Ok((msg.to_string(), String::new()));
