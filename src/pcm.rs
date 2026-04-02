@@ -1,256 +1,185 @@
-//! BitGN PcmRuntime client — virtual file system operations via Connect-RPC.
+//! BitGN PcmRuntime client — typed Connect-RPC via bitgn-sdk.
+//!
+//! Wraps the generated PcmRuntimeClient with shell-like output formatting
+//! that the LLM expects (e.g. `$ cat file\ncontent`).
 
-use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
+use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use bitgn_sdk::vm::pcm::{
+    self as proto,
+    PcmRuntimeClient,
+};
+use connectrpc::client::{HttpClient, ClientConfig};
+
 pub struct PcmClient {
-    client: reqwest::Client,
-    base_url: String,
+    inner: PcmRuntimeClient<HttpClient>,
     pub answer_submitted: AtomicBool,
 }
 
 impl PcmClient {
     pub fn new(harness_url: &str) -> Self {
+        let url = harness_url.trim_end_matches('/');
+        let http = if url.starts_with("https://") {
+            let tls = connectrpc::rustls::ClientConfig::builder()
+                .with_native_roots()
+                .expect("failed to load native root certs")
+                .with_no_client_auth();
+            HttpClient::with_tls(std::sync::Arc::new(tls))
+        } else {
+            HttpClient::plaintext()
+        };
+        let config = ClientConfig::new(url.parse().expect("invalid harness URL"));
         Self {
-            client: reqwest::Client::new(),
-            base_url: harness_url.trim_end_matches('/').to_string(),
+            inner: PcmRuntimeClient::new(http, config),
             answer_submitted: AtomicBool::new(false),
         }
     }
 
-    async fn call(&self, method: &str, body: &Value) -> Result<Value> {
-        let url = format!("{}/bitgn.vm.pcm.PcmRuntime/{}", self.base_url, method);
-        let resp = self
-            .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(body)
-            .send()
-            .await
-            .context(format!("PCM {}", method))?;
-
-        let status = resp.status();
-        let text = resp.text().await?;
-
-        if !status.is_success() {
-            bail!("PCM {} failed ({}): {}", method, status, text);
-        }
-
-        if std::env::var("PAC1_DEBUG").is_ok() {
-            let preview = if text.len() > 300 { &text[..300] } else { &text };
-            eprintln!("      [pcm] {} → {}", method, preview);
-        }
-
-        serde_json::from_str(&text).context(format!("parse PCM {} response", method))
+    fn err(method: &str, e: connectrpc::ConnectError) -> anyhow::Error {
+        anyhow::anyhow!("PCM {} failed: {}", method, e)
     }
 
     pub async fn tree(&self, root: &str, level: i32) -> Result<String> {
-        let resp = self
-            .call("Tree", &json!({"root": root, "level": level}))
-            .await?;
-        let tree_output = format_tree_entry(&resp["root"], "", true);
+        let resp = self.inner.tree(proto::TreeRequest {
+            root: root.into(), level, ..Default::default()
+        }).await.map_err(|e| Self::err("Tree", e))?;
+        let v = resp.view();
+        let tree_output = format_tree_entry(&v.root, "", true);
         Ok(format!("$ tree -L {} {}\n{}", level, root, tree_output))
     }
 
     pub async fn list(&self, path: &str) -> Result<String> {
-        let resp = self.call("List", &json!({"name": path})).await?;
-        let entries = resp["entries"]
-            .as_array()
-            .map(|a| a.as_slice())
-            .unwrap_or_default();
+        let resp = self.inner.list(proto::ListRequest {
+            name: path.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("List", e))?;
+        let v = resp.view();
         let mut out = format!("$ ls {}\n", path);
-        for entry in entries {
-            let name = entry["name"].as_str().unwrap_or("");
-            let is_dir = entry["isDir"].as_bool().unwrap_or(false);
-            if is_dir {
-                out.push_str(&format!("{}/\n", name));
+        for entry in &v.entries {
+            if entry.is_dir {
+                out.push_str(&format!("{}/\n", entry.name));
             } else {
-                out.push_str(&format!("{}\n", name));
+                out.push_str(&format!("{}\n", entry.name));
             }
         }
         Ok(out)
     }
 
-    pub async fn read(
-        &self,
-        path: &str,
-        number: bool,
-        start_line: i32,
-        end_line: i32,
-    ) -> Result<String> {
-        let mut body = json!({"path": path});
-        if number {
-            body["number"] = Value::Bool(true);
-        }
-        if start_line > 0 {
-            body["startLine"] = Value::Number(start_line.into());
-        }
-        if end_line > 0 {
-            body["endLine"] = Value::Number(end_line.into());
-        }
-
-        let resp = self.call("Read", &body).await?;
-        let content = resp["content"].as_str().unwrap_or("").to_string();
-
-        // Shell-like header
+    pub async fn read(&self, path: &str, number: bool, start_line: i32, end_line: i32) -> Result<String> {
+        let resp = self.inner.read(proto::ReadRequest {
+            path: path.into(), number, start_line, end_line, ..Default::default()
+        }).await.map_err(|e| Self::err("Read", e))?;
+        let v = resp.view();
         let header = if start_line > 0 || end_line > 0 {
-            format!(
-                "$ sed -n '{},{}p' {}",
-                if start_line > 0 { start_line } else { 1 },
-                if end_line > 0 {
-                    end_line.to_string()
-                } else {
-                    "$".to_string()
-                },
-                path
-            )
+            format!("$ sed -n '{},{}p' {}", if start_line > 0 { start_line } else { 1 },
+                if end_line > 0 { end_line.to_string() } else { "$".into() }, path)
         } else if number {
             format!("$ cat -n {}", path)
         } else {
             format!("$ cat {}", path)
         };
-        Ok(format!("{}\n{}", header, content))
+        Ok(format!("{}\n{}", header, v.content))
     }
 
-    pub async fn write(
-        &self,
-        path: &str,
-        content: &str,
-        start_line: i32,
-        end_line: i32,
-    ) -> Result<()> {
-        let mut body = json!({"path": path, "content": content});
-        if start_line > 0 {
-            body["startLine"] = Value::Number(start_line.into());
-        }
-        if end_line > 0 {
-            body["endLine"] = Value::Number(end_line.into());
-        }
-
-        self.call("Write", &body).await?;
+    pub async fn write(&self, path: &str, content: &str, start_line: i32, end_line: i32) -> Result<()> {
+        self.inner.write(proto::WriteRequest {
+            path: path.into(), content: content.into(), start_line, end_line, ..Default::default()
+        }).await.map_err(|e| Self::err("Write", e))?;
         Ok(())
     }
 
     pub async fn delete(&self, path: &str) -> Result<()> {
-        self.call("Delete", &json!({"path": path})).await?;
+        self.inner.delete(proto::DeleteRequest {
+            path: path.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("Delete", e))?;
         Ok(())
     }
 
     pub async fn mkdir(&self, path: &str) -> Result<()> {
-        self.call("MkDir", &json!({"path": path})).await?;
+        self.inner.mk_dir(proto::MkDirRequest {
+            path: path.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("MkDir", e))?;
         Ok(())
     }
 
     pub async fn move_file(&self, from: &str, to: &str) -> Result<()> {
-        self.call("Move", &json!({"fromName": from, "toName": to}))
-            .await?;
+        self.inner.r#move(proto::MoveRequest {
+            from_name: from.into(), to_name: to.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("Move", e))?;
         Ok(())
     }
 
     pub async fn find(&self, root: &str, name: &str, file_type: &str, limit: i32) -> Result<String> {
-        let mut body = json!({"root": root, "name": name});
-        if !file_type.is_empty() {
-            let type_val = match file_type {
-                "files" => "TYPE_FILES",
-                "dirs" => "TYPE_DIRS",
-                _ => "TYPE_ALL",
-            };
-            body["type"] = Value::String(type_val.to_string());
-        }
-        if limit > 0 {
-            body["limit"] = Value::Number(limit.into());
-        }
-
-        let resp = self.call("Find", &body).await?;
-        let items = resp["items"]
-            .as_array()
-            .map(|a| a.as_slice())
-            .unwrap_or_default();
-        let results = items
-            .iter()
-            .filter_map(|v| v.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        Ok(format!("$ find {} -name '{}'\n{}", root, name, results))
+        let type_val = match file_type {
+            "files" => proto::find_request::Type::TYPE_FILES,
+            "dirs" => proto::find_request::Type::TYPE_DIRS,
+            _ => proto::find_request::Type::TYPE_ALL,
+        };
+        let resp = self.inner.find(proto::FindRequest {
+            root: root.into(), name: name.into(), r#type: type_val.into(), limit, ..Default::default()
+        }).await.map_err(|e| Self::err("Find", e))?;
+        let v = resp.view();
+        let results: Vec<&str> = v.items.iter().map(|s| s.as_ref()).collect();
+        Ok(format!("$ find {} -name '{}'\n{}", root, name, results.join("\n")))
     }
 
     pub async fn search(&self, root: &str, pattern: &str, limit: i32) -> Result<String> {
-        let mut body = json!({"root": root, "pattern": pattern});
-        if limit > 0 {
-            body["limit"] = Value::Number(limit.into());
-        }
-
-        let resp = self.call("Search", &body).await?;
-        let matches = resp["matches"]
-            .as_array()
-            .map(|a| a.as_slice())
-            .unwrap_or_default();
+        let resp = self.inner.search(proto::SearchRequest {
+            root: root.into(), pattern: pattern.into(), limit, ..Default::default()
+        }).await.map_err(|e| Self::err("Search", e))?;
+        let v = resp.view();
         let mut out = format!("$ rg -n --no-heading -e '{}' {}\n", pattern, root);
-        for m in matches {
-            let path = m["path"].as_str().unwrap_or("");
-            let line = m["line"].as_i64().unwrap_or(0);
-            let text = m["lineText"].as_str().unwrap_or("");
-            out.push_str(&format!("{}:{}:{}\n", path, line, text));
+        for m in &v.matches {
+            out.push_str(&format!("{}:{}:{}\n", m.path, m.line, m.line_text));
         }
         Ok(out)
     }
 
     pub async fn context(&self) -> Result<String> {
-        let resp = self.call("Context", &json!({})).await?;
-        let time = resp["time"].as_str().unwrap_or("");
-        Ok(format!("$ date\n{}", time))
+        let resp = self.inner.context(proto::ContextRequest::default())
+            .await.map_err(|e| Self::err("Context", e))?;
+        let v = resp.view();
+        Ok(format!("$ date\n{}", v.time))
     }
 
     pub async fn answer(&self, message: &str, outcome: &str, refs: &[String]) -> Result<()> {
-        self.call(
-            "Answer",
-            &json!({
-                "message": message,
-                "outcome": outcome,
-                "refs": refs,
-            }),
-        )
-        .await?;
+        let outcome_val = match outcome {
+            "OUTCOME_OK" => proto::Outcome::OUTCOME_OK,
+            "OUTCOME_DENIED_SECURITY" => proto::Outcome::OUTCOME_DENIED_SECURITY,
+            "OUTCOME_NONE_CLARIFICATION" => proto::Outcome::OUTCOME_NONE_CLARIFICATION,
+            "OUTCOME_NONE_UNSUPPORTED" => proto::Outcome::OUTCOME_NONE_UNSUPPORTED,
+            "OUTCOME_ERR_INTERNAL" => proto::Outcome::OUTCOME_ERR_INTERNAL,
+            _ => proto::Outcome::OUTCOME_OK,
+        };
+        self.inner.answer(proto::AnswerRequest {
+            message: message.into(), outcome: outcome_val.into(), refs: refs.to_vec(),
+            ..Default::default()
+        }).await.map_err(|e| Self::err("Answer", e))?;
         self.answer_submitted.store(true, Ordering::SeqCst);
         Ok(())
     }
 }
 
-fn format_tree_entry(entry: &Value, prefix: &str, is_last: bool) -> String {
-    let name = entry["name"].as_str().unwrap_or("");
-    let is_dir = entry["isDir"].as_bool().unwrap_or(false);
-    let children = entry["children"].as_array();
+/// Format tree entry recursively.
+fn format_tree_entry(entry: &proto::tree_response::EntryView<'_>, prefix: &str, is_last: bool) -> String {
+    let name = &entry.name;
+    let is_dir = entry.is_dir;
 
-    let connector = if prefix.is_empty() {
-        ""
-    } else if is_last {
-        "└── "
-    } else {
-        "├── "
-    };
-    let display_name = if is_dir {
-        format!("{}/", name)
-    } else {
-        name.to_string()
-    };
-
+    let connector = if prefix.is_empty() { "" } else if is_last { "└── " } else { "├── " };
+    let display_name = if is_dir { format!("{}/", name) } else { name.to_string() };
     let mut result = format!("{}{}{}\n", prefix, connector, display_name);
 
-    if let Some(children) = children {
-        let child_prefix = if prefix.is_empty() {
-            String::new()
-        } else if is_last {
-            format!("{}    ", prefix)
-        } else {
-            format!("{}│   ", prefix)
-        };
+    let child_prefix = if prefix.is_empty() {
+        String::new()
+    } else if is_last {
+        format!("{}    ", prefix)
+    } else {
+        format!("{}│   ", prefix)
+    };
 
-        for (i, child) in children.iter().enumerate() {
-            let is_last_child = i == children.len() - 1;
-            result.push_str(&format_tree_entry(child, &child_prefix, is_last_child));
-        }
+    for (i, child) in entry.children.iter().enumerate() {
+        let is_last_child = i == entry.children.len() - 1;
+        result.push_str(&format_tree_entry(&child, &child_prefix, is_last_child));
     }
-
     result
 }
