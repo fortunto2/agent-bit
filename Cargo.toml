@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/bitgn-sdk"]
+resolver = "2"
+
 [package]
 name = "pac1-agent"
 version = "0.1.0"
