@@ -1,10 +1,10 @@
 [package]
 name = "bitgn-sdk"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Rust SDK for BitGN Agent Benchmarks platform (Connect-RPC)"
 license = "MIT"
-repository = "https://github.com/fortunto2/agent-bit"
+repository = "https://github.com/fortunto2/bitgn-sdk-rs"
 keywords = ["bitgn", "agent", "benchmark", "connectrpc", "grpc"]
 categories = ["api-bindings"]
 
