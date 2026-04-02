@@ -1,6 +1,6 @@
 [package]
 name = "bitgn-sdk"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Rust SDK for BitGN Agent Benchmarks platform (Connect-RPC)"
 license = "MIT"
@@ -9,7 +9,7 @@ keywords = ["bitgn", "agent", "benchmark", "connectrpc", "grpc"]
 categories = ["api-bindings"]
 
 [dependencies]
-connectrpc = { version = "0.3", features = ["client"] }
+connectrpc = { version = "0.3", features = ["client", "client-tls"] }
 buffa = { version = "0.3", features = ["json"] }
 buffa-types = { version = "0.3", features = ["json"] }
 serde = { version = "1", features = ["derive"] }

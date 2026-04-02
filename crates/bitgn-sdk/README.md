@@ -33,7 +33,10 @@ use connectrpc::client::{HttpClient, ClientConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let http = HttpClient::plaintext();
+    let tls = connectrpc::rustls::ClientConfig::builder()
+        .with_native_roots().unwrap()
+        .with_no_client_auth();
+    let http = HttpClient::with_tls(std::sync::Arc::new(tls));
     let config = ClientConfig::new("https://api.bitgn.com".parse()?);
     let client = HarnessServiceClient::new(http, config);
 
