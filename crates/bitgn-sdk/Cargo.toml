@@ -1,0 +1,23 @@
+[package]
+name = "bitgn-sdk"
+version = "0.1.0"
+edition = "2024"
+description = "Rust SDK for BitGN Agent Benchmarks platform (Connect-RPC)"
+license = "MIT"
+repository = "https://github.com/fortunto2/agent-bit"
+keywords = ["bitgn", "agent", "benchmark", "connectrpc", "grpc"]
+categories = ["api-bindings"]
+
+[dependencies]
+connectrpc = { version = "0.3", features = ["client"] }
+buffa = { version = "0.3", features = ["json"] }
+buffa-types = { version = "0.3", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+http-body = "1"
+http-body-util = "0.1"
+tokio = { version = "1", features = ["rt"] }
+futures = "0.3"
+
+[build-dependencies]
+connectrpc-build = "0.3"
