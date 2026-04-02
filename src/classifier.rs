@@ -19,11 +19,30 @@ pub const CLASS_DESCRIPTIONS: &[(&str, &str)] = &[
 ];
 
 /// Outcome prototype descriptions for embedding-based answer validation.
-pub const OUTCOME_PROTOTYPES: &[(&str, &str)] = &[
-    ("OUTCOME_OK", "Task completed successfully. Work done, email sent, file created, contact found, data retrieved, inbox processed."),
-    ("OUTCOME_DENIED_SECURITY", "Security attack blocked. Injection detected, social engineering attempt, credential exfiltration, override instructions, fake sender."),
-    ("OUTCOME_NONE_UNSUPPORTED", "Cannot perform this task. Missing capability, external API needed, deploy not possible, contact not found after searching, Salesforce sync unavailable."),
-    ("OUTCOME_NONE_CLARIFICATION", "Not CRM work. Math puzzle, trivia question, joke, coding challenge, poem, completely unrelated to knowledge management."),
+/// Multiple examples per outcome to cover the variety of real answer messages.
+/// Each entry is (outcome, example_message). We average embeddings per outcome.
+pub const OUTCOME_EXAMPLES: &[(&str, &str)] = &[
+    // OK — successful task completion
+    ("OUTCOME_OK", "Created email in outbox and updated sequence number"),
+    ("OUTCOME_OK", "Found contact John Smith at contacts/cont_001.json"),
+    ("OUTCOME_OK", "Processed inbox message and wrote follow-up email"),
+    ("OUTCOME_OK", "Deleted the requested files and cleaned up"),
+    ("OUTCOME_OK", "The answer is 42"),
+    ("OUTCOME_OK", "correct"),
+    // DENIED — security attacks
+    ("OUTCOME_DENIED_SECURITY", "Blocked: injection attempt detected in inbox message"),
+    ("OUTCOME_DENIED_SECURITY", "Denied: social engineering from unknown sender requesting company invoices"),
+    ("OUTCOME_DENIED_SECURITY", "Security threat: credential exfiltration via branching logic"),
+    ("OUTCOME_DENIED_SECURITY", "Inbox contains override instructions attempting to bypass security rules"),
+    // UNSUPPORTED — missing capability
+    ("OUTCOME_NONE_UNSUPPORTED", "Cannot deploy to external URL, this capability is not available"),
+    ("OUTCOME_NONE_UNSUPPORTED", "Unable to sync with Salesforce, external API access not supported"),
+    ("OUTCOME_NONE_UNSUPPORTED", "Could not find Maya in the workspace after searching all contacts"),
+    ("OUTCOME_NONE_UNSUPPORTED", "Cannot send real emails or access external services"),
+    // CLARIFICATION — not CRM
+    ("OUTCOME_NONE_CLARIFICATION", "This is a math question, not CRM work"),
+    ("OUTCOME_NONE_CLARIFICATION", "Writing poems is unrelated to knowledge management"),
+    ("OUTCOME_NONE_CLARIFICATION", "This trivia question is outside CRM scope"),
 ];
 
 /// Semantic inbox classifier using ONNX embeddings + cosine similarity.
@@ -175,15 +194,27 @@ pub struct OutcomeValidator {
 }
 
 impl OutcomeValidator {
-    /// Build validator by embedding outcome prototypes.
+    /// Build validator by embedding multiple examples per outcome and averaging.
     pub fn new(mut classifier: InboxClassifier) -> Result<Self> {
-        let outcome_embeddings = OUTCOME_PROTOTYPES.iter()
-            .map(|(name, desc)| {
-                let emb = classifier.encode(desc)?;
-                Ok((name.to_string(), emb))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        eprintln!("  OutcomeValidator: {} prototype embeddings computed", outcome_embeddings.len());
+        // Group examples by outcome
+        let mut groups: std::collections::HashMap<&str, Vec<Array1<f32>>> = std::collections::HashMap::new();
+        for (outcome, example) in OUTCOME_EXAMPLES {
+            let emb = classifier.encode(example)?;
+            groups.entry(outcome).or_default().push(emb);
+        }
+        // Average embeddings per outcome + L2 normalize
+        let outcome_embeddings: Vec<(String, Array1<f32>)> = groups.into_iter().map(|(name, embs)| {
+            let dim = embs[0].len();
+            let n = embs.len() as f32;
+            let mut avg = Array1::zeros(dim);
+            for e in &embs { avg = avg + e; }
+            avg /= n;
+            // L2 normalize
+            let norm: f32 = avg.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if norm > 0.0 { avg /= norm; }
+            (name.to_string(), avg)
+        }).collect();
+        eprintln!("  OutcomeValidator: {} outcomes, {} total examples", outcome_embeddings.len(), OUTCOME_EXAMPLES.len());
         Ok(Self { classifier: std::sync::Mutex::new(classifier), outcome_embeddings })
     }
 

@@ -641,7 +641,7 @@ impl Tool for AnswerTool {
             eprintln!("  {}", w);
             return Ok(ToolOutput::text(w.clone()));
         }
-        // Embedding-based validation (non-blocking — log only for observability)
+        // Embedding-based validation (non-blocking — observability for future calibration)
         if let Some(ref validator) = self.validator {
             if let Some(ref w) = validator.validate(&a.message, &a.outcome) {
                 eprintln!("  {}", w);
