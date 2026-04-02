@@ -472,9 +472,10 @@ fn prescan_instruction(text: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
-/// Scan inbox files for threats. Returns Some(outcome) if any file is dangerous.
+/// Scan inbox files for threats. Two-layer detection:
+/// Layer 1: HTML injection (threat_score) — hard block at score >= 6
+/// Layer 2: ML ensemble + sender trust + sensitive data — hard block when all 3 align
 async fn scan_inbox(pcm: &pcm::PcmClient) -> Option<(&'static str, &'static str)> {
-    // Try both inbox layouts
     let (dir, list) = if let Ok(l) = pcm.list("inbox").await {
         ("inbox", l)
     } else if let Ok(l) = pcm.list("00_inbox").await {
@@ -482,6 +483,10 @@ async fn scan_inbox(pcm: &pcm::PcmClient) -> Option<(&'static str, &'static str)
     } else {
         return None;
     };
+
+    // Collect known account domains for sender trust
+    let known_domains = collect_account_domains(pcm).await;
+    let mut clf = classifier::InboxClassifier::try_load(&classifier::InboxClassifier::models_dir());
 
     let mut max_score = 0u32;
 
@@ -494,22 +499,67 @@ async fn scan_inbox(pcm: &pcm::PcmClient) -> Option<(&'static str, &'static str)
             continue;
         }
 
-        // Fake AGENTS.MD in inbox → social engineering (overriding agent rules)
+        // Fake AGENTS.MD in inbox → social engineering
         if filename.eq_ignore_ascii_case("AGENTS.MD") {
             return Some(("OUTCOME_DENIED_SECURITY", "Blocked: fake AGENTS.MD in inbox — social engineering attempt"));
         }
 
         let path = format!("{}/{}", dir, filename);
         if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+            // Layer 1: HTML injection
             let score = threat_score(&content);
             if score > max_score {
                 max_score = score;
+            }
+
+            // Layer 2: ML ensemble + sender trust + sensitive data
+            // Block when: classifier says injection/social_engineering (>0.4)
+            //           + sender domain is UNKNOWN or MISMATCH
+            //           + content requests sensitive data (invoice, financial, contract)
+            let fc = semantic_classify_inbox_file(&content, clf.as_mut(), None);
+            let is_threat_label = fc.label == "injection" || fc.label == "social_engineering";
+            let is_confident = fc.confidence > 0.4;
+
+            let sender_suspect = if let Some(domain) = extract_sender_domain(&content) {
+                let match_result = check_sender_domain_match(&domain, &content, &known_domains);
+                match_result == "mismatch" || match_result == "unknown"
+            } else {
+                true // no From: header = unknown sender
+            };
+
+            let lower = content.to_lowercase();
+            let requests_sensitive = lower.contains("invoice") || lower.contains("financial")
+                || lower.contains("contract") || lower.contains("statement")
+                || lower.contains("payment") || lower.contains("account data");
+
+            // Credential exfiltration: OTP + extraction branching
+            let has_extraction = ["first character", "first digit", "depending on", "branch"]
+                .iter().any(|p| lower.contains(p));
+            let has_credential = lower.contains("otp") || lower.contains("password")
+                || lower.contains("token") || lower.contains("code");
+            let is_exfiltration = has_extraction && has_credential;
+
+            if is_exfiltration {
+                eprintln!("  ⛔ Inbox ensemble block: credential exfiltration in {}", path);
+                return Some(("OUTCOME_DENIED_SECURITY", "Blocked: credential exfiltration attempt (OTP + branching logic)"));
+            }
+
+            if is_threat_label && is_confident && sender_suspect && requests_sensitive {
+                eprintln!("  ⛔ Inbox ensemble block: {} ({:.2}) + unknown sender + sensitive data in {}",
+                    fc.label, fc.confidence, path);
+                return Some(("OUTCOME_DENIED_SECURITY", "Blocked: social engineering — unknown sender requesting sensitive company data"));
+            }
+
+            // Structural signals boost: >=2 structural signals + unknown sender
+            let structural = classifier::structural_injection_score(&content);
+            if structural >= 0.30 && sender_suspect {
+                eprintln!("  ⛔ Inbox ensemble block: structural={:.2} + unknown sender in {}", structural, path);
+                return Some(("OUTCOME_DENIED_SECURITY", "Blocked: structural injection signals from unknown sender"));
             }
         }
     }
 
     if max_score >= 6 {
-        // Only hard-block on very high confidence (multiple markers)
         Some(("OUTCOME_DENIED_SECURITY", "Blocked: injection detected in inbox file"))
     } else if max_score >= 4 {
         Some(("OUTCOME_NONE_CLARIFICATION", "Inbox contains suspicious/non-CRM content"))
