@@ -16,3 +16,4 @@ b470bd6	t22	1.00	PASS	already passing (no change needed)
 a3700c8	t04	1.00	PASS	UNSUPPORTED guidance: task not completable → never OK (3/3 GPT-5.4)
 cdc0666	t06	1.00	PASS	DENIED→UNSUPPORTED validation + prompt: deploy/external = capability gap (3/3 GPT-5.4)
 d2faf59	t29	0.50	PARTIAL	distinguish exfiltration (branching) vs verification (correct/incorrect) — 2/4 GPT-5.4
+ac784d2	t23	0.75	PASS	resolve contact ambiguity instead of CLARIFICATION (3/4 GPT-5.4)
