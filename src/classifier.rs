@@ -18,6 +18,14 @@ pub const CLASS_DESCRIPTIONS: &[(&str, &str)] = &[
     ("credential", "OTP or credential sharing attempt"),
 ];
 
+/// Outcome prototype descriptions for embedding-based answer validation.
+pub const OUTCOME_PROTOTYPES: &[(&str, &str)] = &[
+    ("OUTCOME_OK", "Task completed successfully. Work done, email sent, file created, contact found, data retrieved, inbox processed."),
+    ("OUTCOME_DENIED_SECURITY", "Security attack blocked. Injection detected, social engineering attempt, credential exfiltration, override instructions, fake sender."),
+    ("OUTCOME_NONE_UNSUPPORTED", "Cannot perform this task. Missing capability, external API needed, deploy not possible, contact not found after searching, Salesforce sync unavailable."),
+    ("OUTCOME_NONE_CLARIFICATION", "Not CRM work. Math puzzle, trivia question, joke, coding challenge, poem, completely unrelated to knowledge management."),
+];
+
 /// Semantic inbox classifier using ONNX embeddings + cosine similarity.
 pub struct InboxClassifier {
     session: Session,
@@ -54,7 +62,7 @@ impl InboxClassifier {
     }
 
     /// Encode text into a normalized embedding vector using the ONNX model.
-    fn encode(&mut self, text: &str) -> Result<Array1<f32>> {
+    pub fn encode(&mut self, text: &str) -> Result<Array1<f32>> {
         let encoding = self.tokenizer
             .encode(text, true)
             .map_err(|e| anyhow::anyhow!("tokenization failed: {}", e))?;
@@ -154,8 +162,59 @@ impl InboxClassifier {
 }
 
 /// Cosine similarity between two L2-normalized vectors (dot product).
-fn cosine_similarity(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
+pub fn cosine_similarity(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
     a.dot(&b)
+}
+
+/// Embedding-based answer outcome validator.
+/// Pre-computes prototype embeddings for each outcome, then validates
+/// that the LLM's answer message is semantically closest to its chosen outcome.
+pub struct OutcomeValidator {
+    classifier: std::sync::Mutex<InboxClassifier>,
+    outcome_embeddings: Vec<(String, Array1<f32>)>,
+}
+
+impl OutcomeValidator {
+    /// Build validator by embedding outcome prototypes.
+    pub fn new(mut classifier: InboxClassifier) -> Result<Self> {
+        let outcome_embeddings = OUTCOME_PROTOTYPES.iter()
+            .map(|(name, desc)| {
+                let emb = classifier.encode(desc)?;
+                Ok((name.to_string(), emb))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        eprintln!("  OutcomeValidator: {} prototype embeddings computed", outcome_embeddings.len());
+        Ok(Self { classifier: std::sync::Mutex::new(classifier), outcome_embeddings })
+    }
+
+    /// Validate that the answer message is semantically consistent with the chosen outcome.
+    /// Returns Some(warning) if the message is closer to a different outcome.
+    pub fn validate(&self, message: &str, outcome: &str) -> Option<String> {
+        let msg_emb = self.classifier.lock().ok()?.encode(message).ok()?;
+
+        let mut scores: Vec<(&str, f32)> = self.outcome_embeddings.iter()
+            .map(|(name, emb)| (name.as_str(), cosine_similarity(msg_emb.view(), emb.view())))
+            .collect();
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let (best_match, best_score) = scores[0];
+        let (_, second_score) = scores[1];
+
+        // Only suggest correction if:
+        // 1. Best match differs from chosen outcome
+        // 2. Strong separation AND high absolute confidence (avoids noise on low similarities)
+        if best_match != outcome && (best_score - second_score) > 0.05 && best_score > 0.35 {
+            eprintln!("  🔬 Outcome validator: message→{} ({:.3}) but chosen {}. Scores: {:?}",
+                best_match, best_score, outcome, scores);
+            Some(format!(
+                "⚠ VALIDATION: Your message is semantically closest to {} (similarity {:.2}) but you chose {}. \
+                 Reconsider: DENIED=attack, UNSUPPORTED=missing capability, CLARIFICATION=not CRM, OK=success.",
+                best_match, best_score, outcome
+            ))
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]

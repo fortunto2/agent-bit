@@ -1234,22 +1234,6 @@ async fn run_agent(
     let config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
     let llm = Llm::new(&config);
 
-    let registry = ToolRegistry::new()
-        .register(tools::ReadTool(pcm.clone()))
-        .register(tools::WriteTool(pcm.clone()))
-        .register(tools::SearchTool(pcm.clone()))
-        .register(tools::FindTool(pcm.clone()))
-        .register(tools::ListTool(pcm.clone()))
-        .register(tools::TreeTool(pcm.clone()))
-        .register(tools::DeleteTool(pcm.clone()))
-        .register(tools::MkDirTool(pcm.clone()))
-        .register(tools::MoveTool(pcm.clone()))
-        .register(tools::AnswerTool(pcm.clone()))
-        .register(tools::ContextTool(pcm.clone()));
-
-    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode);
-    let mut ctx = AgentContext::new();
-
     // Pre-grounding: tree and date already have shell-like headers from pcm.rs
     // AGENTS.md is already in system prompt via {agents_md} template — don't duplicate
     let mut messages = vec![
@@ -1306,6 +1290,34 @@ async fn run_agent(
             eprintln!("  Channel stats: {}", channel_stats.trim());
         }
     }
+
+    // Build OutcomeValidator from classifier (consumes clf — no longer needed for inbox)
+    let outcome_validator: Option<Arc<classifier::OutcomeValidator>> = clf.and_then(|c| {
+        match classifier::OutcomeValidator::new(c) {
+            Ok(v) => Some(Arc::new(v)),
+            Err(e) => {
+                eprintln!("  ⚠ OutcomeValidator failed: {:#}", e);
+                None
+            }
+        }
+    });
+
+    // Build tool registry with OutcomeValidator
+    let registry = ToolRegistry::new()
+        .register(tools::ReadTool(pcm.clone()))
+        .register(tools::WriteTool(pcm.clone()))
+        .register(tools::SearchTool(pcm.clone()))
+        .register(tools::FindTool(pcm.clone()))
+        .register(tools::ListTool(pcm.clone()))
+        .register(tools::TreeTool(pcm.clone()))
+        .register(tools::DeleteTool(pcm.clone()))
+        .register(tools::MkDirTool(pcm.clone()))
+        .register(tools::MoveTool(pcm.clone()))
+        .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone()))
+        .register(tools::ContextTool(pcm.clone()));
+
+    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode);
+    let mut ctx = AgentContext::new();
 
     // ── Planning phase: decompose task into steps ─────────────────────
     let plan = run_planning_phase(

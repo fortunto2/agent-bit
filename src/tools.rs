@@ -576,7 +576,16 @@ fn validate_answer(message: &str, outcome: &str) -> Option<String> {
     None
 }
 
-pub struct AnswerTool(pub Arc<PcmClient>);
+pub struct AnswerTool {
+    pub pcm: Arc<PcmClient>,
+    pub validator: Option<Arc<crate::classifier::OutcomeValidator>>,
+}
+
+impl AnswerTool {
+    pub fn new(pcm: Arc<PcmClient>, validator: Option<Arc<crate::classifier::OutcomeValidator>>) -> Self {
+        Self { pcm, validator }
+    }
+}
 
 #[derive(Deserialize)]
 struct AnswerArgs {
@@ -626,11 +635,20 @@ impl Tool for AnswerTool {
     }
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: AnswerArgs = parse_args(&args)?;
-        // Validate but don't block — log warning and submit anyway
-        if let Some(warning) = validate_answer(&a.message, &a.outcome) {
-            eprintln!("  {}", warning);
+
+        // Keyword-based validation (blocking — returns to model for correction)
+        if let Some(ref w) = validate_answer(&a.message, &a.outcome) {
+            eprintln!("  {}", w);
+            return Ok(ToolOutput::text(w.clone()));
         }
-        self.0.answer(&a.message, &a.outcome, &a.refs).await.map_err(pcm_err)?;
+        // Embedding-based validation (non-blocking — log only for observability)
+        if let Some(ref validator) = self.validator {
+            if let Some(ref w) = validator.validate(&a.message, &a.outcome) {
+                eprintln!("  {}", w);
+            }
+        }
+
+        self.pcm.answer(&a.message, &a.outcome, &a.refs).await.map_err(pcm_err)?;
         Ok(ToolOutput::done(format!("Answer submitted: {}", a.message)))
     }
 }
