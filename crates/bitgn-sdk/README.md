@@ -39,6 +39,17 @@ TLS is included by default (BitGN API is https-only). No extra features needed.
 
 ## Quick Start
 
+Add dependencies:
+
+```toml
+[dependencies]
+bitgn-sdk = "0.1"
+webpki-roots = "0.26"
+tokio = { version = "1", features = ["full"] }
+```
+
+Create a TLS client and call the API:
+
 ```rust
 use bitgn_sdk::harness::{HarnessServiceClient, GetBenchmarkRequest};
 use connectrpc::client::{HttpClient, ClientConfig};
@@ -46,11 +57,19 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // TLS client (required for https://api.bitgn.com)
+    // Install crypto provider (required by rustls 0.23)
+    let _ = connectrpc::rustls::crypto::ring::default_provider().install_default();
+
+    // Build TLS client with root certificates
+    let roots = connectrpc::rustls::RootCertStore::from_iter(
+        webpki_roots::TLS_SERVER_ROOTS.iter().cloned()
+    );
     let tls = connectrpc::rustls::ClientConfig::builder()
-        .with_native_roots()?
+        .with_root_certificates(roots)
         .with_no_client_auth();
     let http = HttpClient::with_tls(Arc::new(tls));
+
+    // Connect to BitGN API
     let config = ClientConfig::new("https://api.bitgn.com".parse()?);
     let client = HarnessServiceClient::new(http, config);
 
