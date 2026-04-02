@@ -1,4 +1,4 @@
-# CLAUDE.md — agent-bit (PAC1 Agent)
+# CLAUDE.md -- agent-bit (PAC1 Agent)
 
 BitGN PAC1 Challenge agent in Rust, powered by sgr-agent.
 
@@ -8,53 +8,86 @@ BitGN PAC1 Challenge agent in Rust, powered by sgr-agent.
 cargo build
 cargo run -- --provider nemotron --list          # list tasks
 cargo run -- --provider nemotron --task t16      # single task
-cargo run -- --provider nemotron                 # all 26 tasks
+cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
-cargo run -- --provider nemotron --dry-run       # pre-scan only (no LLM)
-cargo test                                        # 69 unit tests
+cargo run -- --provider openai-full --parallel 3 # GPT-5.4
+cargo test                                        # 83 unit tests
 ```
 
 ## Architecture
 
 ```
-src/main.rs       — CLI, orchestration, pre-scan security, system prompts
-src/agent.rs      — Pac1Agent (Router + Structured CoT reasoning)
-src/bitgn.rs      — HarnessService client (Connect-RPC/JSON)
-src/pcm.rs        — PcmRuntime client (11 file-system RPCs)
-src/tools.rs      — 11 Tool implementations + security guard + search auto-expand
-src/config.rs     — Provider config with prompt_mode (explicit/standard)
-src/classifier.rs — ONNX embedding classifier (all-MiniLM-L6-v2, cosine similarity)
-src/crm_graph.rs  — petgraph CRM knowledge graph (contacts, accounts, sender trust)
-scripts/export_model.py — Export ONNX model + tokenizer + class embeddings
-models/           — ONNX model files (gitignored, ~90MB, run export_model.py)
+src/main.rs       -- CLI, orchestration, pre-scan, system prompts, domain matching
+src/agent.rs      -- Pac1Agent (Router + Structured CoT reasoning)
+src/bitgn.rs      -- HarnessService client (Connect-RPC/JSON)
+src/pcm.rs        -- PcmRuntime client (11 file-system RPCs)
+src/tools.rs      -- 11 Tool implementations + security guard + OutcomeValidator
+src/config.rs     -- Provider config with prompt_mode (explicit/standard)
+src/classifier.rs -- ONNX classifier + OutcomeValidator (adaptive kNN)
+src/crm_graph.rs  -- petgraph CRM knowledge graph (contacts, accounts, sender trust)
 ```
 
 Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep).
 
+## Decision Pipeline
+
+```
+instruction --> prescan (HTML only) --> start trial
+  --> build CRM graph (contacts/accounts)
+  --> classify inbox files (ML + structural + sender trust)
+  --> domain matching (MATCH/MISMATCH/UNKNOWN)
+  --> pre-grounding (tree, schema, inbox, channel stats)
+  --> OutcomeValidator (seed + adaptive prototypes)
+  --> planning phase (read-only, 5 steps)
+  --> execution loop (Pac1Agent, max 20 steps)
+  --> answer() with outcome validation
+```
+
 ## Key Design Decisions
 
-- **Plan→Execute pipeline** — PlanningAgent (≤5 read-only steps) decomposes task into Plan{steps, tool_hints}, injected as system context for main executor
-- **Agent hooks** — `after_action()` records action ledger + runs structural injection check on read/search output. `prepare_context()` exposes step_count + ledger in ctx.custom
-- **Fuzzy search (strsim)** — Levenshtein distance matching in SearchTool (filename fallback) and CrmGraph (contact name fuzzy-find, sender trust upgrade)
-- **Pac1Agent** — custom Agent impl with 3-phase flow: structured CoT reasoning → reflexion → routed action
-- **Router pattern** — task_type (search/edit/analyze/security) filters available tools per step
-- **Tool pruning** — "analyze" route uses read-only tools on first step, full toolkit after ≥1 read
-- **Structured CoT** — reasoning tool requires task_type, security_assessment, known_facts, plan, done
-- **Reflexion** — validation step between reasoning and action (standard mode only). Asks model to verify plan before acting. Max 1 reflexion per step.
-- **Action ledger** — compact history of previous tool calls (max 10, 80 chars each) injected as context before reasoning. Prevents repeat searches.
-- **Adaptive nudge** — one-time "complete now" message injected when step > 50% budget without answer
-- **Few-shot trajectories** — 4 tool-call examples in both system prompts (CRM lookup, injection, OTP, non-CRM)
-- **SGR pre-grounding** — README.md from tree directories loaded as "CRM Schema" context (max 2000 chars)
-- **Search auto-expand** — SearchTool auto-reads ≤3 matching files inline (parent document retrieval)
-- **Classifier ensemble** — ONNX ML classifier + structural signal detection (imperatives, system refs, base64, zero-width unicode). Weighted: 0.7*ML + 0.3*structural. ≥2 structural signals boost injection to min 0.5.
-- **Instruction classifier** — ML+structural ensemble also runs on task instruction text, blocking injection >0.5 and non_work >0.5 before agent loop
-- **CRM knowledge graph** — petgraph builds in-memory graph from PCM contacts/accounts at trial start. Validates sender email domain → SenderTrust (KNOWN/PLAUSIBLE/CROSS_COMPANY/UNKNOWN).
-- **Pre-scan security** — minimal threat_score (only HTML injection: `<script>`, `<iframe>`, `javascript:`). All semantic patterns handled by classifier.
-- **Post-read guard** — ReadTool/SearchTool append warnings on suspicious content
-- **prompt_mode** — "explicit" (decision tree, no reflexion) for weak models, "standard" (with reflexion) for strong models
-- **Pre-grounding** — tree + AGENTS.md + CRM schema + classified inbox files + classification summary loaded before LLM loop
-- **Loop threshold** — abort after 6 repeated actions (down from 10, PAC1 tasks are short)
-- **Auto-submit fallback** — guess_outcome scans full message history
+### Security: 3-layer defense
+1. **Pre-scan**: literal HTML injection only (`<script>`, `<iframe>`)
+2. **Classifier ensemble**: 0.7*ML(ONNX) + 0.3*structural signals, injected as [CLASSIFICATION] headers
+3. **LLM decision tree**: numbered steps in system prompt guide outcome selection
+
+### Domain Matching (sender trust)
+- `extract_sender_domain()` + `check_sender_domain_match()`
+- `domain_stem()` extracts company name from domain ("blue-harbor-bank.biz" -> "blue harbor bank")
+- MATCH = exact domain or stem overlap >50% with CRM account
+- MISMATCH = stem similar but real domain differs (social engineering)
+- Body fallback: if no CRM account, check domain stem vs company name in email body (strict >50%)
+
+### Credential Detection
+- **Exfiltration** (DENIED): OTP + branching logic ("first character", "branch", "depending on")
+- **Verification** (OK): OTP + simple check ("correct"/"incorrect", no extraction)
+- Distinction prevents false positives on legit OTP verify tasks
+
+### OutcomeValidator (adaptive kNN)
+- **Hypothesis template**: `"The CRM task result: {msg}"` for better embedding discrimination
+- **Seed store**: 17 static examples across 4 outcomes (OUTCOME_EXAMPLES in classifier.rs)
+- **Adaptive store**: grows from every answer(), persisted to `.agent/outcome_store.json`
+- **k-NN (k=5)**: nearest-neighbor voting (no lossy centroid averaging)
+- **Online learning**: every model's answers feed the store; GPT-5.4 = teacher for Nemotron
+- **Currently non-blocking** (log only) -- needs more calibration for blocking mode
+- Dedup: cosine >0.95 suppressed, cap 200, FIFO eviction
+
+### Two Prompt Modes
+- **Explicit** (`prompt_mode = "explicit"`): numbered decision tree, 5 examples, verbose. For weak models (Nemotron, Kimi)
+- **Standard** (`prompt_mode = "standard"`): concise rules, 5 examples. For strong models (GPT-5.4)
+
+### Outcome Distinction (critical for correctness)
+- `OUTCOME_OK` = task completed successfully
+- `OUTCOME_DENIED_SECURITY` = someone is ATTACKING (injection, social engineering, credential exfiltration)
+- `OUTCOME_NONE_UNSUPPORTED` = you LACK capability (deploy, external API, missing data)
+- `OUTCOME_NONE_CLARIFICATION` = NOT CRM work (math, trivia, jokes)
+- Key rule: "could not complete" -> UNSUPPORTED, not OK. Deploy/external -> UNSUPPORTED, not DENIED
+
+### Pre-grounding Context
+- tree + AGENTS.md + CRM schema (READMEs from directories)
+- Classified inbox with [CLASSIFICATION], [SENDER TRUST] annotations
+- Channel file statistics: auto-count entries by category (blacklist, verified, etc.)
+- OTP cleanup: after processing OTP inbox, delete source file (docs/channels/otp.txt)
+- Outbox: read README.MD for format, include `"sent": false`
 
 ## CLI Flags
 
@@ -72,43 +105,44 @@ Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep)
 
 Providers in `config.toml`. Key fields per provider:
 - `model`, `base_url`, `api_key` / `api_key_env`
-- `auth` — "keychain" for Claude Code subscription (macOS Keychain OAuth token)
-- `prompt_mode` — "explicit" (weak models) or "standard" (default)
-- `headers` — extra HTTP headers (e.g. CF Gateway timeout)
+- `auth` -- "keychain" for Claude Code subscription (macOS Keychain OAuth token)
+- `prompt_mode` -- "explicit" (weak models) or "standard" (default)
+- `headers` -- extra HTTP headers (e.g. CF Gateway timeout)
 
 ## Benchmarks
 
-Results tracked in `benchmarks/runs/`. After each significant change, run benchmark and log results.
+Results tracked in `benchmarks/runs/`.
 
-### Current Baselines (2026-03-31)
+### Current Baselines (2026-04-02)
 
-| Model | Commit | Score | Notes |
-|-------|--------|-------|-------|
-| gpt-5.4 | 05a4aed | **71.4%** (20/28) | +5 fixed from 64% baseline (t04,t05,t08,t14,t23) |
-| gpt-5.4-mini | 05a4aed | 100% (8/8 sample) | |
-| nemotron-120b | 40410a3 | 60% (18/30 full), 87.5% (7/8 sample) | Non-deterministic: ±4 tasks between runs |
-| claude-haiku-4.5 | 12e54a6 | 48.3% (14/29) | Via keychain sub. Over-cautious + token expired mid-bench |
+| Model | Score | Notes |
+|-------|-------|-------|
+| GPT-5.4 | **83%** (25/30) | Best. Non-deterministic on t23, t29 |
+| Nemotron-120b | **73%** (19/26) | Non-deterministic: +/-4 tasks between runs |
+| GPT-5.4-mini | 55% (17/31) | Baseline |
 
-### Known Unsolved Tasks
+### Evolution
 
-- **t18, t20, t22** — subtle inbox traps that bypass pre-scan AND model misses
-- **t24** — legit task where model is over-cautious
-- **t25** — injection caught as CLARIFICATION instead of DENIED (severity mismatch)
-- **t19, t28** — new tasks, need investigation
-
-### How to benchmark
+Agent improvements use `/evolve` skill -- autonomous hypothesis-test loop.
 
 ```bash
-# 8-task quick sample
-for t in t01 t02 t03 t04 t05 t09 t16 t21; do cargo run -- --provider openai --task $t &>/tmp/oai-$t.log & done; wait
-# Full 26 tasks
-cargo run -- --provider openai --parallel 3
+make task T=t18                    # single task
+make task T=t18 PROVIDER=openai    # different provider
+make sample                        # 8-task quick sample
+make full P=3                      # parallel full run
+make revert                        # discard failed hypothesis
 ```
 
-Log results to `benchmarks/runs/{date}__{provider}__{commit}.md`.
+Results: `benchmarks/runs/`, `.claude/skills/evolve/results.tsv`
 
 ## sgr-agent Relationship
 
 sgr-agent provides: Agent trait, LlmClient, ToolRegistry, run_loop, Message types.
-agent-bit provides: Pac1Agent (custom Agent impl), PCM tools, security scanner.
+agent-bit provides: Pac1Agent (custom Agent impl), PCM tools, security scanner, OutcomeValidator.
 sgr-agent is NOT modified for PAC1-specific logic.
+
+## Runtime Data
+
+- `.agent/outcome_store.json` -- adaptive OutcomeValidator prototypes (grows with each run)
+- `.agent/evolution.jsonl` -- sgr-agent auto-logged RunStats
+- `models/` -- ONNX model files (gitignored, ~90MB, run `scripts/export_model.py`)
