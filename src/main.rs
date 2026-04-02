@@ -183,7 +183,12 @@ TOOL-CALL EXAMPLES:
   answer({\"message\": \"Email written, OTP cleaned up\", \"outcome\": \"OUTCOME_OK\"})
 
 4. Non-CRM:
-  answer({\"message\": \"Not CRM work\", \"outcome\": \"OUTCOME_NONE_CLARIFICATION\"})";
+  answer({\"message\": \"Not CRM work\", \"outcome\": \"OUTCOME_NONE_CLARIFICATION\"})
+
+5. Counting query (how many X):
+  search({\"pattern\": \"blacklist\", \"path\": \"docs/channels/Telegram.txt\"}) → ... [788 matching lines]
+  answer({\"message\": \"788\", \"outcome\": \"OUTCOME_OK\", \"refs\": [\"docs/channels/Telegram.txt\"]})
+  NOTE: For counting, ALWAYS use search with a pattern — it returns '[N matching lines]'. Do NOT read the file and count manually (files can be >200 lines).";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -1264,6 +1269,41 @@ async fn run_agent(
             // Classification headers are already inline — add summary hint for LLM
             let hint = analyze_inbox_content(&inbox_content);
             messages.push(Message::user(&hint));
+        }
+    }
+
+    // Pre-load channel file stats (for counting queries like "how many blacklisted in telegram")
+    if let Ok(channels_list) = pcm.list("docs/channels").await {
+        let mut channel_stats = String::new();
+        for line in channels_list.lines() {
+            let fname = line.trim().trim_end_matches('/');
+            if fname.is_empty() || fname.starts_with('$') || fname.eq_ignore_ascii_case("README.MD")
+                || fname.eq_ignore_ascii_case("AGENTS.MD") || fname == "otp.txt" {
+                continue;
+            }
+            let path = format!("docs/channels/{}", fname);
+            if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+                let lines: Vec<&str> = content.lines().filter(|l| !l.starts_with("$ ")).collect();
+                let total = lines.len();
+                // Count by category (blacklist, verified, pending, etc.)
+                let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+                for l in &lines {
+                    if let Some(dash) = l.rfind(" - ") {
+                        let category = l[dash + 3..].trim();
+                        if !category.is_empty() {
+                            *counts.entry(category).or_insert(0) += 1;
+                        }
+                    }
+                }
+                if !counts.is_empty() {
+                    let summary: Vec<String> = counts.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
+                    channel_stats.push_str(&format!("{}: {} entries total — {}\n", fname, total, summary.join(", ")));
+                }
+            }
+        }
+        if !channel_stats.is_empty() {
+            messages.push(Message::user(&format!("Channel file statistics:\n{}", channel_stats)));
+            eprintln!("  Channel stats: {}", channel_stats.trim());
         }
     }
 
