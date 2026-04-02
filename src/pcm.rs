@@ -21,9 +21,12 @@ impl PcmClient {
     pub fn new(harness_url: &str) -> Self {
         let url = harness_url.trim_end_matches('/');
         let http = if url.starts_with("https://") {
+            let _ = connectrpc::rustls::crypto::ring::default_provider().install_default();
+            let roots = connectrpc::rustls::RootCertStore::from_iter(
+                webpki_roots::TLS_SERVER_ROOTS.iter().cloned()
+            );
             let tls = connectrpc::rustls::ClientConfig::builder()
-                .with_native_roots()
-                .expect("failed to load native root certs")
+                .with_root_certificates(roots)
                 .with_no_client_auth();
             HttpClient::with_tls(std::sync::Arc::new(tls))
         } else {
