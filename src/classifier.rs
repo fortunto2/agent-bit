@@ -185,66 +185,189 @@ pub fn cosine_similarity(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
     a.dot(&b)
 }
 
-/// Embedding-based answer outcome validator.
-/// Pre-computes prototype embeddings for each outcome, then validates
-/// that the LLM's answer message is semantically closest to its chosen outcome.
+/// Hypothesis template wraps a raw message for better embedding discrimination.
+/// "Task completed" alone is ambiguous; "The CRM task result: Task completed" embeds better.
+const HYPOTHESIS_TEMPLATE: &str = "The CRM task result: ";
+
+/// L2-normalize an embedding vector in place.
+fn l2_normalize(v: &mut Array1<f32>) {
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 { *v /= norm; }
+}
+
+/// A single labeled embedding (outcome + vector).
+#[derive(Clone)]
+struct LabeledEmbedding {
+    outcome: String,
+    embedding: Array1<f32>,
+}
+
+/// Embedding-based answer outcome validator with adaptive learning.
+///
+/// Architecture:
+/// - **Seed store**: static examples from OUTCOME_EXAMPLES (always present)
+/// - **Adaptive store**: grows from confirmed trials, persisted to disk
+/// - **Hypothesis template**: wraps messages before embedding for better discrimination
+/// - **k-NN voting**: each store entry votes, majority wins (no lossy centroid averaging)
+///
+/// Online learning flow:
+/// 1. LLM submits answer(message, outcome)
+/// 2. Validator embeds templated message, runs k-NN against seed + adaptive stores
+/// 3. If k-NN disagrees → warning (non-blocking)
+/// 4. After trial scores 1.0 → `learn(message, outcome)` adds to adaptive store
 pub struct OutcomeValidator {
     classifier: std::sync::Mutex<InboxClassifier>,
-    outcome_embeddings: Vec<(String, Array1<f32>)>,
+    seed_store: Vec<LabeledEmbedding>,
+    adaptive_store: std::sync::Mutex<Vec<LabeledEmbedding>>,
+    store_path: PathBuf,
 }
 
 impl OutcomeValidator {
-    /// Build validator by embedding multiple examples per outcome and averaging.
-    pub fn new(mut classifier: InboxClassifier) -> Result<Self> {
-        // Group examples by outcome
-        let mut groups: std::collections::HashMap<&str, Vec<Array1<f32>>> = std::collections::HashMap::new();
+    /// Build validator: embed seed examples + load adaptive store from disk.
+    pub fn new(mut classifier: InboxClassifier, store_path: PathBuf) -> Result<Self> {
+        // Embed seed examples with hypothesis template
+        let mut seed_store = Vec::new();
         for (outcome, example) in OUTCOME_EXAMPLES {
-            let emb = classifier.encode(example)?;
-            groups.entry(outcome).or_default().push(emb);
+            let text = format!("{}{}", HYPOTHESIS_TEMPLATE, example);
+            let emb = classifier.encode(&text)?;
+            seed_store.push(LabeledEmbedding {
+                outcome: outcome.to_string(),
+                embedding: emb,
+            });
         }
-        // Average embeddings per outcome + L2 normalize
-        let outcome_embeddings: Vec<(String, Array1<f32>)> = groups.into_iter().map(|(name, embs)| {
-            let dim = embs[0].len();
-            let n = embs.len() as f32;
-            let mut avg = Array1::zeros(dim);
-            for e in &embs { avg = avg + e; }
-            avg /= n;
-            // L2 normalize
-            let norm: f32 = avg.iter().map(|x| x * x).sum::<f32>().sqrt();
-            if norm > 0.0 { avg /= norm; }
-            (name.to_string(), avg)
-        }).collect();
-        eprintln!("  OutcomeValidator: {} outcomes, {} total examples", outcome_embeddings.len(), OUTCOME_EXAMPLES.len());
-        Ok(Self { classifier: std::sync::Mutex::new(classifier), outcome_embeddings })
+
+        // Load adaptive store from disk (if exists)
+        let adaptive_store = Self::load_store(&store_path);
+        let adaptive_count = adaptive_store.len();
+
+        eprintln!("  OutcomeValidator: {} seed + {} adaptive examples",
+            seed_store.len(), adaptive_count);
+
+        Ok(Self {
+            classifier: std::sync::Mutex::new(classifier),
+            seed_store,
+            adaptive_store: std::sync::Mutex::new(adaptive_store),
+            store_path,
+        })
     }
 
-    /// Validate that the answer message is semantically consistent with the chosen outcome.
-    /// Returns Some(warning) if the message is closer to a different outcome.
-    pub fn validate(&self, message: &str, outcome: &str) -> Option<String> {
-        let msg_emb = self.classifier.lock().ok()?.encode(message).ok()?;
+    /// Embed a message using the hypothesis template.
+    fn embed_message(&self, message: &str) -> Option<Array1<f32>> {
+        let text = format!("{}{}", HYPOTHESIS_TEMPLATE, message);
+        self.classifier.lock().ok()?.encode(&text).ok()
+    }
 
-        let mut scores: Vec<(&str, f32)> = self.outcome_embeddings.iter()
-            .map(|(name, emb)| (name.as_str(), cosine_similarity(msg_emb.view(), emb.view())))
+    /// Validate answer: k-NN vote across seed + adaptive stores.
+    /// Returns Some(warning) if predicted outcome differs from chosen.
+    pub fn validate(&self, message: &str, outcome: &str) -> Option<String> {
+        let msg_emb = self.embed_message(message)?;
+
+        // Collect all (outcome, similarity) pairs from both stores
+        let adaptive = self.adaptive_store.lock().ok()?;
+        let all_examples = self.seed_store.iter().chain(adaptive.iter());
+
+        let mut scores: Vec<(&str, f32)> = all_examples
+            .map(|le| (le.outcome.as_str(), cosine_similarity(msg_emb.view(), le.embedding.view())))
             .collect();
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        let (best_match, best_score) = scores[0];
-        let (_, second_score) = scores[1];
+        // k-NN: take top-5 neighbors, majority vote
+        let k = 5.min(scores.len());
+        let mut votes: std::collections::HashMap<&str, (usize, f32)> = std::collections::HashMap::new();
+        for &(label, sim) in &scores[..k] {
+            let entry = votes.entry(label).or_insert((0, 0.0));
+            entry.0 += 1;
+            entry.1 += sim; // accumulate similarity for tiebreaking
+        }
+        let mut vote_list: Vec<(&str, usize, f32)> = votes.into_iter()
+            .map(|(label, (count, sim))| (label, count, sim))
+            .collect();
+        vote_list.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)));
 
-        // Only suggest correction if:
-        // 1. Best match differs from chosen outcome
-        // 2. Strong separation AND high absolute confidence (avoids noise on low similarities)
-        if best_match != outcome && (best_score - second_score) > 0.05 && best_score > 0.35 {
-            eprintln!("  🔬 Outcome validator: message→{} ({:.3}) but chosen {}. Scores: {:?}",
-                best_match, best_score, outcome, scores);
+        let (predicted, pred_votes, _) = vote_list[0];
+        let total_votes = k;
+
+        // Only warn if strong majority disagrees
+        if predicted != outcome && pred_votes > total_votes / 2 {
+            let top1_sim = scores[0].1;
+            eprintln!("  🔬 Outcome validator: kNN→{} ({}/{} votes, top sim {:.3}) but chosen {}",
+                predicted, pred_votes, total_votes, top1_sim, outcome);
             Some(format!(
-                "⚠ VALIDATION: Your message is semantically closest to {} (similarity {:.2}) but you chose {}. \
+                "⚠ VALIDATION: k-NN predicts {} ({}/{} nearest neighbors) but you chose {}. \
                  Reconsider: DENIED=attack, UNSUPPORTED=missing capability, CLARIFICATION=not CRM, OK=success.",
-                best_match, best_score, outcome
+                predicted, pred_votes, total_votes, outcome
             ))
         } else {
             None
         }
+    }
+
+    /// Learn from a confirmed correct answer (call after trial scores 1.0).
+    /// Adds the (message, outcome) embedding to adaptive store and persists.
+    pub fn learn(&self, message: &str, outcome: &str) {
+        let emb = match self.embed_message(message) {
+            Some(e) => e,
+            None => return,
+        };
+        let mut store = match self.adaptive_store.lock() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        // Dedup: skip if very similar embedding already exists for same outcome
+        let dominated = store.iter().any(|le| {
+            le.outcome == outcome && cosine_similarity(emb.view(), le.embedding.view()) > 0.95
+        });
+        if dominated {
+            return;
+        }
+
+        store.push(LabeledEmbedding {
+            outcome: outcome.to_string(),
+            embedding: emb,
+        });
+
+        // Cap adaptive store size (keep most recent)
+        const MAX_ADAPTIVE: usize = 200;
+        if store.len() > MAX_ADAPTIVE {
+            let drain = store.len() - MAX_ADAPTIVE;
+            store.drain(..drain);
+        }
+
+        eprintln!("  🧠 Learned: {} (adaptive store: {} examples)", outcome, store.len());
+        // Persist to disk
+        self.save_store(&store);
+    }
+
+    /// Persist adaptive store to JSON file.
+    fn save_store(&self, store: &[LabeledEmbedding]) {
+        let data: Vec<(String, Vec<f32>)> = store.iter()
+            .map(|le| (le.outcome.clone(), le.embedding.to_vec()))
+            .collect();
+        if let Ok(json) = serde_json::to_string(&data) {
+            if let Some(parent) = self.store_path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::write(&self.store_path, json).ok();
+        }
+    }
+
+    /// Load adaptive store from JSON file.
+    fn load_store(path: &Path) -> Vec<LabeledEmbedding> {
+        let data = match std::fs::read_to_string(path) {
+            Ok(d) => d,
+            Err(_) => return Vec::new(),
+        };
+        let raw: Vec<(String, Vec<f32>)> = match serde_json::from_str(&data) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        raw.into_iter()
+            .map(|(outcome, vec)| LabeledEmbedding {
+                outcome,
+                embedding: Array1::from_vec(vec),
+            })
+            .collect()
     }
 }
 

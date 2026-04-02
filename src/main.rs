@@ -1293,7 +1293,8 @@ async fn run_agent(
 
     // Build OutcomeValidator from classifier (consumes clf — no longer needed for inbox)
     let outcome_validator: Option<Arc<classifier::OutcomeValidator>> = clf.and_then(|c| {
-        match classifier::OutcomeValidator::new(c) {
+        let store_path = std::path::PathBuf::from(".agent/outcome_store.json");
+        match classifier::OutcomeValidator::new(c, store_path) {
             Ok(v) => Some(Arc::new(v)),
             Err(e) => {
                 eprintln!("  ⚠ OutcomeValidator failed: {:#}", e);
