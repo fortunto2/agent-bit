@@ -1,16 +1,9 @@
 //! BitGN PcmRuntime client — typed Connect-RPC via bitgn-sdk.
-//!
-//! Wraps the generated PcmRuntimeClient with shell-like output formatting
-//! that the LLM expects (e.g. `$ cat file\ncontent`).
 
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-use bitgn_sdk::vm::pcm::{
-    self as proto,
-    PcmRuntimeClient,
-};
-use connectrpc::client::{HttpClient, ClientConfig};
+use bitgn_sdk::vm::pcm::{self as proto, PcmRuntimeClient};
+use connectrpc::client::HttpClient;
 
 pub struct PcmClient {
     inner: PcmRuntimeClient<HttpClient>,
@@ -19,20 +12,8 @@ pub struct PcmClient {
 
 impl PcmClient {
     pub fn new(harness_url: &str) -> Self {
-        let url = harness_url.trim_end_matches('/');
-        let http = if url.starts_with("https://") {
-            let _ = connectrpc::rustls::crypto::ring::default_provider().install_default();
-            let roots = connectrpc::rustls::RootCertStore::from_iter(
-                webpki_roots::TLS_SERVER_ROOTS.iter().cloned()
-            );
-            let tls = connectrpc::rustls::ClientConfig::builder()
-                .with_root_certificates(roots)
-                .with_no_client_auth();
-            HttpClient::with_tls(std::sync::Arc::new(tls))
-        } else {
-            HttpClient::plaintext()
-        };
-        let config = ClientConfig::new(url.parse().expect("invalid harness URL"));
+        let http = bitgn_sdk::make_http_client(harness_url);
+        let config = bitgn_sdk::make_client_config(harness_url, None);
         Self {
             inner: PcmRuntimeClient::new(http, config),
             answer_submitted: AtomicBool::new(false),
@@ -48,8 +29,7 @@ impl PcmClient {
             root: root.into(), level, ..Default::default()
         }).await.map_err(|e| Self::err("Tree", e))?;
         let v = resp.view();
-        let tree_output = format_tree_entry(&v.root, "", true);
-        Ok(format!("$ tree -L {} {}\n{}", level, root, tree_output))
+        Ok(format!("$ tree -L {} {}\n{}", level, root, format_tree_entry(&v.root, "", true)))
     }
 
     pub async fn list(&self, path: &str) -> Result<String> {
@@ -58,12 +38,9 @@ impl PcmClient {
         }).await.map_err(|e| Self::err("List", e))?;
         let v = resp.view();
         let mut out = format!("$ ls {}\n", path);
-        for entry in &v.entries {
-            if entry.is_dir {
-                out.push_str(&format!("{}/\n", entry.name));
-            } else {
-                out.push_str(&format!("{}\n", entry.name));
-            }
+        for e in &v.entries {
+            if e.is_dir { out.push_str(&format!("{}/\n", e.name)); }
+            else { out.push_str(&format!("{}\n", e.name)); }
         }
         Ok(out)
     }
@@ -76,11 +53,8 @@ impl PcmClient {
         let header = if start_line > 0 || end_line > 0 {
             format!("$ sed -n '{},{}p' {}", if start_line > 0 { start_line } else { 1 },
                 if end_line > 0 { end_line.to_string() } else { "$".into() }, path)
-        } else if number {
-            format!("$ cat -n {}", path)
-        } else {
-            format!("$ cat {}", path)
-        };
+        } else if number { format!("$ cat -n {}", path) }
+        else { format!("$ cat {}", path) };
         Ok(format!("{}\n{}", header, v.content))
     }
 
@@ -92,16 +66,14 @@ impl PcmClient {
     }
 
     pub async fn delete(&self, path: &str) -> Result<()> {
-        self.inner.delete(proto::DeleteRequest {
-            path: path.into(), ..Default::default()
-        }).await.map_err(|e| Self::err("Delete", e))?;
+        self.inner.delete(proto::DeleteRequest { path: path.into(), ..Default::default() })
+            .await.map_err(|e| Self::err("Delete", e))?;
         Ok(())
     }
 
     pub async fn mkdir(&self, path: &str) -> Result<()> {
-        self.inner.mk_dir(proto::MkDirRequest {
-            path: path.into(), ..Default::default()
-        }).await.map_err(|e| Self::err("MkDir", e))?;
+        self.inner.mk_dir(proto::MkDirRequest { path: path.into(), ..Default::default() })
+            .await.map_err(|e| Self::err("MkDir", e))?;
         Ok(())
     }
 
@@ -141,8 +113,7 @@ impl PcmClient {
     pub async fn context(&self) -> Result<String> {
         let resp = self.inner.context(proto::ContextRequest::default())
             .await.map_err(|e| Self::err("Context", e))?;
-        let v = resp.view();
-        Ok(format!("$ date\n{}", v.time))
+        Ok(format!("$ date\n{}", resp.view().time))
     }
 
     pub async fn answer(&self, message: &str, outcome: &str, refs: &[String]) -> Result<()> {
@@ -155,34 +126,22 @@ impl PcmClient {
             _ => proto::Outcome::OUTCOME_OK,
         };
         self.inner.answer(proto::AnswerRequest {
-            message: message.into(), outcome: outcome_val.into(), refs: refs.to_vec(),
-            ..Default::default()
+            message: message.into(), outcome: outcome_val.into(), refs: refs.to_vec(), ..Default::default()
         }).await.map_err(|e| Self::err("Answer", e))?;
         self.answer_submitted.store(true, Ordering::SeqCst);
         Ok(())
     }
 }
 
-/// Format tree entry recursively.
 fn format_tree_entry(entry: &proto::tree_response::EntryView<'_>, prefix: &str, is_last: bool) -> String {
-    let name = &entry.name;
-    let is_dir = entry.is_dir;
-
     let connector = if prefix.is_empty() { "" } else if is_last { "└── " } else { "├── " };
-    let display_name = if is_dir { format!("{}/", name) } else { name.to_string() };
-    let mut result = format!("{}{}{}\n", prefix, connector, display_name);
-
-    let child_prefix = if prefix.is_empty() {
-        String::new()
-    } else if is_last {
-        format!("{}    ", prefix)
-    } else {
-        format!("{}│   ", prefix)
-    };
-
+    let display = if entry.is_dir { format!("{}/", entry.name) } else { entry.name.to_string() };
+    let mut result = format!("{}{}{}\n", prefix, connector, display);
+    let child_prefix = if prefix.is_empty() { String::new() }
+        else if is_last { format!("{}    ", prefix) }
+        else { format!("{}│   ", prefix) };
     for (i, child) in entry.children.iter().enumerate() {
-        let is_last_child = i == entry.children.len() - 1;
-        result.push_str(&format_tree_entry(&child, &child_prefix, is_last_child));
+        result.push_str(&format_tree_entry(&child, &child_prefix, i == entry.children.len() - 1));
     }
     result
 }

@@ -345,8 +345,8 @@ async fn run_leaderboard(
     }
 
     eprintln!("[pac1] Submitting run...");
-    let submit = harness.submit_run(&run.run_id).await?;
-    eprintln!("[pac1] Submitted! State: {} | Run ID: {}", submit.state, run.run_id);
+    harness.submit_run(&run.run_id).await?;
+    eprintln!("[pac1] Submitted! Run ID: {}", run.run_id);
     Ok(())
 }
 

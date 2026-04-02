@@ -1,125 +1,67 @@
-//! BitGN HarnessService client — Connect-RPC over HTTP/JSON.
+//! BitGN HarnessService client — typed Connect-RPC via bitgn-sdk.
 
-use anyhow::{Context, Result, bail};
-use serde::Deserialize;
-use serde_json::json;
+use anyhow::Result;
+use bitgn_sdk::harness::{self as proto, HarnessServiceClient};
+use connectrpc::client::HttpClient;
 
 pub struct HarnessClient {
-    client: reqwest::Client,
-    base_url: String,
-    api_key: Option<String>,
+    inner: HarnessServiceClient<HttpClient>,
 }
 
-// ─── Response types ──────────────────────────────────────────────────────────
+// ─── Response wrappers (compatible API for main.rs) ─────────────────────────
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StatusResponse {
-    pub status: String,
-    pub version: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BenchmarkResponse {
     pub benchmark_id: String,
     pub description: String,
     pub tasks: Vec<TaskInfo>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct TaskInfo {
     pub task_id: String,
     pub preview: String,
-    #[serde(default)]
     pub hint: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct PlaygroundResponse {
     pub trial_id: String,
     pub instruction: String,
     pub harness_url: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct StartRunResponse {
     pub run_id: String,
-    pub benchmark_id: String,
-    #[serde(default)]
     pub trial_ids: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct StartTrialResponse {
     pub trial_id: String,
-    pub benchmark_id: String,
     pub task_id: String,
-    pub run_id: String,
     pub instruction: String,
     pub harness_url: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct EndTrialResponse {
     pub trial_id: String,
     pub score: Option<f32>,
-    #[serde(default)]
     pub score_detail: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct GetRunResponse {
     pub run_id: String,
-    pub benchmark_id: String,
-    pub name: String,
-    pub score: Option<f32>,
-    pub state: String,
-    pub kind: String,
-    #[serde(default)]
-    pub trials: Vec<TrialHead>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TrialHead {
-    pub trial_id: String,
-    pub task_id: String,
     pub state: String,
     pub score: Option<f32>,
-    #[serde(default)]
-    pub error: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SubmitRunResponse {
-    pub run_id: String,
-    pub state: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct GetTrialResponse {
     pub trial_id: String,
     pub instruction: String,
     pub task_id: String,
     pub score: Option<f32>,
-    #[serde(default)]
     pub score_detail: Vec<String>,
     pub state: String,
-    #[serde(default)]
     pub logs: Vec<TrialLog>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct TrialLog {
     pub time: String,
     pub text: String,
@@ -130,104 +72,122 @@ pub struct TrialLog {
 
 impl HarnessClient {
     pub fn new(base_url: &str, api_key: Option<String>) -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            base_url: base_url.trim_end_matches('/').to_string(),
-            api_key,
-        }
+        let http = bitgn_sdk::make_http_client(base_url);
+        let config = bitgn_sdk::make_client_config(base_url, api_key.as_deref());
+        Self { inner: HarnessServiceClient::new(http, config) }
     }
 
-    async fn call<T: serde::de::DeserializeOwned>(
-        &self,
-        method: &str,
-        body: &serde_json::Value,
-    ) -> Result<T> {
-        let url = format!(
-            "{}/bitgn.harness.HarnessService/{}",
-            self.base_url, method
-        );
-        let mut req = self
-            .client
-            .post(&url)
-            .header("Content-Type", "application/json");
-
-        if let Some(ref key) = self.api_key {
-            req = req.header("Authorization", format!("Bearer {}", key));
-        }
-
-        let resp = req
-            .json(body)
-            .send()
-            .await
-            .context(format!("request to {}", method))?;
-
-        let status = resp.status();
-        let text = resp.text().await?;
-
-        if !status.is_success() {
-            bail!("{} failed ({}): {}", method, status, text);
-        }
-
-        serde_json::from_str(&text).context(format!("parse {} response", method))
+    fn err(method: &str, e: connectrpc::ConnectError) -> anyhow::Error {
+        anyhow::anyhow!("{} failed: {}", method, e)
     }
-
-    // ─── Anonymous RPCs ──────────────────────────────────────────────────
 
     pub async fn status(&self) -> Result<String> {
-        let resp: StatusResponse = self.call("Status", &json!({})).await?;
-        Ok(format!("{} ({})", resp.status, resp.version))
+        let r = self.inner.status(proto::StatusRequest::default())
+            .await.map_err(|e| Self::err("Status", e))?;
+        let v = r.view();
+        Ok(format!("{} ({})", v.status, v.version))
     }
 
     pub async fn get_benchmark(&self, benchmark_id: &str) -> Result<BenchmarkResponse> {
-        self.call("GetBenchmark", &json!({"benchmarkId": benchmark_id}))
-            .await
+        let r = self.inner.get_benchmark(proto::GetBenchmarkRequest {
+            benchmark_id: benchmark_id.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("GetBenchmark", e))?;
+        let v = r.view();
+        Ok(BenchmarkResponse {
+            benchmark_id: v.benchmark_id.to_string(),
+            description: v.description.to_string(),
+            tasks: v.tasks.iter().map(|t| TaskInfo {
+                task_id: t.task_id.to_string(),
+                preview: t.preview.to_string(),
+                hint: t.hint.to_string(),
+            }).collect(),
+        })
     }
 
-    pub async fn start_playground(
-        &self,
-        benchmark_id: &str,
-        task_id: &str,
-    ) -> Result<PlaygroundResponse> {
-        self.call(
-            "StartPlayground",
-            &json!({"benchmarkId": benchmark_id, "taskId": task_id}),
-        )
-        .await
+    pub async fn start_playground(&self, benchmark_id: &str, task_id: &str) -> Result<PlaygroundResponse> {
+        let r = self.inner.start_playground(proto::StartPlaygroundRequest {
+            benchmark_id: benchmark_id.into(), task_id: task_id.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("StartPlayground", e))?;
+        let v = r.view();
+        Ok(PlaygroundResponse {
+            trial_id: v.trial_id.to_string(),
+            instruction: v.instruction.to_string(),
+            harness_url: v.harness_url.to_string(),
+        })
     }
 
     pub async fn end_trial(&self, trial_id: &str) -> Result<EndTrialResponse> {
-        self.call("EndTrial", &json!({"trialId": trial_id})).await
+        let r = self.inner.end_trial(proto::EndTrialRequest {
+            trial_id: trial_id.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("EndTrial", e))?;
+        let v = r.view();
+        Ok(EndTrialResponse {
+            trial_id: v.trial_id.to_string(),
+            score: v.score,
+            score_detail: v.score_detail.iter().map(|s| s.to_string()).collect(),
+        })
     }
 
-    // ─── Authenticated RPCs (leaderboard) ────────────────────────────────
-
-    pub async fn start_run(
-        &self,
-        benchmark_id: &str,
-        name: &str,
-    ) -> Result<StartRunResponse> {
-        self.call(
-            "StartRun",
-            &json!({"benchmarkId": benchmark_id, "name": name}),
-        )
-        .await
+    pub async fn start_run(&self, benchmark_id: &str, name: &str) -> Result<StartRunResponse> {
+        let r = self.inner.start_run(proto::StartRunRequest {
+            benchmark_id: benchmark_id.into(), name: name.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("StartRun", e))?;
+        let v = r.view();
+        Ok(StartRunResponse {
+            run_id: v.run_id.to_string(),
+            trial_ids: v.trial_ids.iter().map(|s| s.to_string()).collect(),
+        })
     }
 
     pub async fn start_trial(&self, trial_id: &str) -> Result<StartTrialResponse> {
-        self.call("StartTrial", &json!({"trialId": trial_id}))
-            .await
+        let r = self.inner.start_trial(proto::StartTrialRequest {
+            trial_id: trial_id.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("StartTrial", e))?;
+        let v = r.view();
+        Ok(StartTrialResponse {
+            trial_id: v.trial_id.to_string(),
+            task_id: v.task_id.to_string(),
+            instruction: v.instruction.to_string(),
+            harness_url: v.harness_url.to_string(),
+        })
     }
 
     pub async fn get_run(&self, run_id: &str) -> Result<GetRunResponse> {
-        self.call("GetRun", &json!({"runId": run_id})).await
+        let r = self.inner.get_run(proto::GetRunRequest {
+            run_id: run_id.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("GetRun", e))?;
+        let v = r.view();
+        Ok(GetRunResponse {
+            run_id: v.run_id.to_string(),
+            state: format!("{:?}", v.state),
+            score: v.score,
+        })
     }
 
-    pub async fn submit_run(&self, run_id: &str) -> Result<SubmitRunResponse> {
-        self.call("SubmitRun", &json!({"runId": run_id})).await
+    pub async fn submit_run(&self, run_id: &str) -> Result<()> {
+        self.inner.submit_run(proto::SubmitRunRequest {
+            run_id: run_id.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("SubmitRun", e))?;
+        Ok(())
     }
 
-    /// Get trial details including activity logs (for debugging).
     pub async fn get_trial(&self, trial_id: &str) -> Result<GetTrialResponse> {
-        self.call("GetTrial", &json!({"trialId": trial_id})).await
+        let r = self.inner.get_trial(proto::GetTrialRequest {
+            trial_id: trial_id.into(), ..Default::default()
+        }).await.map_err(|e| Self::err("GetTrial", e))?;
+        let v = r.view();
+        Ok(GetTrialResponse {
+            trial_id: v.trial_id.to_string(),
+            instruction: v.instruction.to_string(),
+            task_id: v.task_id.to_string(),
+            score: v.score,
+            score_detail: v.score_detail.iter().map(|s| s.to_string()).collect(),
+            state: format!("{:?}", v.state),
+            logs: v.logs.iter().map(|l| TrialLog {
+                time: l.time.to_string(),
+                text: l.text.to_string(),
+                kind: format!("{:?}", l.kind),
+            }).collect(),
+        })
     }
 }
