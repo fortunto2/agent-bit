@@ -17,14 +17,17 @@ cargo test                                        # 113 unit tests
 ## Architecture
 
 ```
-src/main.rs       -- CLI, orchestration, pre-scan, system prompts, domain matching
-src/agent.rs      -- Pac1Agent (Router + Structured CoT reasoning)
-src/bitgn.rs      -- HarnessService client (Connect-RPC/JSON)
-src/pcm.rs        -- PcmRuntime client (11 file-system RPCs)
-src/tools.rs      -- 11 Tool implementations + security guard + OutcomeValidator
-src/config.rs     -- Provider config with prompt_mode (explicit/standard)
-src/classifier.rs -- ONNX classifier + OutcomeValidator (adaptive kNN)
-src/crm_graph.rs  -- petgraph CRM knowledge graph (contacts, accounts, sender trust)
+src/main.rs          -- CLI, orchestration, guess_outcome (~384 lines)
+src/prompts.rs       -- system prompts, planning prompt, dynamic examples
+src/scanner.rs       -- security scanning, inbox classification, domain matching
+src/pregrounding.rs  -- contact pre-grounding, inbox reading, planning, agent execution
+src/agent.rs         -- Pac1Agent (Router + Structured CoT reasoning)
+src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
+src/pcm.rs           -- PcmRuntime client (11 file-system RPCs)
+src/tools.rs         -- 11 Tool implementations + security guard + OutcomeValidator
+src/config.rs        -- Provider config with prompt_mode (explicit/standard)
+src/classifier.rs    -- ONNX classifier + OutcomeValidator (adaptive kNN)
+src/crm_graph.rs     -- petgraph CRM knowledge graph (contacts, accounts, sender trust)
 ```
 
 Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep).
@@ -169,8 +172,11 @@ make evolve-fails                  # evolve known failures (bighead-style)
 
 **Current failing tasks** (all non-deterministic, pass on some runs):
 - t08: CRM file operations (delete ambiguity)
-- t23: contact pre-grounding implemented, needs harness verification
+- t23: contact pre-grounding implemented, needs harness verification (Phase 4 open)
 - t25, t29: OTP handling edge cases
+
+**Known tech debt:**
+- `src/main.rs` at 2001 lines — needs splitting into prompts, examples, pregrounding modules
 
 Plans for these: `docs/plan/`, roadmap: `docs/roadmap.md`
 
