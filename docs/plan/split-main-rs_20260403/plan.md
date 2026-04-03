@@ -9,7 +9,7 @@
 
 Mechanical extraction of main.rs (2001 lines) into 3 modules. No logic changes — only file moves, `pub(crate)` visibility, and `use` imports. Each phase produces a compiling, test-passing codebase.
 
-## Phase 1: Extract prompts.rs
+## Phase 1: Extract prompts.rs <!-- checkpoint:6b14dfd -->
 
 Extract static text (system prompt, planning prompt, examples) into a dedicated module.
 
@@ -28,28 +28,15 @@ Extract static text (system prompt, planning prompt, examples) into a dedicated 
 Extract security scanning, inbox classification, and domain matching into scanner module (~570 code lines + ~200 test lines).
 
 ### Tasks
-- [ ] Task 2.1: Create `src/scanner.rs` with these functions (all `pub(crate)`):
-  - `threat_score`, `prescan_instruction`
-  - `scan_inbox`, `analyze_inbox_content`, `extract_company_ref`
-  - `structural_injection_score`, `FileClassification` (struct), `semantic_classify_inbox_file`
-  - `extract_sender_email`, `extract_sender_domain`, `domain_stem`
-  - `collect_account_domains`, `check_sender_domain_match`
-  - Add required `use` imports at top (classifier, pcm, crm_graph crate types)
-  - Move `SharedClassifier` type alias here (used by scan_inbox and read_inbox_files)
-- [ ] Task 2.2: Move corresponding tests from `main.rs::tests` to `scanner.rs` `#[cfg(test)] mod tests`:
-  - `threat_score_*` tests (6 tests)
-  - `prescan_*` tests (4 tests)
-  - `structural_*` tests (7 tests)
-  - `domain_stem_*` tests (1 test)
-  - `extract_sender_domain_*` tests (3 tests)
-  - `sender_domain_*` / `check_sender_domain_*` tests (6 tests)
-- [ ] Task 2.3: In `src/main.rs`, remove moved code, add `mod scanner;`, update all references to use `scanner::*` paths.
-- [ ] Task 2.4: Run `cargo test` + `cargo build` — verify all 113 tests pass.
+- [x] Task 2.1: Create `src/scanner.rs` with these functions (all `pub(crate)`)
+- [x] Task 2.2: Move corresponding tests from `main.rs::tests` to `scanner.rs` `#[cfg(test)] mod tests`
+- [x] Task 2.3: In `src/main.rs`, remove moved code, add `mod scanner;`, update all references to use `scanner::*` paths.
+- [x] Task 2.4: Run `cargo test` + `cargo build` — verify all 113 tests pass.
 
 ### Verification
-- [ ] `src/scanner.rs` exists with 13 functions + 1 struct + ~27 tests
-- [ ] `cargo test` passes (113 tests)
-- [ ] No duplicate function definitions
+- [x] `src/scanner.rs` exists with 13 functions + 1 struct + 31 tests
+- [x] `cargo test` passes (113 tests)
+- [x] No duplicate function definitions
 
 ## Phase 3: Extract pregrounding.rs
 
