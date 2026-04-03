@@ -14,6 +14,7 @@ provider = "openai"
 model = "gpt-5.4-mini"
 api_key_env = "OPENAI_API_KEY"
 
+
 [providers.openai-full]
 model = "gpt-5.4"
 api_key_env = "OPENAI_API_KEY"
@@ -22,13 +23,13 @@ api_key_env = "OPENAI_API_KEY"
 model = "@cf/moonshotai/kimi-k2.5"
 base_url = "https://api.cloudflare.com/client/v4/accounts/33dec9645c443eef5859b1e10ce71e01/ai/v1"
 api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
-prompt_mode = "explicit"
+
 
 [providers.kimi-gateway]
 model = "workers-ai/@cf/moonshotai/kimi-k2.5"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
-prompt_mode = "explicit"
+
 [providers.kimi-gateway.headers]
 cf-aig-request-timeout = "300000"
 
@@ -46,7 +47,7 @@ api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
 model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
-prompt_mode = "explicit"
+
 temperature = 0.1
 [providers.nemotron.headers]
 cf-aig-request-timeout = "300000"
@@ -61,13 +62,13 @@ auth = "keychain"
 [providers.claude-haiku]
 model = "claude-haiku-4-5-20251001"
 auth = "keychain"
-prompt_mode = "explicit"
+
 
 [providers.gemma4]
 model = "workers-ai/@cf/google/gemma-4-26b-a4b-it"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
-prompt_mode = "explicit"
+
 temperature = 0.1
 [providers.gemma4.headers]
 cf-aig-request-timeout = "300000"
