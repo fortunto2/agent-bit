@@ -438,23 +438,31 @@ fn guess_outcome(last_msg: &str, history: &str) -> &'static str {
 /// Minimal threat score — only literal HTML injection that no classifier should miss.
 /// Everything else is handled by the semantic classifier.
 fn threat_score(text: &str) -> u32 {
-    // Decode hex escapes (\x3c → <) before scanning
+    // Decode common escapes before HTML parsing
     let decoded = text
         .replace("\\x3c", "<").replace("\\x3e", ">")
-        .replace("\\x3C", "<").replace("\\x3E", ">")
-        .replace("&lt;", "<").replace("&gt;", ">");
-    let lower = decoded.to_lowercase();
+        .replace("\\x3C", "<").replace("\\x3E", ">");
+
+    // Use ammonia (html5ever) to detect dangerous HTML — browser-grade parsing.
+    // If ammonia strips anything, the original had injection content.
+    let clean = ammonia::clean(&decoded);
+    let html_diff = decoded.len().saturating_sub(clean.len());
+
     let mut score = 0u32;
 
-    // HTML/JS injection markers
-    for tag in &["<script", "</script", "<iframe", "javascript:"] {
-        if lower.contains(tag) {
-            score += 3;
-        }
+    // ammonia removed content → HTML injection detected
+    if html_diff > 10 {
+        score += 6; // high confidence: significant content removed
+    } else if html_diff > 0 {
+        score += 3; // some HTML stripped
     }
 
+    // Non-HTML injection patterns (ammonia doesn't catch these)
+    let lower = decoded.to_lowercase();
+
     // HTML comment injections (<!-- injected: ... -->)
-    if lower.contains("<!-- injected") || lower.contains("<!--injected") {
+    if lower.contains("<!-- injected") || lower.contains("<!--injected")
+        || lower.contains("<!-- override") || lower.contains("<!-- root") {
         score += 3;
     }
 
