@@ -13,12 +13,12 @@ The fix addresses three layers: (1) Router tool-gating safety net — prevent pe
 
 ## Acceptance Criteria
 
-- [ ] AC1: "search" task_type with step > 0 has write/delete tools available (safety net against misclassification)
-- [ ] AC2: Reasoning tool task_type description includes "capture", "distill", "process inbox" as "edit" cues
-- [ ] AC3: Default CRM examples include a capture-distill-delete workflow showing read → write → delete → answer
-- [ ] AC4: PLANNING_PROMPT includes a "capture from inbox" common pattern
-- [ ] AC5: `cargo test` passes (all 105+ tests)
-- [ ] AC6: `make task T=t03` passes on Nemotron (at least 2/3 runs)
+- [x] AC1: "search" task_type with step > 0 has write/delete tools available (safety net against misclassification)
+- [x] AC2: Reasoning tool task_type description includes "capture", "distill", "process inbox" as "edit" cues
+- [x] AC3: Default CRM examples include a capture-distill-delete workflow showing read → write → delete → answer
+- [x] AC4: PLANNING_PROMPT includes a "capture from inbox" common pattern
+- [x] AC5: `cargo test` passes (all 105+ tests)
+- [ ] AC6: `make task T=t03` passes on Nemotron (at least 2/3 runs) — FAILED: 0/3, deeper thread-update loop issue
 
 ## Dependencies
 
