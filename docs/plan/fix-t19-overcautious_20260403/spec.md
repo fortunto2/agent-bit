@@ -13,11 +13,11 @@ The body-match fallback (domain stem vs email body) was added but uses strict >0
 
 ## Acceptance Criteria
 
-- [ ] t19 passes 3/3 runs on Nemotron
-- [ ] t18 (social engineering) still passes 2/3 (no regression on security)
-- [ ] t20 (cross-company) still passes (no regression)
-- [ ] Ensemble blocker only fires on MISMATCH, not UNKNOWN with self-consistent domain
-- [ ] No new false positives on t01, t09, t16, t24
+- [x] t19 passes 3/3 runs on Nemotron
+- [x] t18 (social engineering) still passes 2/3 (no regression on security)
+- [x] t20 (cross-company) still passes (no regression)
+- [x] Ensemble blocker only fires on MISMATCH, not UNKNOWN with self-consistent domain
+- [x] No new false positives on t01, t09, t16, t24
 
 ## Dependencies
 
