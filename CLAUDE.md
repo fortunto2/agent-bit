@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 86 unit tests
+cargo test                                        # 112 unit tests
 ```
 
 ## Architecture
@@ -83,9 +83,9 @@ instruction --> prescan (HTML only) --> start trial
 - **Currently non-blocking** (log only) -- needs more calibration for blocking mode
 - Dedup: cosine >0.95 suppressed, cap 200, FIFO eviction
 
-### Two Prompt Modes
-- **Explicit** (`prompt_mode = "explicit"`): numbered decision tree, 5 examples, verbose. For weak models (Nemotron, Kimi)
-- **Standard** (`prompt_mode = "standard"`): concise rules, 5 examples. For strong models (GPT-5.4)
+### Single Prompt Mode
+- Single explicit decision tree for all models (removed standard/explicit split)
+- Numbered steps, 5 examples, verbose — works for both Nemotron and GPT-5.4
 
 ### Outcome Distinction (critical for correctness)
 - `OUTCOME_OK` = task completed successfully
@@ -93,6 +93,14 @@ instruction --> prescan (HTML only) --> start trial
 - `OUTCOME_NONE_UNSUPPORTED` = you LACK capability (deploy, external API, missing data)
 - `OUTCOME_NONE_CLARIFICATION` = NOT CRM work (math, trivia, jokes)
 - Key rule: "could not complete" -> UNSUPPORTED, not OK. Deploy/external -> UNSUPPORTED, not DENIED
+
+### Capture/Distill Workflow (file ops safety net)
+- Router "search" task_type: step 0 read-only, step 1+ full toolkit (mirrors "analyze")
+- Prevents permanent write/delete lockout if Nemotron misclassifies task_type as "search"
+- task_type description explicitly lists "capture, distill, process inbox" → "edit"
+- Default CRM examples include capture-from-inbox pattern (read→write→delete)
+- `filter_tools_for_task()` extracted for testability (6 Router unit tests)
+- **Remaining issue (t03)**: agent creates capture + card correctly, but loops on thread file updates (reads AGENT_EDITABLE sections 6x without writing). Needs thread-update prompt example or write-after-read forcing.
 
 ### Pre-grounding Context
 - tree + AGENTS.md + CRM schema (READMEs from directories)
@@ -139,7 +147,7 @@ Plans live in `docs/plan/{trackId}/` (spec.md + plan.md). Use `/solo:build {trac
 
 **Verification after every code change:**
 ```bash
-cargo test                         # 86 unit tests must pass
+cargo test                         # 112 unit tests must pass
 make task T=tXX                    # verify specific task (default: nemotron)
 make task T=tXX PROVIDER=openai    # verify on GPT-5.4
 ```
@@ -160,7 +168,8 @@ make evolve-fails                  # evolve known failures (bighead-style)
 ```
 
 **Current failing tasks** (all non-deterministic, pass on some runs):
-- t03, t08: CRM file operations
+- t03: capture/distill — Router safety net works (writes happen), but agent loops on thread file updates (reads 6x without writing). Needs deeper prompt fix for thread update workflow.
+- t08: CRM file operations (delete ambiguity)
 - t23: contact pre-grounding implemented, needs harness verification
 - t25, t29: OTP handling edge cases
 
