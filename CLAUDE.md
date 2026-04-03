@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 123 unit tests
+cargo test                                        # 131 unit tests
 ```
 
 ## Architecture
@@ -80,10 +80,13 @@ instruction --> prescan (HTML only) --> start trial
 ### OutcomeValidator (adaptive kNN)
 - **Hypothesis template**: `"The CRM task result: {msg}"` for better embedding discrimination
 - **Seed store**: 17 static examples across 4 outcomes (OUTCOME_EXAMPLES in classifier.rs)
-- **Adaptive store**: grows from every answer(), persisted to `.agent/outcome_store.json`
+- **Adaptive store**: grows from confirmed correct trials only (score ≥ 1.0), persisted to `.agent/outcome_store.json`
 - **k-NN (k=5)**: nearest-neighbor voting (no lossy centroid averaging)
-- **Online learning**: every model's answers feed the store; GPT-5.4 = teacher for Nemotron
-- **Currently non-blocking** (log only) -- needs more calibration for blocking mode
+- **Confidence-gated blocking**: `ValidationMode::Block` when ≥4/5 votes + top_sim > 0.80, `Warn` for 3/5 (log only), `Pass` otherwise
+- **Security-safe**: never blocks when chosen outcome is `OUTCOME_DENIED_SECURITY` (trust LLM security decisions)
+- **Retry limit**: max 1 block per trial via `AtomicU32` counter — prevents infinite validation loops
+- **Score-gated learning**: `store_answer()` in AnswerTool, `learn_last()` in main.rs after trial scores ≥ 1.0
+- **Created in main.rs**: shared across all trials, accessible for post-trial learning (not in pregrounding.rs)
 - Dedup: cosine >0.95 suppressed, cap 200, FIFO eviction
 
 ### Single Prompt Mode
