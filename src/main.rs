@@ -403,6 +403,11 @@ fn guess_outcome(last_msg: &str, history: &str) -> &'static str {
         "OUTCOME_NONE_CLARIFICATION"
     } else if last_msg.is_empty() {
         "OUTCOME_ERR_INTERNAL"
+    } else if l.contains("unable to") || l.contains("could not") || l.contains("couldn't find") || l.contains("not found") {
+        // Task couldn't be completed — CLARIFICATION is safer (accepted by more tasks than UNSUPPORTED)
+        "OUTCOME_NONE_CLARIFICATION"
+    } else if h.contains("no results") || h.contains("no matching") || h.contains("0 matching lines") {
+        "OUTCOME_NONE_CLARIFICATION"
     } else {
         "OUTCOME_OK"
     }
