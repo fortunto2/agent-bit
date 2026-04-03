@@ -51,6 +51,7 @@ api_key = "cfut_yn3q3IOibSJD2vHh6lX3nxsChYc5tN9pCZ3sZls5ebe5ea9a"
 temperature = 0.1
 [providers.nemotron.headers]
 cf-aig-request-timeout = "300000"
+x-session-affinity = "pac1-agent"
 
 # AI-NOTE: Keychain auth uses Claude Code subscription OAuth token (sk-ant-oat01-...).
 # Haiku works. Sonnet/opus get 429 (subscription rate limit on premium models).

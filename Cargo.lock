@@ -2014,9 +2014,9 @@ dependencies = [
 
 [[package]]
 name = "openai-oxide"
-version = "0.11.2"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9be9cd09c79fa19201269e0f569fa857650ef339c77da4dd878003fca0c6f8ab"
+checksum = "07994e0d1b73906ece02fd52f2f335f430bba369336a66c069836259e5d2712b"
 dependencies = [
  "async-trait",
  "bytes",
