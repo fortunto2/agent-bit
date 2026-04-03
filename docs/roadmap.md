@@ -9,19 +9,27 @@ Target: every task passes deterministically. After fixing each task, run full be
 - GPT-5.4: ~85% (25-27/30)
 - GPT-5.4-mini: 65% (20/31)
 
+## Cost Policy
+
+- **Focus on Nemotron** (free via Cloudflare Workers AI). ALL development and testing on Nemotron.
+- **OpenAI (GPT-5.4): ONLY for final validation** — max 1-2 runs per session. Never iterate on OpenAI.
+- `make task T=tXX` defaults to Nemotron. Do NOT add PROVIDER=openai unless final check.
+- Never `make full PROVIDER=openai-full` — too expensive.
+
 ## Process
 
 For each failing task:
 1. `/solo:plan "Fix tXX — description"` → create plan in docs/plan/
 2. `/solo:build trackId` → execute plan
-3. `make task T=tXX` → verify fix
-4. `make task T=t01` → regression check
+3. `make task T=tXX` → verify on **Nemotron** (free)
+4. `make task T=t01` → regression check on **Nemotron**
 5. Archive plan to docs/plan-done/
 
 After ALL tasks fixed:
-6. `make full` → full 30-task benchmark on Nemotron
+6. `make full` → full 30-task benchmark on **Nemotron**
 7. If any fail → create new plan for that task, repeat from step 1
-8. Goal: **3 consecutive full runs at 30/30** (confirms determinism)
+8. Goal: **3 consecutive full runs at 30/30 on Nemotron**
+9. Final validation: ONE run on GPT-5.4 to confirm cross-model
 
 ## Failing Tasks
 

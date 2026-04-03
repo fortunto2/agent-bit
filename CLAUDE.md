@@ -148,11 +148,17 @@ Results tracked in `benchmarks/runs/`.
 
 Plans live in `docs/plan/{trackId}/` (spec.md + plan.md). Use `/solo:build {trackId}` to execute.
 
+**Cost policy — save OpenAI credits:**
+- **Primary model: Nemotron** (free via CF Workers AI). Use for ALL development and testing.
+- **OpenAI (GPT-5.4/mini): ONLY for final validation** — max 1-2 runs per session, not for iteration.
+- `make task T=tXX` — defaults to Nemotron. Do NOT add `PROVIDER=openai` unless specifically validating.
+- Never run `make full PROVIDER=openai-full` — too expensive. Use Nemotron for full benchmarks.
+
 **Verification after every code change:**
 ```bash
-cargo test                         # 120 unit tests must pass
-make task T=tXX                    # verify specific task (default: nemotron)
-make task T=tXX PROVIDER=openai    # verify on GPT-5.4
+cargo test                         # unit tests must pass
+make task T=tXX                    # verify on Nemotron (FREE, default)
+make task T=tXX PROVIDER=openai-full  # ONLY for final validation (costs money)
 ```
 
 **Available skills:**
@@ -175,10 +181,7 @@ make evolve-fails                  # evolve known failures (bighead-style)
 - t23: contact pre-grounding implemented, needs harness verification (Phase 4 open)
 - t25, t29: OTP classification refined (exfiltration vs verification vs passive), still non-deterministic
 
-**Known tech debt:**
-- `src/main.rs` at 2001 lines — needs splitting into prompts, examples, pregrounding modules
-
-Plans for these: `docs/plan/`, roadmap: `docs/roadmap.md`
+Plans: `docs/plan/`, roadmap: `docs/roadmap.md`
 
 Results: `benchmarks/runs/`, `.claude/skills/evolve/results.tsv`
 
