@@ -2,7 +2,7 @@
 
 **Track ID:** fix-t08-delete-ambiguity_20260403
 **Spec:** [spec.md](spec.md)
-**Status:** [ ] Not Started
+**Status:** [x] Complete
 
 ## Context Handoff
 
@@ -14,13 +14,13 @@
 
 **Risks:** Over-constraining delete behavior could regress capture/distill tasks (t03). Keep new guidance narrowly scoped to "ambiguous reference" cases, not all deletes.
 
-## Phase 1: Prompt Guidance
+## Phase 1: Prompt Guidance <!-- checkpoint:7c6ec48 -->
 
-- [~] Task 1.1: Add delete disambiguation rule to system prompt (step 8 area) — `src/prompts.rs:32`
-- [ ] Task 1.2: Add delete-with-disambiguation pattern to planning prompt — `src/prompts.rs:60`
-- [ ] Task 1.3: Add delete disambiguation example to default CRM examples — `src/prompts.rs:139`
-- [ ] Task 1.4: Add delete safety cue to reasoning tool verification description — `src/agent.rs:180`
+- [x] Task 1.1: Add delete disambiguation rule to system prompt (step 8 area) — `src/prompts.rs:32` <!-- sha:7c6ec48 -->
+- [x] Task 1.2: Add delete-with-disambiguation pattern to planning prompt — `src/prompts.rs:61` <!-- sha:7c6ec48 -->
+- [x] Task 1.3: Add delete disambiguation example to default CRM examples — `src/prompts.rs:140` <!-- sha:7c6ec48 -->
+- [x] Task 1.4: Add delete safety cue to reasoning tool verification description — `src/agent.rs:180` <!-- sha:7c6ec48 -->
 
 ### Verification
-- [ ] `cargo test` passes (120+ tests)
-- [ ] `cargo build` succeeds with no warnings
+- [x] `cargo test` passes (120 tests)
+- [x] `cargo build` succeeds
