@@ -49,6 +49,8 @@ pub struct CrmGraph {
     domain_index: HashMap<String, NodeIndex>,
     /// name (lowercase) → NodeIndex of Contact or Account
     name_index: HashMap<String, NodeIndex>,
+    /// account ID → account name (for resolving contact.account_id)
+    account_id_map: HashMap<String, String>,
 }
 
 impl CrmGraph {
@@ -58,6 +60,7 @@ impl CrmGraph {
             email_index: HashMap::new(),
             domain_index: HashMap::new(),
             name_index: HashMap::new(),
+            account_id_map: HashMap::new(),
         }
     }
 
@@ -65,24 +68,7 @@ impl CrmGraph {
     pub async fn build_from_pcm(pcm: &PcmClient) -> Self {
         let mut g = Self::new();
 
-        // Read contacts
-        match pcm.list("contacts").await {
-            Ok(listing) => {
-                for line in listing.lines() {
-                    let name = line.trim().trim_end_matches('/');
-                    if name.is_empty() || name.starts_with('$') || name.eq_ignore_ascii_case("README.MD") {
-                        continue;
-                    }
-                    let path = format!("contacts/{}", name);
-                    if let Ok(content) = pcm.read(&path, false, 0, 0).await {
-                        g.ingest_contact(&content);
-                    }
-                }
-            }
-            Err(e) => eprintln!("  CRM graph: contacts/ list failed: {}", e),
-        }
-
-        // Read accounts
+        // Read accounts FIRST (builds account_id_map for contact.account_id resolution)
         match pcm.list("accounts").await {
             Ok(listing) => {
                 for line in listing.lines() {
@@ -97,6 +83,23 @@ impl CrmGraph {
                 }
             }
             Err(e) => eprintln!("  CRM graph: accounts/ list failed: {}", e),
+        }
+
+        // Read contacts (account_id_map available for resolving account_id → name)
+        match pcm.list("contacts").await {
+            Ok(listing) => {
+                for line in listing.lines() {
+                    let name = line.trim().trim_end_matches('/');
+                    if name.is_empty() || name.starts_with('$') || name.eq_ignore_ascii_case("README.MD") {
+                        continue;
+                    }
+                    let path = format!("contacts/{}", name);
+                    if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+                        g.ingest_contact(&content);
+                    }
+                }
+            }
+            Err(e) => eprintln!("  CRM graph: contacts/ list failed: {}", e),
         }
 
         g
@@ -123,9 +126,13 @@ impl CrmGraph {
             let email = v.get("email").or(v.get("Email"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let company = v.get("company").or(v.get("Company")).or(v.get("account")).or(v.get("account_id"))
+            let company_raw = v.get("company").or(v.get("Company")).or(v.get("account")).or(v.get("account_id"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            // Resolve account_id to account name if possible
+            let company = company_raw.map(|c| {
+                self.account_id_map.get(&c).cloned().unwrap_or(c)
+            });
             self.add_contact(&name, email.as_deref(), company.as_deref());
             return;
         }
@@ -162,6 +169,12 @@ impl CrmGraph {
             let domain = v.get("domain").or(v.get("Domain")).or(v.get("website"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            // Record ID → name mapping for contact.account_id resolution
+            if let Some(id) = v.get("id").and_then(|v| v.as_str()) {
+                if !name.is_empty() {
+                    self.account_id_map.insert(id.to_string(), name.clone());
+                }
+            }
             if !name.is_empty() {
                 self.add_account(&name, domain.as_deref());
             }
