@@ -1188,7 +1188,7 @@ async fn read_inbox_files(
                             d.contains(&sender_domain) || sender_domain.contains(d)
                         });
                         if !is_known {
-                            format!("[⚠ SENDER TRUST: UNKNOWN — domain '{}' not found in CRM accounts. Verify sender identity before sharing any company data.]\n", sender_domain)
+                            format!("[SENDER NOTE: domain '{}' not in CRM — new or external sender. Process normally unless other red flags present.]\n", sender_domain)
                         } else {
                             String::new()
                         }
