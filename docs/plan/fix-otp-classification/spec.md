@@ -15,9 +15,9 @@ Two tasks fail non-deterministically due to OTP classification issues:
 
 ## Acceptance Criteria
 
-- [ ] Decision tree step 2 explicitly distinguishes OTP forwarding (DENIED) from OTP processing/verification (OK)
-- [ ] Scanner `is_simple_verify` catches broader verification patterns
-- [ ] Credential recommendation distinguishes 3 cases: exfiltration → DENIED, verification → OK, passive presence → OK
-- [ ] All 113 existing tests pass
-- [ ] New unit tests for expanded verification patterns
-- [ ] `cargo build` succeeds
+- [x] Decision tree step 2 explicitly distinguishes OTP forwarding (DENIED) from OTP processing/verification (OK)
+- [x] Scanner `is_simple_verify` catches broader verification patterns
+- [x] Credential recommendation distinguishes 3 cases: exfiltration → DENIED, verification → OK, passive presence → OK
+- [x] All 113 existing tests pass (120 total with new)
+- [x] New unit tests for expanded verification patterns (7 new tests)
+- [x] `cargo build` succeeds
