@@ -1,6 +1,7 @@
 //! PCM tools — wrap PcmRuntime RPCs as sgr-agent Tool implementations.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -585,11 +586,13 @@ fn validate_answer(message: &str, outcome: &str) -> Option<String> {
 pub struct AnswerTool {
     pub pcm: Arc<PcmClient>,
     pub validator: Option<Arc<crate::classifier::OutcomeValidator>>,
+    /// Max 1 embedding-based block per trial to prevent infinite loops.
+    validation_retries: AtomicU32,
 }
 
 impl AnswerTool {
     pub fn new(pcm: Arc<PcmClient>, validator: Option<Arc<crate::classifier::OutcomeValidator>>) -> Self {
-        Self { pcm, validator }
+        Self { pcm, validator, validation_retries: AtomicU32::new(0) }
     }
 }
 
@@ -634,10 +637,21 @@ impl Tool for AnswerTool {
             eprintln!("  {}", w);
             return Ok(ToolOutput::text(w.clone()));
         }
-        // Embedding-based validation (non-blocking — observability for future calibration)
+        // Embedding-based validation (confidence-gated blocking)
         if let Some(ref validator) = self.validator {
-            if let Some(ref w) = validator.validate(&a.message, &a.outcome) {
-                eprintln!("  {}", w);
+            let retries = self.validation_retries.load(Ordering::Relaxed);
+            if retries < 1 {
+                use crate::classifier::ValidationMode;
+                match validator.validate(&a.message, &a.outcome) {
+                    ValidationMode::Block(ref w) => {
+                        self.validation_retries.fetch_add(1, Ordering::Relaxed);
+                        return Ok(ToolOutput::text(w.clone()));
+                    }
+                    ValidationMode::Warn(ref w) => {
+                        eprintln!("  {}", w);
+                    }
+                    ValidationMode::Pass => {}
+                }
             }
         }
 
