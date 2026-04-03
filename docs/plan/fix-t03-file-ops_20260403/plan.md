@@ -3,7 +3,7 @@
 **Track ID:** fix-t03-file-ops_20260403
 **Spec:** [spec.md](./spec.md)
 **Created:** 2026-04-03
-**Status:** [~] Partial — Phase 1-2 complete, Phase 3 integration FAILED (t03 0/3 on Nemotron)
+**Status:** [~] In Progress — Phase 1-3 complete, Phase 4 added by review
 
 ## Overview
 
@@ -59,6 +59,21 @@ Improve task_type classification and add capture/distill workflow examples.
 - [x] Tests pass (cargo test) — 112 pass
 - [x] Build succeeds (cargo build)
 - [ ] t03 deterministic on Nemotron — **FAILED**: 0/3 pass, needs new plan for thread update workflow
+
+## Phase 4: Thread-Update Loop Fix (added by review)
+
+Root cause: Nemotron reads AGENT_EDITABLE sections of thread files 6x without writing. The model sees existing content but doesn't realize it needs to update/append. Needs either a prompt example for thread updates or a write-after-read nudge.
+
+### Tasks
+
+- [ ] Task 4.1: Analyze t03 agent logs to identify exact loop pattern — which file is re-read, what AGENT_EDITABLE content triggers the loop
+- [ ] Task 4.2: Add thread-update prompt example to default CRM examples: read(thread) → write(thread with new entry) pattern
+- [ ] Task 4.3: Consider adaptive nudge after 3+ consecutive reads of same file without intervening write — inject "You've read this file N times. If you need to update it, use write() now."
+- [ ] Task 4.4: Run `make task T=t03` on Nemotron — target 2/3 pass
+
+### Verification
+- [ ] t03 passes 2/3+ runs on Nemotron (AC6)
+- [ ] No regression on t01
 
 ## Context Handoff
 

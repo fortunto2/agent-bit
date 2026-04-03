@@ -8,7 +8,7 @@
 ## Build & Test
 ```bash
 cargo build                        # compile
-cargo test                         # 86+ unit tests — MUST pass before commit
+cargo test                         # 112 unit tests — MUST pass before commit
 make task T=tXX                    # verify specific PAC1 task (default: nemotron)
 make task T=tXX PROVIDER=openai    # verify on GPT-5.4
 make sample                        # quick 8-task smoke test
