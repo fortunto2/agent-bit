@@ -3,7 +3,7 @@
 **Track ID:** fix-t23-contact-ambiguity_20260403
 **Spec:** [spec.md](./spec.md)
 **Created:** 2026-04-03
-**Status:** [~] In Progress (Phase 1-2 complete, Phase 3 blocked by disk space)
+**Status:** [~] In Progress (Phase 1-2 code done, but t23 still 0/3 on Nemotron — needs deeper fix)
 
 ## Overview
 
@@ -73,13 +73,27 @@ When search returns multiple contacts, annotate results with CRM graph context.
 - [ ] Build succeeds
 - [ ] Documentation up to date
 
+## Phase 4: Diagnose Why Pre-Grounding Didn't Help
+
+Phase 1-2 added contact hints + search annotations but t23 still 0/3 on Nemotron. Need to understand WHY.
+
+### Tasks
+
+- [ ] Task 4.1: Run `make task T=t23` and capture FULL log. Check: does model see contact hints? Does it still DENY? What exactly does the model's reasoning say? Use `grep -E "Verify|answer|DENIED|contact|hint"` on log.
+- [ ] Task 4.2: Based on diagnosis — if model ignores hints, try `/evolve t23` for prompt-level fix. If hints are wrong, fix pre-grounding logic.
+- [ ] Task 4.3: Verify fix: `make task T=t23` 3 times on Nemotron. Must pass 2/3 minimum.
+- [ ] Task 4.4: Regression: `make task T=t01 && make task T=t18 && make task T=t19`
+
+### Verification
+- [ ] t23 passes 2/3 on Nemotron
+- [ ] No regression on t01, t18, t19
+
 ## Final Verification
 
-- [ ] All acceptance criteria from spec met
-- [ ] Tests pass
-- [ ] Linter clean
+- [ ] t23 passes 2/3 on Nemotron (MANDATORY — do not mark plan complete without this)
+- [ ] All tests pass
 - [ ] Build succeeds
-- [ ] Documentation up to date
+- [ ] No regression on key tasks
 
 ## Context Handoff
 
