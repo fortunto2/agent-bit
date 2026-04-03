@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 113 unit tests
+cargo test                                        # 120 unit tests
 ```
 
 ## Architecture
@@ -150,7 +150,7 @@ Plans live in `docs/plan/{trackId}/` (spec.md + plan.md). Use `/solo:build {trac
 
 **Verification after every code change:**
 ```bash
-cargo test                         # 113 unit tests must pass
+cargo test                         # 120 unit tests must pass
 make task T=tXX                    # verify specific task (default: nemotron)
 make task T=tXX PROVIDER=openai    # verify on GPT-5.4
 ```

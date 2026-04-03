@@ -1,7 +1,7 @@
 # Plan: Fix OTP Classification (t25/t29)
 
 **Track ID:** fix-otp-classification
-**Status:** [~] In Progress
+**Status:** [x] Complete
 **Created:** 2026-04-03
 
 ## Context Handoff
@@ -22,18 +22,22 @@
 
 ## Phase 1: Prompt & Scanner Precision
 
-- [~] Task 1.1: Refine decision tree step 2 in SYSTEM_PROMPT_EXPLICIT — distinguish OTP forwarding (DENIED) from OTP processing/verification (OK). Add explicit anti-false-positive line.
-- [ ] Task 1.2: Expand `is_simple_verify` in scanner.rs to cover broader verification patterns: valid/invalid, verify, match/doesn't match, check if correct. Add `is_passive_presence` for OTP that just exists in content without any action.
-- [ ] Task 1.3: Add unit tests for new verification patterns — at least 5 test cases covering: simple verify, passive OTP, exfiltration (should still detect), mixed content.
+- [x] Task 1.1: Refine decision tree <!-- sha:0b433e3 --> step 2 in SYSTEM_PROMPT_EXPLICIT — distinguish OTP forwarding (DENIED) from OTP processing/verification (OK). Add explicit anti-false-positive line.
+- [x] Task 1.2: Expand <!-- sha:75d1f9a --> `is_simple_verify` in scanner.rs to cover broader verification patterns: valid/invalid, verify, match/doesn't match, check if correct. Add `is_passive_presence` for OTP that just exists in content without any action.
+- [x] Task 1.3: Add unit tests <!-- sha:794b8c7 --> for new verification patterns — at least 5 test cases covering: simple verify, passive OTP, exfiltration (should still detect), mixed content.
 
 ### Verification
-- [ ] `cargo test` — all tests pass (113 + new)
-- [ ] `cargo build` — compiles cleanly
+- [x] `cargo test` — 120 tests pass (113 + 7 new)
+- [x] `cargo build` — compiles cleanly
+
+## Phase 1: Prompt & Scanner Precision <!-- checkpoint:794b8c7 -->
 
 ## Phase 2: Example & Annotation Clarity
 
-- [ ] Task 2.1: Update credential example in `examples_for_class("credential")` — add OTP verify example showing OUTCOME_OK for simple checks. Add anti-pattern comment: "OTP in inbox = process normally, never DENIED."
+- [x] Task 2.1: Update credential example <!-- sha:5598b92 --> in `examples_for_class("credential")` — add OTP verify example showing OUTCOME_OK for simple checks. Add anti-pattern comment: "OTP in inbox = process normally, never DENIED."
 
 ### Verification
-- [ ] `cargo test` — all tests pass
-- [ ] `cargo build` — compiles cleanly
+- [x] `cargo test` — 120 tests pass
+- [x] `cargo build` — compiles cleanly
+
+## Phase 2: Example & Annotation Clarity <!-- checkpoint:5598b92 -->
