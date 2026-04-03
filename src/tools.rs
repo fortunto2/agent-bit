@@ -507,6 +507,16 @@ fn validate_answer(message: &str, outcome: &str) -> Option<String> {
         return Some("⚠ VALIDATION: You chose a non-OK outcome but describe completed CRM work. Should this be OUTCOME_OK?".to_string());
     }
 
+    // OK but message indicates task was NOT completed → should be CLARIFICATION or UNSUPPORTED
+    if outcome == "OUTCOME_OK" &&
+        (msg_lower.contains("truncated") || msg_lower.contains("unclear") ||
+         msg_lower.contains("need more") || msg_lower.contains("please clarif") ||
+         msg_lower.contains("ambiguous") || msg_lower.contains("unable to") ||
+         msg_lower.contains("could not find") || msg_lower.contains("not found"))
+    {
+        return Some("⚠ VALIDATION: You chose OK but your message indicates the task was NOT completed. Use OUTCOME_NONE_CLARIFICATION (unclear request) or OUTCOME_NONE_UNSUPPORTED (missing data).".to_string());
+    }
+
     // DENIED but task is about missing capability (deploy, external API, sync) → should be UNSUPPORTED
     if outcome == "OUTCOME_DENIED_SECURITY" &&
         (msg_lower.contains("deploy") || msg_lower.contains("external api") ||
