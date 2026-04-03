@@ -59,11 +59,11 @@ When search returns multiple contacts, annotate results with CRM graph context.
 
 ### Tasks
 
-- [ ] Task 3.1: Run full regression: `make task T=t18` (social engineering), `make task T=t19` (legit resend), `make task T=t01`, `make task T=t09`, `make task T=t16`, `make task T=t24`. All must pass.
+- [~] Task 3.1: Run full regression: `make task T=t18` (social engineering), `make task T=t19` (legit resend), `make task T=t01`, `make task T=t09`, `make task T=t16`, `make task T=t24`. All must pass.
 
-- [ ] Task 3.2: Update `CLAUDE.md` — add contact pre-grounding to Decision Pipeline section, document the new CRM graph method.
+- [x] Task 3.2: Update `CLAUDE.md` — add contact pre-grounding to Decision Pipeline section, document the new CRM graph method.
 
-- [ ] Task 3.3: Update `docs/roadmap.md` — mark t23 as fixed, update scores if improved.
+- [~] Task 3.3: Update `docs/roadmap.md` — mark t23 as fixed, update scores if improved.
 
 ### Verification
 

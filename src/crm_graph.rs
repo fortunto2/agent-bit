@@ -66,48 +66,64 @@ impl CrmGraph {
         let mut g = Self::new();
 
         // Read contacts
-        if let Ok(listing) = pcm.list("contacts").await {
-            for line in listing.lines() {
-                let name = line.trim().trim_end_matches('/');
-                if name.is_empty() || name.starts_with('$') || name.eq_ignore_ascii_case("README.MD") {
-                    continue;
-                }
-                let path = format!("contacts/{}", name);
-                if let Ok(content) = pcm.read(&path, false, 0, 0).await {
-                    g.ingest_contact(&content);
+        match pcm.list("contacts").await {
+            Ok(listing) => {
+                for line in listing.lines() {
+                    let name = line.trim().trim_end_matches('/');
+                    if name.is_empty() || name.starts_with('$') || name.eq_ignore_ascii_case("README.MD") {
+                        continue;
+                    }
+                    let path = format!("contacts/{}", name);
+                    if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+                        g.ingest_contact(&content);
+                    }
                 }
             }
+            Err(e) => eprintln!("  CRM graph: contacts/ list failed: {}", e),
         }
 
         // Read accounts
-        if let Ok(listing) = pcm.list("accounts").await {
-            for line in listing.lines() {
-                let name = line.trim().trim_end_matches('/');
-                if name.is_empty() || name.starts_with('$') || name.eq_ignore_ascii_case("README.MD") {
-                    continue;
-                }
-                let path = format!("accounts/{}", name);
-                if let Ok(content) = pcm.read(&path, false, 0, 0).await {
-                    g.ingest_account(&content);
+        match pcm.list("accounts").await {
+            Ok(listing) => {
+                for line in listing.lines() {
+                    let name = line.trim().trim_end_matches('/');
+                    if name.is_empty() || name.starts_with('$') || name.eq_ignore_ascii_case("README.MD") {
+                        continue;
+                    }
+                    let path = format!("accounts/{}", name);
+                    if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+                        g.ingest_account(&content);
+                    }
                 }
             }
+            Err(e) => eprintln!("  CRM graph: accounts/ list failed: {}", e),
         }
 
         g
     }
 
+    /// Strip PCM shell header ("$ cat ...\n") from read output.
+    fn strip_pcm_header(content: &str) -> &str {
+        if content.starts_with("$ ") {
+            content.find('\n').map(|i| &content[i + 1..]).unwrap_or(content)
+        } else {
+            content
+        }
+    }
+
     /// Parse a contact file (JSON or markdown) and add to graph.
-    fn ingest_contact(&mut self, content: &str) {
+    fn ingest_contact(&mut self, raw: &str) {
+        let content = Self::strip_pcm_header(raw);
         // Try JSON first
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
-            let name = v.get("name").or(v.get("Name"))
+            let name = v.get("name").or(v.get("Name")).or(v.get("full_name"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
             let email = v.get("email").or(v.get("Email"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let company = v.get("company").or(v.get("Company")).or(v.get("account"))
+            let company = v.get("company").or(v.get("Company")).or(v.get("account")).or(v.get("account_id"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
             self.add_contact(&name, email.as_deref(), company.as_deref());
@@ -136,7 +152,8 @@ impl CrmGraph {
     }
 
     /// Parse an account file and add to graph.
-    fn ingest_account(&mut self, content: &str) {
+    fn ingest_account(&mut self, raw: &str) {
+        let content = Self::strip_pcm_header(raw);
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
             let name = v.get("name").or(v.get("Name"))
                 .and_then(|v| v.as_str())
@@ -454,6 +471,20 @@ mod tests {
         g.ingest_contact(r#"{"name": "Test User", "email": "test@example.com", "company": "TestCo"}"#);
         assert!(g.is_known_entity("Test User"));
         assert_eq!(g.validate_sender("test@example.com", None), SenderTrust::Known);
+    }
+
+    #[test]
+    fn ingest_json_with_pcm_header() {
+        let mut g = CrmGraph::new();
+        g.ingest_contact("$ cat contacts/test.json\n{\"name\": \"PCM User\", \"email\": \"pcm@example.com\", \"company\": \"PCMCo\"}");
+        assert!(g.is_known_entity("PCM User"), "Should parse JSON after stripping $ cat header");
+    }
+
+    #[test]
+    fn ingest_account_with_pcm_header() {
+        let mut g = CrmGraph::new();
+        g.ingest_account("$ cat accounts/acme.json\n{\"name\": \"Acme Corp\", \"domain\": \"acme.com\"}");
+        assert!(g.is_known_entity("Acme Corp"), "Should parse account JSON after stripping $ cat header");
     }
 
     #[test]

@@ -218,13 +218,17 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
 
                 // Log verification self-check
                 if !verification.is_empty() {
-                    eprintln!("    🔍 Verify: {}", &verification[..verification.len().min(120)]);
+                    let vlen = verification.len().min(120);
+                    let vend = verification.char_indices().map(|(i, _)| i).take_while(|&i| i <= vlen).last().unwrap_or(0);
+                    eprintln!("    🔍 Verify: {}", &verification[..vend]);
                 }
 
+                let slen = current_state.len().min(80);
+                let send = current_state.char_indices().map(|(i, _)| i).take_while(|&i| i <= slen).last().unwrap_or(0);
                 let situation = format!(
                     "Type: {} | Security: {} | State: {} | Done: [{}]",
                     task_type, security,
-                    &current_state[..current_state.len().min(80)],
+                    &current_state[..send],
                     completed.join("; ")
                 );
                 (task_type, security, situation, plan, done)

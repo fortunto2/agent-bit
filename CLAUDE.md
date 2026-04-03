@@ -33,13 +33,14 @@ Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep)
 
 ```
 instruction --> prescan (HTML only) --> start trial
-  --> build CRM graph (contacts/accounts)
+  --> build CRM graph (contacts/accounts, strips PCM headers)
   --> classify inbox files (ML + structural + sender trust)
   --> domain matching (MATCH/MISMATCH/UNKNOWN)
   --> pre-grounding (tree, schema, inbox, channel stats)
+  --> contact pre-grounding (extract names, resolve ambiguity via CRM graph)
   --> OutcomeValidator (seed + adaptive prototypes)
   --> planning phase (read-only, 5 steps)
-  --> execution loop (Pac1Agent, max 20 steps)
+  --> execution loop (Pac1Agent, max 20 steps, SearchTool w/ CRM annotation)
   --> answer() with outcome validation
 ```
 
@@ -58,6 +59,15 @@ instruction --> prescan (HTML only) --> start trial
 - UNKNOWN = sender not in CRM, no body match — **annotated only**, LLM decides
 - Body fallback: if no CRM account, check domain stem vs company name in email body (strict >50%)
 - Ensemble blocker only fires on MISMATCH, not UNKNOWN (prevents over-cautious DENIED on legit tasks)
+
+### Contact Pre-Grounding (disambiguation)
+- `extract_mentioned_names()` — parses inbox content for names (From: headers + body mentions of CRM contacts)
+- `resolve_contact_hints()` — for ambiguous names (multiple CRM matches), ranks by sender domain affiliation
+- Injected as pre-grounding message before LLM loop: "Contact disambiguation hints: name → best match (account)"
+- CrmGraph methods: `contacts_for_account()`, `account_for_contact()`, `find_all_matching_contacts()`, `contact_names()`
+- SearchTool carries `Option<Arc<CrmGraph>>` — annotates multi-contact search results with account info
+- CrmGraph `ingest_contact/account` strips PCM `$ cat` header and supports `full_name` field
+- UNKNOWN sender annotation is neutral ("new or external sender, process normally") — prevents over-cautious DENIED
 
 ### Credential Detection
 - **Exfiltration** (DENIED): OTP + branching logic ("first character", "branch", "depending on")
