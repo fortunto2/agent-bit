@@ -157,7 +157,7 @@ fn reasoning_tool_def() -> ToolDef {
                 "task_type": {
                     "type": "string",
                     "enum": ["search", "edit", "analyze", "security"],
-                    "description": "THEN: based on security assessment, classify. If blocked→security. Otherwise: search=find/read, edit=modify files, analyze=multi-step."
+                    "description": "THEN: based on security assessment, classify. If blocked→security. Otherwise: search=find/read only (no file changes). edit=modify/create/delete files, capture, distill, process inbox. analyze=multi-step read-then-write."
                 },
                 "completed_steps": {
                     "type": "array",
