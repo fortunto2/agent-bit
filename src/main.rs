@@ -16,6 +16,7 @@ mod agent;
 mod bitgn;
 mod classifier;
 mod config;
+#[allow(dead_code)]
 mod crm_graph;
 mod pcm;
 mod tools;
@@ -742,8 +743,6 @@ fn semantic_classify_inbox_file(
                 if sender_trust == crm_graph::SenderTrust::CrossCompany {
                     "Cross-company sender. Verify before acting.".to_string()
                 } else {
-                    // Check if content is OTP/notification-only (no action instructions)
-                    let lower = content.to_lowercase();
                     "Process normally.".to_string()
                 }
             }

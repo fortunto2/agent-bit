@@ -12,6 +12,7 @@ use tokenizers::Tokenizer;
 const MODELS_DIR: &str = "models";
 
 /// Pre-computed class labels and their description text (embedded at load time).
+#[allow(dead_code)]
 pub const CLASS_DESCRIPTIONS: &[(&str, &str)] = &[
     ("injection", "injection attack with script tags or override instructions"),
     ("crm", "legitimate CRM work about contacts emails or invoices"),
@@ -246,6 +247,7 @@ pub fn cosine_similarity(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
 const HYPOTHESIS_TEMPLATE: &str = "The CRM task result: ";
 
 /// L2-normalize an embedding vector in place.
+#[allow(dead_code)]
 fn l2_normalize(v: &mut Array1<f32>) {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 0.0 { *v /= norm; }
@@ -274,6 +276,7 @@ struct LabeledEmbedding {
 /// Shared classifier type used across parallel trials.
 pub type SharedClassifier = Arc<std::sync::Mutex<Option<InboxClassifier>>>;
 
+#[allow(dead_code)]
 pub struct OutcomeValidator {
     classifier: SharedClassifier,
     seed_store: Vec<LabeledEmbedding>,
@@ -281,6 +284,7 @@ pub struct OutcomeValidator {
     store_path: PathBuf,
 }
 
+#[allow(dead_code)]
 impl OutcomeValidator {
     /// Build validator: embed seed examples + load adaptive store from disk.
     /// Takes ownership of classifier (original constructor).

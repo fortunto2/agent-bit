@@ -1,4 +1,5 @@
 //! BitGN HarnessService client — typed Connect-RPC via bitgn-sdk.
+#![allow(dead_code)]
 
 use anyhow::Result;
 use bitgn_sdk::harness::{self as proto, HarnessServiceClient};
