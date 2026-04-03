@@ -137,7 +137,7 @@ pub(crate) fn resolve_contact_hints(
                 .map(|(n, _)| n.as_str())
                 .collect();
             hints.push_str(&format!(
-                "- \"{}\" → best match: {} (account: {}). Others: {}\n",
+                "RESOLVED: \"{}\" in this inbox = {} (account: {}). USE this contact, not: {}\n",
                 name, best_name, account, others.join(", ")
             ));
         }
@@ -448,7 +448,7 @@ pub(crate) async fn run_agent(
                 );
                 if !contact_hints.is_empty() {
                     messages.push(Message::user(&format!(
-                        "Contact disambiguation hints:\n{}", contact_hints
+                        "⚠ CONTACT RESOLUTION (use these, do NOT ask for clarification):\n{}", contact_hints
                     )));
                     eprintln!("  Contact hints: {} names, {} ambiguous",
                         mentioned.len(),
@@ -693,8 +693,10 @@ mod tests {
         let names = vec![("Smith".to_string(), "inbox/msg.md".to_string())];
         let hints = resolve_contact_hints(&names, &crm, Some("acme.com"));
         assert!(!hints.is_empty(), "Two Smiths = hint needed");
+        assert!(hints.contains("RESOLVED:"), "Directive format: {}", hints);
         assert!(hints.contains("john smith") || hints.contains("John Smith"),
             "Should prefer John Smith from Acme Corp. Got: {}", hints);
+        assert!(hints.contains("USE this contact"), "Must contain USE directive. Got: {}", hints);
     }
 
     #[test]
