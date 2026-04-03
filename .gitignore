@@ -3,3 +3,6 @@
 *.log
 .agent/
 models/
+.solo/
+.claude/
+.DS_Store

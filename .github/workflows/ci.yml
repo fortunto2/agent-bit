@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout agent-bit
+        uses: actions/checkout@v4
+        with:
+          path: active/agent-bit
+
+      - name: Checkout rust-code (sgr-agent dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: fortunto2/rust-code
+          path: shared/rust-code
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            active/agent-bit/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('active/agent-bit/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Build
+        working-directory: active/agent-bit
+        run: cargo build --release
+
+      - name: Clippy
+        working-directory: active/agent-bit
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: active/agent-bit
+        run: cargo test
+
+  release:
+    needs: check
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout agent-bit
+        uses: actions/checkout@v4
+        with:
+          path: active/agent-bit
+
+      - name: Checkout rust-code
+        uses: actions/checkout@v4
+        with:
+          repository: fortunto2/rust-code
+          path: shared/rust-code
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            active/agent-bit/target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('active/agent-bit/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-release-
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Build release binary
+        working-directory: active/agent-bit
+        run: cargo build --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pac1-linux-x86_64
+          path: active/agent-bit/target/release/pac1
