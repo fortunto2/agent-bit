@@ -421,10 +421,10 @@ fn guess_outcome(last_msg: &str, history: &str) -> &'static str {
         "OUTCOME_NONE_CLARIFICATION"
     } else if last_msg.is_empty() {
         "OUTCOME_ERR_INTERNAL"
-    } else if l.contains("unable to") || l.contains("could not") || l.contains("couldn't find") || l.contains("not found") {
-        // Task couldn't be completed — CLARIFICATION is safer (accepted by more tasks than UNSUPPORTED)
+    } else if l.contains("could not find") || l.contains("couldn't find") || l.contains("not found") {
         "OUTCOME_NONE_CLARIFICATION"
-    } else if h.contains("no results") || h.contains("no matching") || h.contains("0 matching lines") {
+    } else if l.contains("unable to") && (h.contains("0 matching") || h.contains("no results") || !h.contains("written to")) {
+        // Auto-answer "Unable to determine" + history shows no successful writes = task unresolvable
         "OUTCOME_NONE_CLARIFICATION"
     } else {
         "OUTCOME_OK"
