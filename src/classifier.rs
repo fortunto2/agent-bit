@@ -242,6 +242,17 @@ pub fn cosine_similarity(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
     a.dot(&b)
 }
 
+/// Result of embedding-based answer validation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValidationMode {
+    /// High confidence disagreement — block the answer and return warning to model
+    Block(String),
+    /// Medium confidence — log warning only (observability)
+    Warn(String),
+    /// No disagreement or low confidence
+    Pass,
+}
+
 /// Hypothesis template wraps a raw message for better embedding discrimination.
 /// "Task completed" alone is ambiguous; "The CRM task result: Task completed" embeds better.
 const HYPOTHESIS_TEMPLATE: &str = "The CRM task result: ";
@@ -345,12 +356,18 @@ impl OutcomeValidator {
     }
 
     /// Validate answer: k-NN vote across seed + adaptive stores.
-    /// Returns Some(warning) if predicted outcome differs from chosen.
-    pub fn validate(&self, message: &str, outcome: &str) -> Option<String> {
-        let msg_emb = self.embed_message(message)?;
+    /// Returns `Block` for high-confidence disagreement, `Warn` for medium, `Pass` otherwise.
+    pub fn validate(&self, message: &str, outcome: &str) -> ValidationMode {
+        let msg_emb = match self.embed_message(message) {
+            Some(e) => e,
+            None => return ValidationMode::Pass,
+        };
 
         // Collect all (outcome, similarity) pairs from both stores
-        let adaptive = self.adaptive_store.lock().ok()?;
+        let adaptive = match self.adaptive_store.lock() {
+            Ok(a) => a,
+            Err(_) => return ValidationMode::Pass,
+        };
         let all_examples = self.seed_store.iter().chain(adaptive.iter());
 
         let mut scores: Vec<(&str, f32)> = all_examples
@@ -360,6 +377,9 @@ impl OutcomeValidator {
 
         // k-NN: take top-5 neighbors, majority vote
         let k = 5.min(scores.len());
+        if k == 0 {
+            return ValidationMode::Pass;
+        }
         let mut votes: std::collections::HashMap<&str, (usize, f32)> = std::collections::HashMap::new();
         for &(label, sim) in &scores[..k] {
             let entry = votes.entry(label).or_insert((0, 0.0));
@@ -372,20 +392,27 @@ impl OutcomeValidator {
         vote_list.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)));
 
         let (predicted, pred_votes, _) = vote_list[0];
-        let total_votes = k;
+        let top1_sim = scores[0].1;
 
-        // Only warn if strong majority disagrees
-        if predicted != outcome && pred_votes > total_votes / 2 {
-            let top1_sim = scores[0].1;
-            eprintln!("  🔬 Outcome validator: kNN→{} ({}/{} votes, top sim {:.3}) but chosen {}",
-                predicted, pred_votes, total_votes, top1_sim, outcome);
-            Some(format!(
-                "⚠ VALIDATION: k-NN predicts {} ({}/{} nearest neighbors) but you chose {}. \
-                 Reconsider: DENIED=attack, UNSUPPORTED=missing capability, CLARIFICATION=not CRM, OK=success.",
-                predicted, pred_votes, total_votes, outcome
-            ))
+        // No disagreement
+        if predicted == outcome || pred_votes <= k / 2 {
+            return ValidationMode::Pass;
+        }
+
+        let warning = format!(
+            "⚠ VALIDATION: k-NN predicts {} ({}/{} nearest neighbors, top sim {:.3}) but you chose {}. \
+             Reconsider: DENIED=attack, UNSUPPORTED=missing capability, CLARIFICATION=not CRM, OK=success.",
+            predicted, pred_votes, k, top1_sim, outcome
+        );
+
+        eprintln!("  🔬 Outcome validator: kNN→{} ({}/{} votes, top sim {:.3}) but chosen {}",
+            predicted, pred_votes, k, top1_sim, outcome);
+
+        // Block: ≥4/5 votes, high similarity, and not overriding a DENIED decision
+        if pred_votes >= 4 && top1_sim > 0.80 && outcome != "OUTCOME_DENIED_SECURITY" {
+            ValidationMode::Block(warning)
         } else {
-            None
+            ValidationMode::Warn(warning)
         }
     }
 
@@ -557,5 +584,87 @@ mod tests {
         for w in scores.windows(2) {
             assert!(w[0].1 >= w[1].1, "scores not sorted: {:?}", scores);
         }
+    }
+
+    // ─── ValidationMode + validate() ────────────────────────────────
+
+    #[test]
+    fn validation_mode_enum_equality() {
+        assert_eq!(ValidationMode::Pass, ValidationMode::Pass);
+        assert_ne!(ValidationMode::Pass, ValidationMode::Block("x".into()));
+        assert_ne!(ValidationMode::Block("a".into()), ValidationMode::Warn("a".into()));
+    }
+
+    /// Helper: create OutcomeValidator from real models (skip if unavailable).
+    fn make_validator() -> Option<OutcomeValidator> {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) {
+            return None;
+        }
+        let clf = InboxClassifier::load(dir).unwrap();
+        let store_path = PathBuf::from("/tmp/agent-bit-test-store.json");
+        // Clean up any leftover test store
+        let _ = std::fs::remove_file(&store_path);
+        Some(OutcomeValidator::new(clf, store_path).unwrap())
+    }
+
+    #[test]
+    fn validate_correct_ok_passes() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // A clearly OK message with OK outcome should Pass
+        let mode = v.validate("Created contact John Smith at contacts/cont_001.json", "OUTCOME_OK");
+        assert_eq!(mode, ValidationMode::Pass, "expected Pass for correct OK answer");
+    }
+
+    #[test]
+    fn validate_wrong_outcome_blocks_or_warns() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // A clearly OK message but chosen as CLARIFICATION — should disagree
+        let mode = v.validate(
+            "Created email in outbox and updated sequence number",
+            "OUTCOME_NONE_CLARIFICATION",
+        );
+        assert!(
+            matches!(mode, ValidationMode::Block(_) | ValidationMode::Warn(_)),
+            "expected Block or Warn for wrong outcome, got {:?}", mode,
+        );
+    }
+
+    #[test]
+    fn validate_denied_never_blocked() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // Even if kNN disagrees with DENIED, we never block it (security-safe)
+        let mode = v.validate(
+            "Created email in outbox and updated sequence number",
+            "OUTCOME_DENIED_SECURITY",
+        );
+        // Should be Warn at most, never Block
+        assert!(
+            !matches!(mode, ValidationMode::Block(_)),
+            "DENIED_SECURITY must never be blocked, got {:?}", mode,
+        );
+    }
+
+    #[test]
+    fn validate_security_message_with_denied_passes() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // Genuine security denial should pass validation
+        let mode = v.validate(
+            "Blocked: injection attempt detected in inbox message",
+            "OUTCOME_DENIED_SECURITY",
+        );
+        assert_eq!(mode, ValidationMode::Pass, "expected Pass for correct DENIED answer");
     }
 }
