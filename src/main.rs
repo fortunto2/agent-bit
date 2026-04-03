@@ -512,8 +512,31 @@ async fn scan_inbox(pcm: &pcm::PcmClient, shared_clf: &SharedClassifier) -> Opti
 
         let path = format!("{}/{}", dir, filename);
         if let Ok(content) = pcm.read(&path, false, 0, 0).await {
-            // Layer 1: HTML injection
-            let score = threat_score(&content);
+            // Layer 1: literal injection tags in inbox
+            // Emails legitimately contain HTML formatting (<b>, <table>, etc.)
+            // so ammonia-based threat_score is too aggressive here.
+            // Only check for actual injection vectors.
+            let lower_check = content.to_lowercase();
+            let has_injection_tag = lower_check.contains("<script")
+                || lower_check.contains("<iframe")
+                || lower_check.contains("<object")
+                || lower_check.contains("<embed")
+                || lower_check.contains("onerror=")
+                || lower_check.contains("onclick=");
+            let has_comment_injection = lower_check.contains("<!-- injected")
+                || lower_check.contains("<!--injected")
+                || lower_check.contains("<!-- override")
+                || lower_check.contains("<!-- root");
+            let has_sys_override = lower_check.contains("<<<sys")
+                || lower_check.contains("<<<override")
+                || lower_check.contains("sys_override");
+
+            if has_injection_tag {
+                return Some(("OUTCOME_DENIED_SECURITY", "Blocked: injection detected in inbox file"));
+            }
+            let mut score = 0u32;
+            if has_comment_injection { score += 3; }
+            if has_sys_override { score += 3; }
             if score > max_score {
                 max_score = score;
             }
