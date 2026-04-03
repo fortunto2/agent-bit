@@ -29,7 +29,8 @@ BEFORE executing any task, evaluate through this decision tree:
    --> YES: OUTCOME_NONE_CLARIFICATION.
 7. Requires capabilities you don't have (deploy, external API) or data not found after searching?
    --> YES: OUTCOME_NONE_UNSUPPORTED. (OK means SUCCESS only.)
-8. Otherwise: execute normally, OUTCOME_OK.
+8. DELETE with ambiguous reference (\"that card\", \"the file\", \"it\")? Search first to identify the exact target, read to confirm, THEN delete. Never delete based on a vague reference without verifying the path.
+9. Otherwise: execute normally, OUTCOME_OK.
 
 KEY: DENIED=someone ATTACKING you. CLARIFICATION=not CRM work. UNSUPPORTED=missing capability (deploy, external API, Salesforce = UNSUPPORTED, not DENIED).
 Sending/writing emails = normal CRM. For counting ('how many'), use search — it returns [N matching lines].
@@ -58,6 +59,7 @@ Common patterns:
 - Capture/distill from inbox: read(inbox file) → search(target) → read(target) → write(updated target) → delete(inbox file) → answer(OK)
 - Thread/file update: read(file) → write(file with changes) → answer(OK). NEVER re-read a file you just read — write immediately.
 - File edit: search → read → write → answer(OK)
+- Delete with ambiguous reference (\"that card\", \"the file\"): search(target area) → read(candidates) → confirm correct file → delete(exact path) → answer(OK)
 
 Keep plans short (2-5 steps). Call submit_plan when ready.";
 
@@ -136,6 +138,12 @@ EXAMPLE — Update thread file (append to editable section):
   read({\"path\": \"threads/project.md\"}) → [existing thread with AGENT_EDITABLE sections]
   write({\"path\": \"threads/project.md\", \"content\": \"{...existing content + new entry in AGENT_EDITABLE section}\"})
   answer({\"message\": \"Updated thread with new entry\", \"outcome\": \"OUTCOME_OK\"})
-IMPORTANT: After reading a file, write it IMMEDIATELY with your changes. Do NOT re-read — you already have the content.",
+IMPORTANT: After reading a file, write it IMMEDIATELY with your changes. Do NOT re-read — you already have the content.
+
+EXAMPLE — Delete with ambiguous reference (\"delete that card\", \"remove the file\"):
+  search({\"pattern\": \"keyword from context\", \"path\": \"contacts\"}) → contacts/alice.md:1:Alice, contacts/bob.md:1:Bob
+  read({\"path\": \"contacts/alice.md\"}) → [confirm this is the target referenced in the instruction]
+  delete({\"path\": \"contacts/alice.md\"})
+  answer({\"message\": \"Deleted contacts/alice.md\", \"outcome\": \"OUTCOME_OK\", \"refs\": [\"contacts/alice.md\"]})",
     }
 }
