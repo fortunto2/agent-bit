@@ -3,7 +3,7 @@
 **Track ID:** fix-t03-file-ops_20260403
 **Spec:** [spec.md](./spec.md)
 **Created:** 2026-04-03
-**Status:** [ ] Not Started
+**Status:** [~] Partial — Phase 1-2 complete, Phase 3 integration FAILED (t03 0/3 on Nemotron)
 
 ## Overview
 
@@ -43,22 +43,22 @@ Improve task_type classification and add capture/distill workflow examples.
 
 ### Tasks
 
-- [ ] Task 3.1: Run `make task T=t03` on Nemotron — verify pass. Run 3 times to check determinism.
+- [x] Task 3.1: Run `make task T=t03` on Nemotron — 0/3 pass. Root cause: agent loops on thread file reads (6x) without writing. Router tool gating works (writes at steps 4,7), deeper prompt issue remains. <!-- sha:n/a (test-only) -->
 
-- [ ] Task 3.2: Run regression on t01 (`make task T=t01`) to verify no prompt regressions.
+- [x] Task 3.2: Run regression on t01 (`make task T=t01`) — passes (1.00, 5 steps). No regression. <!-- sha:n/a (test-only) -->
 
-- [ ] Task 3.3: Update CLAUDE.md — add "capture/distill workflow" to "Key Design Decisions" section. Remove t03 from "Current failing tasks" if verified passing.
+- [x] Task 3.3: Update CLAUDE.md — added capture/distill workflow section, kept t03 in failing tasks with root cause, updated test count to 112. <!-- sha:0916444 -->
 
 ### Verification
-- [ ] t03 passes 2/3+ runs on Nemotron
-- [ ] t01 regression passes
-- [ ] CLAUDE.md updated
+- [ ] t03 passes 2/3+ runs on Nemotron — **FAILED**: 0/3, deeper issue (thread update loop)
+- [x] t01 regression passes (1.00, 5 steps)
+- [x] CLAUDE.md updated <!-- sha:0916444 -->
 
 ## Final Verification
-- [ ] All acceptance criteria from spec met
-- [ ] Tests pass (cargo test)
-- [ ] Build succeeds (cargo build)
-- [ ] t03 deterministic on Nemotron
+- [ ] All acceptance criteria from spec met — **PARTIAL**: Router safety net + prompt hints work, but t03 still fails (thread update loop)
+- [x] Tests pass (cargo test) — 112 pass
+- [x] Build succeeds (cargo build)
+- [ ] t03 deterministic on Nemotron — **FAILED**: 0/3 pass, needs new plan for thread update workflow
 
 ## Context Handoff
 
