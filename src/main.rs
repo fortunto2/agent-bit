@@ -783,21 +783,35 @@ fn extract_sender_email(text: &str) -> Option<String> {
 
 /// Extract email domain from a "From:" header line in text.
 fn extract_sender_domain(content: &str) -> Option<String> {
+    // Use mailparse for RFC 5322 compliant email extraction
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("From:") || trimmed.starts_with("from:") {
-            if let Some(start) = trimmed.find('<') {
-                if let Some(end) = trimmed.find('>') {
-                    let email = &trimmed[start + 1..end];
-                    if let Some(at) = email.rfind('@') {
-                        return Some(email[at + 1..].to_lowercase());
+        if trimmed.to_lowercase().starts_with("from:") {
+            let value = trimmed[5..].trim();
+            // mailparse expects full header
+            if let Ok(addrs) = mailparse::addrparse(value) {
+                for addr in addrs.iter() {
+                    match addr {
+                        mailparse::MailAddr::Single(info) => {
+                            if let Some(at) = info.addr.rfind('@') {
+                                return Some(info.addr[at + 1..].to_lowercase());
+                            }
+                        }
+                        mailparse::MailAddr::Group(group) => {
+                            if let Some(first) = group.addrs.first() {
+                                if let Some(at) = first.addr.rfind('@') {
+                                    return Some(first.addr[at + 1..].to_lowercase());
+                                }
+                            }
+                        }
                     }
                 }
             }
-            if let Some(at) = trimmed.rfind('@') {
-                let after_at = &trimmed[at + 1..];
+            // Fallback: simple @ extraction if mailparse fails
+            if let Some(at) = value.rfind('@') {
+                let after_at = &value[at + 1..];
                 let domain = after_at.split_whitespace().next().unwrap_or(after_at);
-                let domain = domain.trim_end_matches('>');
+                let domain = domain.trim_end_matches('>').trim_end_matches('"');
                 return Some(domain.to_lowercase());
             }
         }
