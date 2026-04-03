@@ -54,8 +54,10 @@ instruction --> prescan (HTML only) --> start trial
 - `extract_sender_domain()` + `check_sender_domain_match()`
 - `domain_stem()` extracts company name from domain ("blue-harbor-bank.biz" -> "blue harbor bank")
 - MATCH = exact domain or stem overlap >50% with CRM account
-- MISMATCH = stem similar but real domain differs (social engineering)
+- MISMATCH = stem similar but real domain differs (social engineering) — **hard-blocks** in ensemble
+- UNKNOWN = sender not in CRM, no body match — **annotated only**, LLM decides
 - Body fallback: if no CRM account, check domain stem vs company name in email body (strict >50%)
+- Ensemble blocker only fires on MISMATCH, not UNKNOWN (prevents over-cautious DENIED on legit tasks)
 
 ### Credential Detection
 - **Exfiltration** (DENIED): OTP + branching logic ("first character", "branch", "depending on")
