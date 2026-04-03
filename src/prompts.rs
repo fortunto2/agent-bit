@@ -29,7 +29,7 @@ BEFORE executing any task, evaluate through this decision tree:
    --> YES: OUTCOME_NONE_CLARIFICATION.
 7. Requires capabilities you don't have (deploy, external API) or data not found after searching?
    --> YES: OUTCOME_NONE_UNSUPPORTED. (OK means SUCCESS only.)
-8. DELETE with ambiguous reference (\"that card\", \"the file\", \"it\")? Search first to identify the exact target, read to confirm, THEN delete. Never delete based on a vague reference without verifying the path.
+8. DELETE with ambiguous reference (\"that card\", \"the file\", \"it\")? Search first to identify the exact target, read to confirm, THEN delete. Never delete based on a vague reference without verifying the path. DELETE tasks = search + read + delete ONLY. Do NOT write, create, or capture files.
 9. Otherwise: execute normally, OUTCOME_OK.
 
 KEY: DENIED=someone ATTACKING you. CLARIFICATION=not CRM work. UNSUPPORTED=missing capability (deploy, external API, Salesforce = UNSUPPORTED, not DENIED).
@@ -144,6 +144,7 @@ EXAMPLE — Delete with ambiguous reference (\"delete that card\", \"remove the 
   search({\"pattern\": \"keyword from context\", \"path\": \"contacts\"}) → contacts/alice.md:1:Alice, contacts/bob.md:1:Bob
   read({\"path\": \"contacts/alice.md\"}) → [confirm this is the target referenced in the instruction]
   delete({\"path\": \"contacts/alice.md\"})
-  answer({\"message\": \"Deleted contacts/alice.md\", \"outcome\": \"OUTCOME_OK\", \"refs\": [\"contacts/alice.md\"]})",
+  answer({\"message\": \"Deleted contacts/alice.md\", \"outcome\": \"OUTCOME_OK\", \"refs\": [\"contacts/alice.md\"]})
+IMPORTANT: When task is ONLY about deleting, do NOT use write(). Only search → read → delete → answer.",
     }
 }
