@@ -13,15 +13,15 @@ Making the embedding-based validator **blocking** (returning the warning to the 
 
 ## Acceptance Criteria
 
-- [ ] Embedding-based validation is blocking: returns `ToolOutput::text()` when confidence exceeds threshold
-- [ ] Confidence gating: blocks only when ≥4/5 votes disagree AND top similarity > 0.80
-- [ ] Security-safe: never blocks when chosen outcome is `OUTCOME_DENIED_SECURITY` (trust LLM security decisions)
-- [ ] Retry limit: max 1 validation block per trial (second attempt always submits)
-- [ ] Score-gated learning: `learn()` re-enabled, gated on trial score ≥ 1.0
-- [ ] OutcomeValidator accessible from main.rs for post-trial learning
-- [ ] Unit tests for blocking behavior, confidence gating, retry limit, and security exception
-- [ ] `cargo test` passes (123+ tests)
-- [ ] No regressions on passing tasks (verify with `make task T=t01`)
+- [x] Embedding-based validation is blocking: returns `ToolOutput::text()` when confidence exceeds threshold
+- [x] Confidence gating: blocks only when ≥4/5 votes disagree AND top similarity > 0.80
+- [x] Security-safe: never blocks when chosen outcome is `OUTCOME_DENIED_SECURITY` (trust LLM security decisions)
+- [x] Retry limit: max 1 validation block per trial (second attempt always submits)
+- [x] Score-gated learning: `learn()` re-enabled, gated on trial score ≥ 1.0
+- [x] OutcomeValidator accessible from main.rs for post-trial learning
+- [x] Unit tests for blocking behavior, confidence gating, retry limit, and security exception
+- [x] `cargo test` passes (123+ tests)
+- [x] No regressions on passing tasks (verify with `make task T=t01`)
 
 ## Dependencies
 
