@@ -413,7 +413,7 @@ fn guess_outcome(last_msg: &str, history: &str) -> &'static str {
     // Check last message for specific outcomes
     if l.contains("unsupported") || l.contains("cannot access") || l.contains("external api") {
         "OUTCOME_NONE_UNSUPPORTED"
-    } else if l.contains("security") || l.contains("injection") || l.contains("denied") {
+    } else if l.contains("denied") || l.contains("injection") || l.contains("security threat") || l.contains("social engineering") {
         "OUTCOME_DENIED_SECURITY"
     } else if l.contains("clarif") || l.contains("unclear") || l.contains("not related to crm") {
         "OUTCOME_NONE_CLARIFICATION"
@@ -1743,6 +1743,16 @@ mod tests {
     fn guess_outcome_unsupported() {
         let outcome = guess_outcome("Cannot access external api", "");
         assert_eq!(outcome, "OUTCOME_NONE_UNSUPPORTED");
+    }
+
+    #[test]
+    fn guess_outcome_security_safe_not_denied() {
+        // Reasoning context with "Security: safe" must NOT trigger DENIED
+        let outcome = guess_outcome(
+            "Type: edit | Security: safe | State: File captured and card created",
+            "read inbox, wrote card, search contacts",
+        );
+        assert_eq!(outcome, "OUTCOME_OK");
     }
 
     // ─── guard_content (from tools.rs, test via threat_score) ───────────
