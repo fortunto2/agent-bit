@@ -159,11 +159,17 @@ EXAMPLE — Capture from inbox (distill + delete source):
   delete({\"path\": \"inbox/msg.md\"})
   answer({\"message\": \"Captured info from inbox and deleted source\", \"outcome\": \"OUTCOME_OK\"})
 
+EXAMPLE — Distill: create card from capture source:
+  read({\"path\": \"01_capture/topic/2026-03-01__article-title.md\"}) → [source content]
+  read({\"path\": \"02_distill/cards/_card-template.md\"}) → [template]
+  write({\"path\": \"02_distill/cards/2026-03-01__article-title.md\", \"content\": \"{...card from template + source}\"})
+  IMPORTANT: Keep the EXACT source filename when creating the card. Do NOT rename.
+
 EXAMPLE — Update thread file (append to editable section):
-  read({\"path\": \"threads/project.md\"}) → [existing thread with editable section]
-  write({\"path\": \"threads/project.md\", \"content\": \"{...existing content + new entry appended to editable section}\"})
+  read({\"path\": \"threads/project.md\"}) → [existing thread with AGENT_EDITABLE sections]
+  write({\"path\": \"threads/project.md\", \"content\": \"{...existing content + new entry in AGENT_EDITABLE section}\"})
   answer({\"message\": \"Updated thread with new entry\", \"outcome\": \"OUTCOME_OK\"})
-IMPORTANT: After reading a file you plan to update, write it IMMEDIATELY with your changes. Do NOT re-read it — you already have the content.",
+IMPORTANT: After reading a file, write it IMMEDIATELY with your changes. Do NOT re-read — you already have the content.",
     }
 }
 
