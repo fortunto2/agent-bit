@@ -152,6 +152,18 @@ async fn main() -> Result<()> {
     );
     eprintln!("[pac1] Classifier: {}", if shared_clf.lock().unwrap().is_some() { "loaded (shared)" } else { "unavailable" });
 
+    // Build OutcomeValidator once — shared across all trials for score-gated learning
+    let outcome_validator: Option<Arc<classifier::OutcomeValidator>> = {
+        let store_path = std::path::PathBuf::from(".agent/outcome_store.json");
+        match classifier::OutcomeValidator::from_shared(shared_clf.clone(), store_path) {
+            Ok(v) => Some(Arc::new(v)),
+            Err(e) => {
+                eprintln!("  ⚠ OutcomeValidator failed: {:#}", e);
+                None
+            }
+        }
+    };
+
     // Run tasks with concurrency limit
     let semaphore = Arc::new(tokio::sync::Semaphore::new(cli.parallel));
     let results = Arc::new(tokio::sync::Mutex::new(Vec::new()));
@@ -171,6 +183,7 @@ async fn main() -> Result<()> {
         let sem = semaphore.clone();
         let res = results.clone();
         let clf = shared_clf.clone();
+        let ov = outcome_validator.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
@@ -192,7 +205,7 @@ async fn main() -> Result<()> {
             let (last_msg, history) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature,
-                &clf,
+                &clf, ov.clone(),
             ).await;
             auto_submit_if_needed(&pcm, &last_msg, &history).await;
 
@@ -202,6 +215,12 @@ async fn main() -> Result<()> {
                     eprintln!("  {} Score: {:.2}", task_id, s);
                     for detail in &result.score_detail {
                         eprintln!("    {}", detail);
+                    }
+                    // Score-gated learning: only learn from confirmed correct answers
+                    if s >= 1.0 {
+                        if let Some(ref v) = ov {
+                            v.learn_last();
+                        }
                     }
                     // Fetch full trial logs for debugging when score < 1.0
                     if s < 1.0 {
@@ -259,18 +278,36 @@ async fn run_leaderboard(
         std::sync::Mutex::new(classifier::InboxClassifier::try_load(&classifier::InboxClassifier::models_dir()))
     );
 
+    // Build OutcomeValidator once for score-gated learning across all trials
+    let outcome_validator: Option<Arc<classifier::OutcomeValidator>> = {
+        let store_path = std::path::PathBuf::from(".agent/outcome_store.json");
+        match classifier::OutcomeValidator::from_shared(shared_clf.clone(), store_path) {
+            Ok(v) => Some(Arc::new(v)),
+            Err(e) => {
+                eprintln!("  ⚠ OutcomeValidator failed: {:#}", e);
+                None
+            }
+        }
+    };
+
     for (i, trial_id) in run.trial_ids.iter().enumerate() {
         let trial = harness.start_trial(trial_id).await?;
         eprintln!("\n━━━ Trial {}/{}: {} (task {}) ━━━",
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, &shared_clf).await;
+        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, &shared_clf, outcome_validator.clone()).await;
         auto_submit_if_needed(&pcm, &last_msg, &history).await;
 
         let result = harness.end_trial(&trial.trial_id).await?;
         if let Some(score) = result.score {
             eprintln!("  Score: {:.2}", score);
+            // Score-gated learning: only learn from confirmed correct answers
+            if score >= 1.0 {
+                if let Some(ref v) = outcome_validator {
+                    v.learn_last();
+                }
+            }
         }
         for detail in &result.score_detail {
             eprintln!("    {}", detail);
@@ -299,8 +336,9 @@ async fn run_trial(
     model: &str, base_url: Option<&str>, api_key: &str,
     extra_headers: &[(String, String)], max_steps: usize, prompt_mode: &str, temperature: f32,
     shared_clf: &SharedClassifier,
+    outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
 ) -> (String, String) {
-    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, shared_clf).await {
+    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, shared_clf, outcome_validator).await {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);

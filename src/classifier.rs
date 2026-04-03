@@ -287,15 +287,15 @@ struct LabeledEmbedding {
 /// Shared classifier type used across parallel trials.
 pub type SharedClassifier = Arc<std::sync::Mutex<Option<InboxClassifier>>>;
 
-#[allow(dead_code)]
 pub struct OutcomeValidator {
     classifier: SharedClassifier,
     seed_store: Vec<LabeledEmbedding>,
     adaptive_store: std::sync::Mutex<Vec<LabeledEmbedding>>,
     store_path: PathBuf,
+    /// Last answer submitted during a trial — used for score-gated learning from main.rs.
+    last_answer: std::sync::Mutex<Option<(String, String)>>,
 }
 
-#[allow(dead_code)]
 impl OutcomeValidator {
     /// Build validator: embed seed examples + load adaptive store from disk.
     /// Takes ownership of classifier (original constructor).
@@ -318,6 +318,7 @@ impl OutcomeValidator {
             seed_store,
             adaptive_store: std::sync::Mutex::new(adaptive_store),
             store_path,
+            last_answer: std::sync::Mutex::new(None),
         })
     }
 
@@ -345,6 +346,7 @@ impl OutcomeValidator {
             seed_store,
             adaptive_store: std::sync::Mutex::new(adaptive_store),
             store_path,
+            last_answer: std::sync::Mutex::new(None),
         })
     }
 
@@ -451,6 +453,29 @@ impl OutcomeValidator {
         eprintln!("  🧠 Learned: {} (adaptive store: {} examples)", outcome, store.len());
         // Persist to disk
         self.save_store(&store);
+    }
+
+    /// Store the last answer for deferred score-gated learning.
+    /// Called from AnswerTool::execute() before pcm.answer() submission.
+    pub fn store_answer(&self, message: &str, outcome: &str) {
+        if let Ok(mut guard) = self.last_answer.lock() {
+            *guard = Some((message.to_string(), outcome.to_string()));
+        }
+    }
+
+    /// Learn from the last stored answer (call after trial scores ≥ 1.0).
+    /// Consumes the stored answer so it can't be learned twice.
+    pub fn learn_last(&self) {
+        let answer = {
+            let mut guard = match self.last_answer.lock() {
+                Ok(g) => g,
+                Err(_) => return,
+            };
+            guard.take()
+        };
+        if let Some((message, outcome)) = answer {
+            self.learn(&message, &outcome);
+        }
     }
 
     /// Persist adaptive store to JSON file.
@@ -666,5 +691,49 @@ mod tests {
             "OUTCOME_DENIED_SECURITY",
         );
         assert_eq!(mode, ValidationMode::Pass, "expected Pass for correct DENIED answer");
+    }
+
+    // ─── store_answer / learn_last ──────────────────────────────────
+
+    #[test]
+    fn store_answer_saves_values() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        v.store_answer("Created contact", "OUTCOME_OK");
+        let guard = v.last_answer.lock().unwrap();
+        let (msg, outcome) = guard.as_ref().expect("last_answer should be Some");
+        assert_eq!(msg, "Created contact");
+        assert_eq!(outcome, "OUTCOME_OK");
+    }
+
+    #[test]
+    fn learn_last_consumes_stored_answer() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        let initial_count = v.adaptive_store.lock().unwrap().len();
+        v.store_answer("Created email in outbox", "OUTCOME_OK");
+        v.learn_last();
+        // Answer should be consumed
+        assert!(v.last_answer.lock().unwrap().is_none(), "last_answer should be consumed");
+        // Adaptive store should grow by 1
+        let new_count = v.adaptive_store.lock().unwrap().len();
+        assert_eq!(new_count, initial_count + 1, "adaptive store should grow after learn_last");
+    }
+
+    #[test]
+    fn learn_last_noop_when_empty() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        let initial_count = v.adaptive_store.lock().unwrap().len();
+        // No stored answer — learn_last should be a no-op
+        v.learn_last();
+        let new_count = v.adaptive_store.lock().unwrap().len();
+        assert_eq!(new_count, initial_count, "adaptive store should not change without stored answer");
     }
 }
