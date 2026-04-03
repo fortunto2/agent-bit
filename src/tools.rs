@@ -655,9 +655,12 @@ impl Tool for AnswerTool {
             }
         }
 
+        // Store answer for score-gated learning (main.rs calls learn_last after trial)
+        if let Some(ref validator) = self.validator {
+            validator.store_answer(&a.message, &a.outcome);
+        }
+
         self.pcm.answer(&a.message, &a.outcome, &a.refs).await.map_err(pcm_err)?;
-        // AI-NOTE: learn() disabled — was poisoning store with wrong answers.
-        // Re-enable only with score-gated feedback (learn after trial scores 1.0).
         Ok(ToolOutput::done(format!("Answer submitted: {}", a.message)))
     }
 }

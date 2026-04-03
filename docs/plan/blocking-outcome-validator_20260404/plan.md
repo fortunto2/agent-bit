@@ -9,16 +9,16 @@
 
 Convert the embedding-based OutcomeValidator from log-only to confidence-gated blocking mode. Add retry limit to prevent infinite loops. Move validator creation to main.rs so post-trial score-gated learning can work. Conservative thresholds: ≥4/5 votes + top_sim > 0.80 + not DENIED.
 
-## Phase 1: Confidence-Gated Blocking
+## Phase 1: Confidence-Gated Blocking <!-- checkpoint:9e8ef11 -->
 
 Make the embedding validator return warnings to the model (like keyword validation already does) but only when confidence is high enough to avoid regressions.
 
 ### Tasks
 
-- [x] Task 1.1: Add `ValidationMode` enum to `src/classifier.rs` — `Block(String)` vs `Warn(String)` vs `Pass`. Modify `validate()` to return `ValidationMode` instead of `Option<String>`. Block when `pred_votes >= 4 && top_sim > 0.80 && outcome != "OUTCOME_DENIED_SECURITY"`. Warn (log-only) for 3/5 votes. Pass otherwise.
-- [x] Task 1.2: Add `validation_retries: AtomicU32` field to `AnswerTool` in `src/tools.rs`. Increment on each block. If retries >= 1, skip embedding validation and submit (max 1 block per trial).
-- [x] Task 1.3: Update `AnswerTool::execute()` in `src/tools.rs:637-642` — match on `ValidationMode::Block` to return `ToolOutput::text()`, `Warn` to only `eprintln!`, `Pass` to proceed. Check retry counter before calling validate.
-- [x] Task 1.4: Unit tests in `src/classifier.rs` — test `validate()` returns Block for 4/5 unanimous high-sim, Warn for 3/5, Pass for agreement. Test DENIED exception (never blocks when chosen is DENIED_SECURITY).
+- [x] Task 1.1: Add `ValidationMode` enum <!-- sha:9e8ef11 --> to `src/classifier.rs` — `Block(String)` vs `Warn(String)` vs `Pass`. Modify `validate()` to return `ValidationMode` instead of `Option<String>`. Block when `pred_votes >= 4 && top_sim > 0.80 && outcome != "OUTCOME_DENIED_SECURITY"`. Warn (log-only) for 3/5 votes. Pass otherwise.
+- [x] Task 1.2: Add `validation_retries: AtomicU32` <!-- sha:9e8ef11 --> field to `AnswerTool` in `src/tools.rs`. Increment on each block. If retries >= 1, skip embedding validation and submit (max 1 block per trial).
+- [x] Task 1.3: Update `AnswerTool::execute()` <!-- sha:9e8ef11 --> in `src/tools.rs:637-642` — match on `ValidationMode::Block` to return `ToolOutput::text()`, `Warn` to only `eprintln!`, `Pass` to proceed. Check retry counter before calling validate.
+- [x] Task 1.4: Unit tests <!-- sha:9e8ef11 --> in `src/classifier.rs` — test `validate()` returns Block for 4/5 unanimous high-sim, Warn for 3/5, Pass for agreement. Test DENIED exception (never blocks when chosen is DENIED_SECURITY).
 
 ### Verification
 
@@ -31,15 +31,15 @@ Re-enable adaptive learning but only for confirmed correct answers (trial score 
 
 ### Tasks
 
-- [ ] Task 2.1: Move `OutcomeValidator` creation from `src/pregrounding.rs:496-507` to `src/main.rs` — create it once per run in `run_playground()`/`run_leaderboard()`, pass as `Option<Arc<OutcomeValidator>>` to `run_trial()` → `run_agent()`. Update `run_agent()` signature in `src/pregrounding.rs` to accept `Option<Arc<OutcomeValidator>>`.
-- [ ] Task 2.2: Add `last_answer: Mutex<Option<(String, String)>>` field to `OutcomeValidator` in `src/classifier.rs`. Add `store_answer()` and `learn_last()` methods. `store_answer(msg, outcome)` saves to mutex. `learn_last()` calls `learn()` with stored values.
-- [ ] Task 2.3: Call `validator.store_answer()` in `AnswerTool::execute()` before `pcm.answer()` submission. Call `validator.learn_last()` in `src/main.rs` after `end_trial()` when score ≥ 1.0.
-- [ ] Task 2.4: Unit tests — `store_answer()` stores values, `learn_last()` calls learn with stored values, learning is skipped when no stored answer.
+- [x] Task 2.1: Move `OutcomeValidator` creation from `src/pregrounding.rs:496-507` to `src/main.rs` — create it once per run in `run_playground()`/`run_leaderboard()`, pass as `Option<Arc<OutcomeValidator>>` to `run_trial()` → `run_agent()`. Update `run_agent()` signature in `src/pregrounding.rs` to accept `Option<Arc<OutcomeValidator>>`.
+- [x] Task 2.2: Add `last_answer: Mutex<Option<(String, String)>>` field to `OutcomeValidator` in `src/classifier.rs`. Add `store_answer()` and `learn_last()` methods. `store_answer(msg, outcome)` saves to mutex. `learn_last()` calls `learn()` with stored values.
+- [x] Task 2.3: Call `validator.store_answer()` in `AnswerTool::execute()` before `pcm.answer()` submission. Call `validator.learn_last()` in `src/main.rs` after `end_trial()` when score ≥ 1.0.
+- [x] Task 2.4: Unit tests — `store_answer()` stores values, `learn_last()` calls learn with stored values, learning is skipped when no stored answer.
 
 ### Verification
 
-- [ ] `cargo test` passes
-- [ ] Adaptive store grows only on successful trials (check stderr output)
+- [x] `cargo test` passes (131 tests)
+- [x] Adaptive store grows only on successful trials (score-gated via learn_last)
 
 ## Phase 3: Verification & Tuning
 

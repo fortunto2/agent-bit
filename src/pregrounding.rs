@@ -333,6 +333,7 @@ pub(crate) async fn run_agent(
     prompt_mode: &str,
     temperature: f32,
     shared_clf: &SharedClassifier,
+    outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
 ) -> Result<(String, String)> {
     // === Level 1: Pre-scan instruction for injection ===
     if let Some((outcome, msg)) = scanner::prescan_instruction(instruction) {
@@ -494,19 +495,7 @@ pub(crate) async fn run_agent(
 
     let crm_graph = Arc::new(crm_graph);
 
-    // Build OutcomeValidator using the shared classifier
-    let outcome_validator: Option<Arc<classifier::OutcomeValidator>> = {
-        let store_path = std::path::PathBuf::from(".agent/outcome_store.json");
-        match classifier::OutcomeValidator::from_shared(shared_clf.clone(), store_path) {
-            Ok(v) => Some(Arc::new(v)),
-            Err(e) => {
-                eprintln!("  ⚠ OutcomeValidator failed: {:#}", e);
-                None
-            }
-        }
-    };
-
-    // Build tool registry with OutcomeValidator
+    // Build tool registry with OutcomeValidator (passed in from main.rs for score-gated learning)
     let registry = ToolRegistry::new()
         .register(tools::ReadTool(pcm.clone()))
         .register(tools::WriteTool(pcm.clone()))
