@@ -536,6 +536,21 @@ pub(crate) async fn run_agent(
 
     messages.push(Message::user(instruction));
 
+    // Delete-intent pre-grounding: inject hint for delete-only tasks
+    {
+        let lower = instruction.to_lowercase();
+        let is_delete = lower.contains("delete") || lower.contains("remove");
+        let is_combined = lower.contains("capture") || lower.contains("distill")
+            || lower.contains("write") || lower.contains("create");
+        if is_delete && !is_combined {
+            messages.push(Message::user(
+                "IMPORTANT: This task involves deletion. Identify the EXACT target file first \
+                 (search + read to verify). Do NOT create or modify any files — only delete the \
+                 specific target."
+            ));
+        }
+    }
+
     let loop_config = LoopConfig {
         max_steps,
         loop_abort_threshold: 6,

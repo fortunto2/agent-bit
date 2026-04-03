@@ -14,13 +14,13 @@ Add "delete" as a first-class task_type in the Router that structurally prevents
 Add "delete" variant to Router's reasoning tool and tool-gating logic.
 
 ### Tasks
-- [x] Task 1.1: Add "delete" to reasoning tool task_type enum and update description — `src/agent.rs:164-166`
+- [x] Task 1.1: Add "delete" to reasoning tool task_type enum and update description — `src/agent.rs:164-166` <!-- sha:6a2d307 -->
   - Enum: `["search", "edit", "delete", "analyze", "security"]`
   - Description: `"delete=remove a specific file ONLY (find it, verify, delete it — NO writing/creating). Use 'edit' if task also needs writing. edit=modify/create files, capture, distill, process inbox."`
-- [x] Task 1.2: Add "delete" case to `filter_tools_for_task()` — `src/agent.rs:23-69`
+- [x] Task 1.2: Add "delete" case to `filter_tools_for_task()` — `src/agent.rs:23-69` <!-- sha:6a2d307 -->
   - "delete" → `search + read + find + list + delete + answer` (NO write/mkdir/move/tree/context)
   - No step-based safety net (unlike "search") — restriction is permanent
-- [x] Task 1.3: Add Router unit tests for "delete" task_type — `src/agent.rs:tests`
+- [x] Task 1.3: Add Router unit tests for "delete" task_type — `src/agent.rs:tests` <!-- sha:6a2d307 -->
   - `router_delete_no_write`: verify no write/mkdir/move tools
   - `router_delete_has_delete`: verify delete+search+read+answer present
   - `router_delete_all_steps`: verify restriction holds at step 0 and step 5
@@ -35,19 +35,19 @@ Add "delete" variant to Router's reasoning tool and tool-gating logic.
 Strengthen prompts and add pre-grounding hint for delete intent.
 
 ### Tasks
-- [ ] Task 2.1: Add anti-pattern to delete example in `examples_for_class` default branch — `src/prompts.rs:143-147`
+- [x] Task 2.1: Add anti-pattern to delete example in `examples_for_class` default branch — `src/prompts.rs:143-147`
   - After the delete example, add: `"IMPORTANT: When task is ONLY about deleting, do NOT use write(). Only search → read → delete → answer."`
-- [ ] Task 2.2: Strengthen system prompt decision tree step 8 — `src/prompts.rs:32`
+- [x] Task 2.2: Strengthen system prompt decision tree step 8 — `src/prompts.rs:32`
   - Current: "DELETE with ambiguous reference... Search first to identify the exact target"
   - Add: "DELETE tasks = search + read + delete ONLY. Do NOT write, create, or capture files."
-- [ ] Task 2.3: Add delete-intent pre-grounding hint in `run_agent()` — `src/pregrounding.rs:537` (after instruction message push)
+- [x] Task 2.3: Add delete-intent pre-grounding hint in `run_agent()` — `src/pregrounding.rs:537` (after instruction message push)
   - Detect: `instruction.to_lowercase().contains("delete") && !instruction.to_lowercase().contains("capture")`
   - Inject: `Message::user("IMPORTANT: This task involves deletion. Identify the EXACT target file first (search + read to verify). Do NOT create or modify any files — only delete the specific target.")`
   - Guard: skip if instruction also contains "capture", "distill", "write", "create" (combined tasks use "edit" routing)
 
 ### Verification
-- [ ] Prompt changes don't break `cargo test`
-- [ ] Pre-grounding hint only fires for delete-focused instructions
+- [x] Prompt changes don't break `cargo test`
+- [x] Pre-grounding hint only fires for delete-focused instructions
 
 ## Phase 3: Verification + Docs
 
