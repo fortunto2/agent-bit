@@ -36,6 +36,16 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
                 )
             })
             .collect(),
+        // "delete" → read-only + delete (NO write/mkdir/move) — permanent restriction
+        "delete" => all_defs
+            .into_iter()
+            .filter(|t| {
+                matches!(
+                    t.name.as_str(),
+                    "search" | "read" | "find" | "list" | "delete" | "answer"
+                )
+            })
+            .collect(),
         "edit" => all_defs
             .into_iter()
             .filter(|t| {
@@ -162,8 +172,8 @@ fn reasoning_tool_def() -> ToolDef {
                 },
                 "task_type": {
                     "type": "string",
-                    "enum": ["search", "edit", "analyze", "security"],
-                    "description": "THEN: based on security assessment, classify. If blocked→security. Otherwise: search=find/read only (no file changes). edit=modify/create/delete files, capture, distill, process inbox. analyze=multi-step read-then-write."
+                    "enum": ["search", "edit", "delete", "analyze", "security"],
+                    "description": "THEN: based on security assessment, classify. If blocked→security. Otherwise: search=find/read only (no file changes). delete=remove a specific file ONLY (find it, verify, delete it — NO writing/creating). Use 'edit' if task also needs writing. edit=modify/create files, capture, distill, process inbox. analyze=multi-step read-then-write."
                 },
                 "completed_steps": {
                     "type": "array",
@@ -504,10 +514,11 @@ mod tests {
         let def = reasoning_tool_def();
         let task_type = &def.parameters["properties"]["task_type"];
         let variants = task_type["enum"].as_array().unwrap();
-        assert_eq!(variants.len(), 4);
+        assert_eq!(variants.len(), 5);
         let names: Vec<&str> = variants.iter().map(|v| v.as_str().unwrap()).collect();
         assert!(names.contains(&"search"));
         assert!(names.contains(&"edit"));
+        assert!(names.contains(&"delete"));
         assert!(names.contains(&"analyze"));
         assert!(names.contains(&"security"));
     }
@@ -563,6 +574,43 @@ mod tests {
             assert!(names.contains(&"write"), "edit step {step} must have write");
             assert!(names.contains(&"delete"), "edit step {step} must have delete");
         }
+    }
+
+    #[test]
+    fn router_delete_no_write() {
+        for step in [0, 1, 5] {
+            let defs = filter_tools_for_task("delete", step, fake_tool_defs());
+            let names = tool_names(&defs);
+            assert!(!names.contains(&"write"), "delete step {step} must not have write");
+            assert!(!names.contains(&"mkdir"), "delete step {step} must not have mkdir");
+            assert!(!names.contains(&"move_file"), "delete step {step} must not have move_file");
+            assert!(!names.contains(&"tree"), "delete step {step} must not have tree");
+            assert!(!names.contains(&"context"), "delete step {step} must not have context");
+        }
+    }
+
+    #[test]
+    fn router_delete_has_delete() {
+        for step in [0, 1, 5] {
+            let defs = filter_tools_for_task("delete", step, fake_tool_defs());
+            let names = tool_names(&defs);
+            assert!(names.contains(&"delete"), "delete step {step} must have delete");
+            assert!(names.contains(&"search"), "delete step {step} must have search");
+            assert!(names.contains(&"read"), "delete step {step} must have read");
+            assert!(names.contains(&"answer"), "delete step {step} must have answer");
+            assert!(names.contains(&"find"), "delete step {step} must have find");
+            assert!(names.contains(&"list"), "delete step {step} must have list");
+        }
+    }
+
+    #[test]
+    fn router_delete_all_steps() {
+        // Verify "delete" restriction is permanent (no step-based safety net)
+        let defs_s0 = filter_tools_for_task("delete", 0, fake_tool_defs());
+        let defs_s5 = filter_tools_for_task("delete", 5, fake_tool_defs());
+        let names_s0 = tool_names(&defs_s0);
+        let names_s5 = tool_names(&defs_s5);
+        assert_eq!(names_s0, names_s5, "delete routing must be identical at all steps");
     }
 
     #[test]
