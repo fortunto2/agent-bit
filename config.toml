@@ -22,13 +22,13 @@ api_key_env = "OPENAI_API_KEY"
 [providers.kimi]
 model = "@cf/moonshotai/kimi-k2.5"
 base_url = "https://api.cloudflare.com/client/v4/accounts/33dec9645c443eef5859b1e10ce71e01/ai/v1"
-api_key = "REDACTED_CF_KEY"
+api_key_env = "CF_AI_API_KEY"
 
 
 [providers.kimi-gateway]
 model = "workers-ai/@cf/moonshotai/kimi-k2.5"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
-api_key = "REDACTED_CF_KEY"
+api_key_env = "CF_AI_API_KEY"
 
 [providers.kimi-gateway.headers]
 cf-aig-request-timeout = "300000"
@@ -36,17 +36,17 @@ cf-aig-request-timeout = "300000"
 [providers.llama]
 model = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
-api_key = "REDACTED_CF_KEY"
+api_key_env = "CF_AI_API_KEY"
 
 [providers.glm]
 model = "workers-ai/@cf/zhipuai/glm-4.7-flash"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
-api_key = "REDACTED_CF_KEY"
+api_key_env = "CF_AI_API_KEY"
 
 [providers.nemotron]
 model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
-api_key = "REDACTED_CF_KEY"
+api_key_env = "CF_AI_API_KEY"
 
 temperature = 0.1
 [providers.nemotron.headers]
@@ -68,7 +68,7 @@ auth = "keychain"
 [providers.gemma4]
 model = "workers-ai/@cf/google/gemma-4-26b-a4b-it"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
-api_key = "REDACTED_CF_KEY"
+api_key_env = "CF_AI_API_KEY"
 
 temperature = 0.1
 [providers.gemma4.headers]
