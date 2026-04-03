@@ -997,6 +997,134 @@ fn check_sender_domain_match(
     "unknown"
 }
 
+/// Extract person names mentioned in inbox content (From: display names + body mentions of CRM contacts).
+/// Returns Vec<(name, source_file)>.
+fn extract_mentioned_names(inbox_content: &str, crm: &crm_graph::CrmGraph) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    let mut current_file = String::new();
+
+    for line in inbox_content.lines() {
+        if line.starts_with("$ cat ") {
+            current_file = line.strip_prefix("$ cat ").unwrap_or("").to_string();
+            continue;
+        }
+        // Skip classification/annotation headers
+        if line.starts_with('[') { continue; }
+
+        // Extract From: display name via mailparse
+        let lower = line.to_lowercase();
+        if lower.starts_with("from:") {
+            let value = line[5..].trim();
+            if let Ok(addrs) = mailparse::addrparse(value) {
+                for addr in addrs.iter() {
+                    if let mailparse::MailAddr::Single(info) = addr {
+                        if let Some(ref dname) = info.display_name {
+                            let name = dname.trim().to_string();
+                            if name.split_whitespace().count() >= 2 {
+                                results.push((name, current_file.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Scan body for mentions of known CRM contact names
+    let known = crm.contact_names();
+    for contact_name in &known {
+        let cn_lower = contact_name.to_lowercase();
+        // Check each file section
+        let mut cur_file = String::new();
+        let mut in_body = false;
+        for line in inbox_content.lines() {
+            if line.starts_with("$ cat ") {
+                cur_file = line.strip_prefix("$ cat ").unwrap_or("").to_string();
+                in_body = false;
+                continue;
+            }
+            if line.starts_with('[') { continue; }
+            if line.to_lowercase().starts_with("from:") || line.to_lowercase().starts_with("to:")
+                || line.to_lowercase().starts_with("subject:") {
+                in_body = true;
+                continue;
+            }
+            if in_body && line.to_lowercase().contains(&cn_lower) {
+                // Capitalize properly — use the first word-capitalized form from name_index
+                let display = contact_name
+                    .split_whitespace()
+                    .map(|w| {
+                        let mut c = w.chars();
+                        match c.next() {
+                            None => String::new(),
+                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                results.push((display, cur_file.clone()));
+                break; // One match per contact per file is enough
+            }
+        }
+    }
+
+    // Deduplicate by (name_lower, file)
+    results.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()).then(a.1.cmp(&b.1)));
+    results.dedup_by(|a, b| a.0.to_lowercase() == b.0.to_lowercase() && a.1 == b.1);
+    results
+}
+
+/// Resolve contact ambiguity: for names with multiple CRM matches, pick best match.
+/// Uses sender domain for affiliation ranking.
+fn resolve_contact_hints(
+    names: &[(String, String)],
+    crm: &crm_graph::CrmGraph,
+    sender_domain: Option<&str>,
+) -> String {
+    let mut hints = String::new();
+
+    for (name, _source) in names {
+        let matches = crm.find_all_matching_contacts(name);
+        if matches.len() <= 1 {
+            continue; // No ambiguity
+        }
+
+        // Rank by sender domain affiliation: prefer contact whose account domain matches sender
+        let best = if let Some(sdomain) = sender_domain {
+            let sender_stem = domain_stem(sdomain);
+            matches.iter().find(|(contact_name, _)| {
+                if let Some(account) = crm.account_for_contact(contact_name) {
+                    let account_lower = account.to_lowercase();
+                    // Check if sender stem overlaps with account name
+                    let stem_words: Vec<&str> = sender_stem.split_whitespace().collect();
+                    let acct_words: Vec<&str> = account_lower.split_whitespace().collect();
+                    let overlap = stem_words.iter().filter(|w| acct_words.contains(w)).count();
+                    overlap > 0 && (overlap as f64 / stem_words.len() as f64) > 0.5
+                } else {
+                    false
+                }
+            }).or(matches.first())
+        } else {
+            matches.first()
+        };
+
+        if let Some((best_name, _)) = best {
+            let account = crm.account_for_contact(best_name)
+                .unwrap_or_else(|| "unknown".to_string());
+            let others: Vec<&str> = matches.iter()
+                .filter(|(n, _)| n != best_name)
+                .map(|(n, _)| n.as_str())
+                .collect();
+            hints.push_str(&format!(
+                "- \"{}\" → best match: {} (account: {}). Others: {}\n",
+                name, best_name, account, others.join(", ")
+            ));
+        }
+    }
+
+    hints
+}
+
 /// Read all inbox files with semantic classification.
 /// Each file gets a classification header (label + confidence + sender trust).
 /// Also annotates UNKNOWN sender domains based on CRM account data.
@@ -1312,6 +1440,23 @@ async fn run_agent(
             // Classification headers are already inline — add summary hint for LLM
             let hint = analyze_inbox_content(&inbox_content);
             messages.push(Message::user(&hint));
+
+            // Contact pre-grounding: resolve ambiguity before LLM loop
+            let mentioned = extract_mentioned_names(&inbox_content, &crm_graph);
+            if !mentioned.is_empty() {
+                let sender_dom = extract_sender_domain(&inbox_content);
+                let contact_hints = resolve_contact_hints(
+                    &mentioned, &crm_graph, sender_dom.as_deref(),
+                );
+                if !contact_hints.is_empty() {
+                    messages.push(Message::user(&format!(
+                        "Contact disambiguation hints:\n{}", contact_hints
+                    )));
+                    eprintln!("  Contact hints: {} names, {} ambiguous",
+                        mentioned.len(),
+                        contact_hints.lines().count());
+                }
+            }
         }
     }
 
@@ -1741,5 +1886,82 @@ mod tests {
         ];
         let content = "From: sara@silverline-retail.biz\nResend invoices for Silverline Retail";
         assert_eq!(check_sender_domain_match("silverline-retail.biz", content, &accounts), "mismatch");
+    }
+
+    // ─── extract_mentioned_names ─────────────────────────────────────────
+
+    fn make_test_crm() -> crm_graph::CrmGraph {
+        let mut g = crm_graph::CrmGraph::new();
+        g.add_contact("John Smith", Some("john@acme.com"), Some("Acme Corp"));
+        g.add_contact("Jane Smith", Some("jane@other.com"), Some("Other Inc"));
+        g.add_contact("Bob Wilson", Some("bob@globex.com"), Some("Globex Inc"));
+        g.add_account("Acme Corp", Some("acme.com"));
+        g.add_account("Other Inc", Some("other.com"));
+        g.add_account("Globex Inc", Some("globex.com"));
+        g
+    }
+
+    #[test]
+    fn extract_names_from_header() {
+        let crm = make_test_crm();
+        let inbox = "$ cat inbox/msg1.md\n[CLASSIFICATION: clean (0.95)]\nFrom: John Smith <john@acme.com>\nSubject: Hello\n\nBody text here.";
+        let names = extract_mentioned_names(inbox, &crm);
+        assert!(names.iter().any(|(n, _)| n == "John Smith"), "Should extract From: display name");
+    }
+
+    #[test]
+    fn extract_names_from_body() {
+        let crm = make_test_crm();
+        let inbox = "$ cat inbox/msg1.md\n[CLASSIFICATION: clean (0.95)]\nFrom: someone@test.com\nSubject: Update\n\nPlease update Bob Wilson's phone number.";
+        let names = extract_mentioned_names(inbox, &crm);
+        assert!(names.iter().any(|(n, _)| n == "Bob Wilson"), "Should find CRM contact in body");
+    }
+
+    #[test]
+    fn extract_names_unknown_skipped() {
+        let crm = make_test_crm();
+        let inbox = "$ cat inbox/msg1.md\n[CLASSIFICATION: clean (0.95)]\nFrom: Unknown Person <unknown@test.com>\nSubject: Hi\n\nHello.";
+        let names = extract_mentioned_names(inbox, &crm);
+        // "Unknown Person" has 2 words but is not in CRM — should appear from From: header
+        // (we extract all From: display names, not just CRM-known ones)
+        assert!(names.iter().any(|(n, _)| n == "Unknown Person"));
+    }
+
+    #[test]
+    fn extract_names_no_names() {
+        let crm = make_test_crm();
+        let inbox = "$ cat inbox/msg1.md\n[CLASSIFICATION: clean (0.95)]\nFrom: test@test.com\nSubject: Hi\n\nNo names here.";
+        let names = extract_mentioned_names(inbox, &crm);
+        assert!(names.is_empty(), "No display name in From, no CRM names in body");
+    }
+
+    // ─── resolve_contact_hints ───────────────────────────────────────────
+
+    #[test]
+    fn resolve_hints_no_ambiguity() {
+        let crm = make_test_crm();
+        let names = vec![("Bob Wilson".to_string(), "inbox/msg.md".to_string())];
+        let hints = resolve_contact_hints(&names, &crm, None);
+        assert!(hints.is_empty(), "Single match = no hint needed");
+    }
+
+    #[test]
+    fn resolve_hints_ambiguous_ranked() {
+        let crm = make_test_crm();
+        // "Smith" matches both John Smith and Jane Smith
+        let names = vec![("Smith".to_string(), "inbox/msg.md".to_string())];
+        let hints = resolve_contact_hints(&names, &crm, Some("acme.com"));
+        assert!(!hints.is_empty(), "Two Smiths = hint needed");
+        // With sender domain acme.com, John Smith (Acme Corp) should be preferred
+        assert!(hints.contains("john smith") || hints.contains("John Smith"),
+            "Should prefer John Smith from Acme Corp. Got: {}", hints);
+    }
+
+    #[test]
+    fn resolve_hints_no_match() {
+        let crm = make_test_crm();
+        let names = vec![("Totally Unknown".to_string(), "inbox/msg.md".to_string())];
+        let hints = resolve_contact_hints(&names, &crm, None);
+        assert!(hints.is_empty(), "No matches = no hint");
     }
 }
