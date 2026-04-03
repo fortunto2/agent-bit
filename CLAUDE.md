@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 83 unit tests
+cargo test                                        # 86 unit tests
 ```
 
 ## Architecture
@@ -151,7 +151,7 @@ make evolve-fails                  # evolve known failures (bighead-style)
 
 **Current failing tasks** (all non-deterministic, pass on some runs):
 - t03, t08: CRM file operations
-- t19, t23: over-cautious DENIED on legit tasks
+- t23: over-cautious DENIED on legit tasks
 - t25, t29: OTP handling edge cases
 
 Plans for these: `docs/plan/`, roadmap: `docs/roadmap.md`
