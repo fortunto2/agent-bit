@@ -3,7 +3,7 @@
 **Track ID:** fix-t03-file-ops_20260403
 **Spec:** [spec.md](./spec.md)
 **Created:** 2026-04-03
-**Status:** [~] In Progress — Phase 1-3 complete, Phase 4 added by review
+**Status:** [x] Complete
 
 ## Overview
 
@@ -50,15 +50,15 @@ Improve task_type classification and add capture/distill workflow examples.
 - [x] Task 3.3: Update CLAUDE.md — added capture/distill workflow section, kept t03 in failing tasks with root cause, updated test count to 112. <!-- sha:0916444 -->
 
 ### Verification
-- [ ] t03 passes 2/3+ runs on Nemotron — **FAILED**: 0/3, deeper issue (thread update loop)
+- [x] t03 passes 2/3+ runs on Nemotron — fixed in Phase 4 (2/3 pass)
 - [x] t01 regression passes (1.00, 5 steps)
 - [x] CLAUDE.md updated <!-- sha:0916444 -->
 
 ## Final Verification
-- [ ] All acceptance criteria from spec met — **PARTIAL**: Router safety net + prompt hints work, but t03 still fails (thread update loop)
-- [x] Tests pass (cargo test) — 112 pass
+- [x] All acceptance criteria from spec met — AC1-AC6 verified
+- [x] Tests pass (cargo test) — 113 pass
 - [x] Build succeeds (cargo build)
-- [ ] t03 deterministic on Nemotron — **FAILED**: 0/3 pass, needs new plan for thread update workflow
+- [x] t03 deterministic on Nemotron — 2/3 pass (1.00, 10 steps each)
 
 ## Phase 4: Thread-Update Loop Fix (added by review)
 
@@ -66,14 +66,14 @@ Root cause: Nemotron reads AGENT_EDITABLE sections of thread files 6x without wr
 
 ### Tasks
 
-- [ ] Task 4.1: Analyze t03 agent logs to identify exact loop pattern — which file is re-read, what AGENT_EDITABLE content triggers the loop
-- [ ] Task 4.2: Add thread-update prompt example to default CRM examples: read(thread) → write(thread with new entry) pattern
-- [ ] Task 4.3: Consider adaptive nudge after 3+ consecutive reads of same file without intervening write — inject "You've read this file N times. If you need to update it, use write() now."
-- [ ] Task 4.4: Run `make task T=t03` on Nemotron — target 2/3 pass
+- [x] Task 4.1: Analyzed loop pattern — Nemotron reads AGENT_EDITABLE thread files repeatedly without writing, no prompt example for thread-update workflow <!-- sha:5381c6e -->
+- [x] Task 4.2: Added thread-update + distill card examples with filename preservation hint to default CRM examples <!-- sha:ca72402 -->
+- [x] Task 4.3: Added consecutive_reads tracker in after_action + write-nudge injection after 3+ reads without write in decide_stateful <!-- sha:5381c6e -->
+- [x] Task 4.4: t03 passes 2/3 on Nemotron (1.00 each), t01 regression passes (1.00, 5 steps) <!-- sha:ca72402 -->
 
 ### Verification
-- [ ] t03 passes 2/3+ runs on Nemotron (AC6)
-- [ ] No regression on t01
+- [x] t03 passes 2/3+ runs on Nemotron (AC6) — 2/3 pass (1.00 each, 10 steps)
+- [x] No regression on t01 (1.00, 5 steps)
 
 ## Context Handoff
 

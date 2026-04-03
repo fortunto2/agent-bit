@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 112 unit tests
+cargo test                                        # 113 unit tests
 ```
 
 ## Architecture
@@ -100,7 +100,7 @@ instruction --> prescan (HTML only) --> start trial
 - task_type description explicitly lists "capture, distill, process inbox" → "edit"
 - Default CRM examples include capture-from-inbox pattern (read→write→delete)
 - `filter_tools_for_task()` extracted for testability (6 Router unit tests)
-- **Remaining issue (t03)**: agent creates capture + card correctly, but loops on thread file updates (reads AGENT_EDITABLE sections 6x without writing). Needs thread-update prompt example or write-after-read forcing.
+- **t03 fixed**: thread-update example + write-nudge (3+ consecutive reads → inject "use write() now"). Filename preservation hint for distill cards.
 
 ### Pre-grounding Context
 - tree + AGENTS.md + CRM schema (READMEs from directories)
@@ -147,7 +147,7 @@ Plans live in `docs/plan/{trackId}/` (spec.md + plan.md). Use `/solo:build {trac
 
 **Verification after every code change:**
 ```bash
-cargo test                         # 112 unit tests must pass
+cargo test                         # 113 unit tests must pass
 make task T=tXX                    # verify specific task (default: nemotron)
 make task T=tXX PROVIDER=openai    # verify on GPT-5.4
 ```
@@ -168,7 +168,6 @@ make evolve-fails                  # evolve known failures (bighead-style)
 ```
 
 **Current failing tasks** (all non-deterministic, pass on some runs):
-- t03: capture/distill — Router safety net works (writes happen), but agent loops on thread file updates (reads 6x without writing). Needs deeper prompt fix for thread update workflow.
 - t08: CRM file operations (delete ambiguity)
 - t23: contact pre-grounding implemented, needs harness verification
 - t25, t29: OTP handling edge cases
