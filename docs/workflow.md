@@ -8,12 +8,17 @@
 ## Build & Test
 ```bash
 cargo build                        # compile
-cargo test                         # 113 unit tests — MUST pass before commit
-make task T=tXX                    # verify specific PAC1 task (default: nemotron)
-make task T=tXX PROVIDER=openai    # verify on GPT-5.4
-make sample                        # quick 8-task smoke test
-make full P=3                      # full 30-task benchmark
+cargo test                         # unit tests — MUST pass before commit
+make task T=tXX                    # verify on Nemotron (FREE, default)
+make sample                        # quick 8-task smoke test on Nemotron
+make full P=3                      # full 30-task benchmark on Nemotron
 ```
+
+## Cost Policy — IMPORTANT
+- **Nemotron = primary model.** Free via Cloudflare. Use for ALL dev and testing.
+- **OpenAI (GPT-5.4) = final validation ONLY.** Max 1-2 runs per session.
+- Do NOT iterate on OpenAI. Do NOT run `make full PROVIDER=openai-full`.
+- `make task T=tXX PROVIDER=openai-full` — ONLY for final cross-model check.
 
 ## TDD Policy
 - **Moderate TDD**: write tests for new detection logic (threat_score, domain matching, structural signals)
