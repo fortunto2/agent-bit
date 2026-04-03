@@ -298,7 +298,8 @@ pub struct OutcomeValidator {
 
 impl OutcomeValidator {
     /// Build validator: embed seed examples + load adaptive store from disk.
-    /// Takes ownership of classifier (original constructor).
+    /// Takes ownership of classifier (used in tests; production uses from_shared).
+    #[cfg(test)]
     pub fn new(mut classifier: InboxClassifier, store_path: PathBuf) -> Result<Self> {
         let mut seed_store = Vec::new();
         for (outcome, example) in OUTCOME_EXAMPLES {
