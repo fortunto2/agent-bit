@@ -184,7 +184,7 @@ make evolve-fails                  # evolve known failures (bighead-style)
 ```
 
 **Current failing tasks** (all non-deterministic, pass on some runs):
-- t08: CRM file operations (delete ambiguity)
+- t08: delete routing + pre-grounding fix applied (structural write-restriction), still non-deterministic due to task randomization
 - t23: contact pre-grounding implemented, needs harness verification (Phase 4 open)
 - t25, t29: OTP classification refined (exfiltration vs verification vs passive), still non-deterministic
 
