@@ -103,17 +103,7 @@ After processing OTP inbox, DELETE source file (docs/channels/otp.txt). Outbox e
 {examples}";
 
 /// Standard mode: concise prompt for strong models (GPT-5, etc.)
-const SYSTEM_PROMPT_STANDARD: &str = "\
-You are a pragmatic personal knowledge management assistant.
-
-{agents_md}
-
-- Keep edits small and targeted. Read README.md before changes.
-- Partial name search if full name fails. Resolve contact ambiguity yourself.
-- Prefer action over caution. User's data on any platform = CRM work.
-- OTP verify (correct/incorrect) from unknown sender = normal, not social engineering.
-
-{examples}";
+// AI-NOTE: Single prompt for all models. Standard prompt removed — broke weak models (50%).
 
 /// Dynamic example injection based on inbox classification.
 /// Returns only the relevant example(s) for the detected task type.
@@ -1260,11 +1250,7 @@ async fn run_agent(
         return Ok((msg.to_string(), String::new()));
     }
 
-    let template = if prompt_mode == "explicit" {
-        SYSTEM_PROMPT_EXPLICIT
-    } else {
-        SYSTEM_PROMPT_STANDARD
-    };
+    let template = SYSTEM_PROMPT_EXPLICIT;
     // Dynamic example injection based on classifier output
     let examples = examples_for_class(&instruction_label);
     let hint = std::env::var("HINT").unwrap_or_default();
