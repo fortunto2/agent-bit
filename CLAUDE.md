@@ -106,32 +106,53 @@ instruction --> prescan (HTML only) --> start trial
 Providers in `config.toml`. Key fields per provider:
 - `model`, `base_url`, `api_key` / `api_key_env`
 - `auth` -- "keychain" for Claude Code subscription (macOS Keychain OAuth token)
-- `prompt_mode` -- "explicit" (weak models) or "standard" (default)
+- Single prompt for all models (explicit decision tree). No prompt_mode needed.
 - `headers` -- extra HTTP headers (e.g. CF Gateway timeout)
 
 ## Benchmarks
 
 Results tracked in `benchmarks/runs/`.
 
-### Current Baselines (2026-04-02)
+### Current Baselines (2026-04-03)
 
 | Model | Score | Notes |
 |-------|-------|-------|
-| GPT-5.4 | **83%** (25/30) | Best. Non-deterministic on t23, t29 |
-| Nemotron-120b | **73%** (19/26) | Non-deterministic: +/-4 tasks between runs |
-| GPT-5.4-mini | 55% (17/31) | Baseline |
+| Nemotron-120b | **80%** (24/30) | Best free model. Non-deterministic ±4 tasks |
+| GPT-5.4 | **85%** (25-27/30) | Best overall |
+| GPT-5.4-mini | 65% (20/31) | Weaker reasoning |
 
-### Evolution
+### Development Workflow
 
-Agent improvements use `/evolve` skill -- autonomous hypothesis-test loop.
+Plans live in `docs/plan/{trackId}/` (spec.md + plan.md). Use `/solo:build {trackId}` to execute.
 
+**Verification after every code change:**
+```bash
+cargo test                         # 86 unit tests must pass
+make task T=tXX                    # verify specific task (default: nemotron)
+make task T=tXX PROVIDER=openai    # verify on GPT-5.4
+```
+
+**Available skills:**
+- `/evolve tXX` -- autonomous hypothesis-test loop for a failing task
+- `/solo:plan "description"` -- create spec + plan for a feature/bug
+- `/solo:build trackId` -- execute plan tasks with TDD workflow
+- `/solo:review` -- final quality gate
+
+**Evolve commands:**
 ```bash
 make task T=t18                    # single task
-make task T=t18 PROVIDER=openai    # different provider
 make sample                        # 8-task quick sample
 make full P=3                      # parallel full run
 make revert                        # discard failed hypothesis
+make evolve-fails                  # evolve known failures (bighead-style)
 ```
+
+**Current failing tasks** (all non-deterministic, pass on some runs):
+- t03, t08: CRM file operations
+- t19, t23: over-cautious DENIED on legit tasks
+- t25, t29: OTP handling edge cases
+
+Plans for these: `docs/plan/`, roadmap: `docs/roadmap.md`
 
 Results: `benchmarks/runs/`, `.claude/skills/evolve/results.tsv`
 
