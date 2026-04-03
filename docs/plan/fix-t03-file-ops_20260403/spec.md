@@ -18,7 +18,7 @@ The fix addresses three layers: (1) Router tool-gating safety net — prevent pe
 - [x] AC3: Default CRM examples include a capture-distill-delete workflow showing read → write → delete → answer
 - [x] AC4: PLANNING_PROMPT includes a "capture from inbox" common pattern
 - [x] AC5: `cargo test` passes (all 105+ tests)
-- [ ] AC6: `make task T=t03` passes on Nemotron (at least 2/3 runs) — FAILED: 0/3, deeper thread-update loop issue
+- [x] AC6: `make task T=t03` passes on Nemotron (at least 2/3 runs) — 2/3 pass (1.00, 10 steps)
 
 ## Dependencies
 
