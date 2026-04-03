@@ -1,3 +1,21 @@
+#![allow(
+    clippy::collapsible_if,
+    clippy::too_many_arguments,
+    clippy::needless_borrows_for_generic_args,
+    clippy::type_complexity,
+    clippy::manual_split_once,
+    clippy::doc_lazy_continuation,
+    clippy::duplicated_attributes,
+    clippy::explicit_counter_loop,
+    clippy::manual_inspect,
+    clippy::char_lit_as_u8,
+    clippy::double_ended_iterator_last,
+    clippy::needless_range_loop,
+    clippy::collapsible_str_replace,
+    clippy::needless_borrow,
+    clippy::manual_pattern_char_comparison
+)]
+
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
