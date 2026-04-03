@@ -15,12 +15,12 @@ Fix approach: prompt wording (per roadmap rule: prompt > classifier > structural
 
 ## Acceptance Criteria
 
-- [ ] System prompt includes delete disambiguation rule (verify target before deleting)
-- [ ] Planning prompt includes delete-with-disambiguation pattern
-- [ ] Default examples include a delete disambiguation example (search → read candidates → confirm → delete)
-- [ ] Reasoning tool verification description includes delete safety cue
-- [ ] `cargo test` passes (120+ tests)
-- [ ] `make task T=t08` passes at least 2/3 on Nemotron
+- [x] System prompt includes delete disambiguation rule (verify target before deleting)
+- [x] Planning prompt includes delete-with-disambiguation pattern
+- [x] Default examples include a delete disambiguation example (search → read candidates → confirm → delete)
+- [x] Reasoning tool verification description includes delete safety cue
+- [x] `cargo test` passes (120+ tests)
+- [ ] `make task T=t08` passes at least 2/3 on Nemotron — FAILED: 0/1 (non-deterministic, agent did capture when expected no changes)
 
 ## Dependencies
 
