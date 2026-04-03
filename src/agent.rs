@@ -82,6 +82,10 @@ pub struct Pac1Agent<C: LlmClient> {
     nudge_sent: AtomicU32, // 0 = not sent, 1 = sent
     /// Reflexion count per step (max 1 per step)
     reflexion_count: AtomicU32,
+    /// Consecutive read calls without an intervening write (for write-nudge)
+    consecutive_reads: AtomicU32,
+    /// Whether the write-nudge has been injected (one-time)
+    write_nudge_sent: AtomicU32,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -95,6 +99,8 @@ impl<C: LlmClient> Pac1Agent<C> {
             action_ledger: Mutex::new(Vec::new()),
             nudge_sent: AtomicU32::new(0),
             reflexion_count: AtomicU32::new(0),
+            consecutive_reads: AtomicU32::new(0),
+            write_nudge_sent: AtomicU32::new(0),
         }
     }
 
@@ -245,6 +251,21 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
                 step, self.max_steps
             );
             eprintln!("  ⏰ Nudge: {}", nudge);
+            msgs.push(Message::user(&nudge));
+        }
+
+        // Write nudge: if 3+ consecutive reads without a write, prompt the model to write
+        let reads = self.consecutive_reads.load(Ordering::SeqCst);
+        if reads >= 3
+            && self.write_nudge_sent.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+        {
+            let nudge = format!(
+                "WRITE NUDGE: You have read files {} times without writing. \
+                 You already have the content — use write() now to make your changes. \
+                 Re-reading the same file will not help.",
+                reads
+            );
+            eprintln!("  ✏️ Write nudge: {} consecutive reads", reads);
             msgs.push(Message::user(&nudge));
         }
 
@@ -409,6 +430,13 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         let step = ctx.iteration as u32;
         self.record_action(step, tool_name, "", output);
 
+        // Track consecutive reads without writes (for write-nudge)
+        if matches!(tool_name, "read") {
+            self.consecutive_reads.fetch_add(1, Ordering::SeqCst);
+        } else if matches!(tool_name, "write" | "delete") {
+            self.consecutive_reads.store(0, Ordering::SeqCst);
+        }
+
         // Post-read security check: detect structural injection signals
         if matches!(tool_name, "read" | "search") {
             let score = structural_injection_score_inline(output);
@@ -552,5 +580,55 @@ mod tests {
         let names = tool_names(&defs);
         assert!(names.contains(&"write"), "analyze step 1+ must have write");
         assert!(names.contains(&"delete"), "analyze step 1+ must have delete");
+    }
+
+    #[test]
+    fn consecutive_reads_counter() {
+        use sgr_agent::context::AgentContext;
+        let agent = Pac1Agent::with_config(
+            DummyClient, "test".to_string(), 20, "explicit",
+        );
+        let mut ctx = AgentContext::new();
+        ctx.iteration = 1;
+
+        // 3 reads increment counter
+        agent.after_action(&mut ctx, "read", "$ cat file.md\ncontent");
+        agent.after_action(&mut ctx, "read", "$ cat file2.md\ncontent");
+        agent.after_action(&mut ctx, "read", "$ cat file3.md\ncontent");
+        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 3);
+
+        // write resets counter
+        agent.after_action(&mut ctx, "write", "OK");
+        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 0);
+
+        // delete also resets
+        agent.after_action(&mut ctx, "read", "$ cat x.md\ndata");
+        agent.after_action(&mut ctx, "read", "$ cat y.md\ndata");
+        agent.after_action(&mut ctx, "delete", "OK");
+        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 0);
+    }
+
+    /// Dummy LlmClient for unit tests that don't need LLM calls.
+    struct DummyClient;
+
+    #[async_trait::async_trait]
+    impl LlmClient for DummyClient {
+        async fn structured_call(
+            &self,
+            _messages: &[Message],
+            _schema: &serde_json::Value,
+        ) -> Result<(Option<serde_json::Value>, Vec<sgr_agent::types::ToolCall>, String), sgr_agent::SgrError> {
+            Ok((None, vec![], String::new()))
+        }
+        async fn tools_call(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDef],
+        ) -> Result<Vec<sgr_agent::types::ToolCall>, sgr_agent::SgrError> {
+            Ok(vec![])
+        }
+        async fn complete(&self, _messages: &[Message]) -> Result<String, sgr_agent::SgrError> {
+            Ok(String::new())
+        }
     }
 }

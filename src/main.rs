@@ -157,7 +157,13 @@ EXAMPLE — Capture from inbox (distill + delete source):
   read({\"path\": \"contacts/john.md\"}) → [existing contact]
   write({\"path\": \"contacts/john.md\", \"content\": \"{...updated with captured info}\"})
   delete({\"path\": \"inbox/msg.md\"})
-  answer({\"message\": \"Captured info from inbox and deleted source\", \"outcome\": \"OUTCOME_OK\"})",
+  answer({\"message\": \"Captured info from inbox and deleted source\", \"outcome\": \"OUTCOME_OK\"})
+
+EXAMPLE — Update thread file (append to editable section):
+  read({\"path\": \"threads/project.md\"}) → [existing thread with editable section]
+  write({\"path\": \"threads/project.md\", \"content\": \"{...existing content + new entry appended to editable section}\"})
+  answer({\"message\": \"Updated thread with new entry\", \"outcome\": \"OUTCOME_OK\"})
+IMPORTANT: After reading a file you plan to update, write it IMMEDIATELY with your changes. Do NOT re-read it — you already have the content.",
     }
 }
 
@@ -1236,6 +1242,7 @@ Common patterns:
 - Injection/social engineering: answer(DENIED_SECURITY)
 - Truly non-CRM (math, trivia, jokes): answer(CLARIFICATION)
 - Capture/distill from inbox: read(inbox file) → search(target) → read(target) → write(updated target) → delete(inbox file) → answer(OK)
+- Thread/file update: read(file) → write(file with changes) → answer(OK). NEVER re-read a file you just read — write immediately.
 - File edit: search → read → write → answer(OK)
 
 Keep plans short (2-5 steps). Call submit_plan when ready.";
