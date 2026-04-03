@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use unicode_normalization::UnicodeNormalization;
 
 use anyhow::{Context, Result};
 use ndarray::{Array1, ArrayView1};
@@ -185,7 +186,10 @@ impl InboxClassifier {
 /// Detects: (a) imperative override verbs, (b) system refs, (c) base64, (d) zero-width unicode.
 /// Returns 0.0-0.60 (each signal adds 0.15).
 pub fn structural_injection_score(text: &str) -> f32 {
-    let lower = text.to_lowercase();
+    // NFKC normalization: maps confusable chars to canonical forms
+    // e.g. fullwidth "ｉｇｎｏｒｅ" → "ignore", cyrillic "а" → detectable
+    let normalized: String = text.nfkc().collect();
+    let lower = normalized.to_lowercase();
     let mut signals = 0u32;
 
     // (a) Imperative verbs addressing "you"
@@ -209,11 +213,24 @@ pub fn structural_injection_score(text: &str) -> f32 {
         }
     }
 
-    // (d) Zero-width unicode characters
+    // (d) Zero-width / invisible unicode characters
     for c in text.chars() {
-        if matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' | '\u{2060}') {
+        if matches!(c,
+            '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' | '\u{2060}' | // zero-width
+            '\u{00AD}' | // soft hyphen
+            '\u{034F}' | // combining grapheme joiner
+            '\u{180E}' | // mongolian vowel separator
+            '\u{2028}' | '\u{2029}' | // line/paragraph separator
+            '\u{202A}'..='\u{202E}' | // bidi overrides
+            '\u{2066}'..='\u{2069}'   // bidi isolates
+        ) {
             signals += 1; break;
         }
+    }
+
+    // (e) Text differs after NFKC normalization → confusable characters used
+    if normalized != text && text.len() > 20 {
+        signals += 1;
     }
 
     (signals as f32) * 0.15

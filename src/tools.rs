@@ -153,6 +153,18 @@ impl Tool for WriteTool {
     fn parameters_schema(&self) -> Value { json_schema_for::<WriteArgs>() }
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: WriteArgs = parse_args(&args)?;
+
+        // Outbox validation: if writing JSON to outbox/, check required fields
+        if a.path.contains("outbox/") && !a.path.contains("seq.json") && !a.path.contains("README") {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&a.content) {
+                if json.get("sent").is_none() {
+                    return Ok(ToolOutput::text(
+                        "⚠ VALIDATION: Outbox email JSON missing 'sent' field. Add \"sent\": false. Read outbox/README.MD for format.".to_string()
+                    ));
+                }
+            }
+        }
+
         self.0.write(&a.path, &a.content, a.start_line, a.end_line).await.map_err(pcm_err)?;
         let msg = if a.start_line > 0 && a.end_line > 0 {
             format!("Replaced lines {}-{} in {}", a.start_line, a.end_line, a.path)

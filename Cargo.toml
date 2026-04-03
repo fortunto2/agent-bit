@@ -29,6 +29,10 @@ futures = "0.3"
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 schemars = "0.8"
 ammonia = "4"
+mailparse = "0.15"
+jsonschema = "0.28"
+regex = "1"
+unicode-normalization = "0.1"
 bitgn-sdk = { path = "crates/bitgn-sdk" }
 connectrpc = { version = "0.3", features = ["client", "client-tls"] }
 webpki-roots = "0.26"
