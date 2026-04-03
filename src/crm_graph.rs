@@ -168,7 +168,7 @@ impl CrmGraph {
         }
     }
 
-    fn add_contact(&mut self, name: &str, email: Option<&str>, company: Option<&str>) {
+    pub fn add_contact(&mut self, name: &str, email: Option<&str>, company: Option<&str>) {
         let contact_idx = self.graph.add_node(Node::Contact {
             name: name.to_string(),
             email: email.map(|s| s.to_string()),
@@ -200,7 +200,7 @@ impl CrmGraph {
         }
     }
 
-    fn add_account(&mut self, name: &str, domain: Option<&str>) {
+    pub fn add_account(&mut self, name: &str, domain: Option<&str>) {
         let account_idx = if let Some(&idx) = self.name_index.get(&name.to_lowercase()) {
             idx
         } else {
@@ -310,6 +310,82 @@ impl CrmGraph {
         best
     }
 
+    /// Get all contacts linked to an account via WorksAt edge.
+    pub fn contacts_for_account(&self, account_name: &str) -> Vec<String> {
+        let account_idx = match self.name_index.get(&account_name.to_lowercase()) {
+            Some(&idx) => idx,
+            None => return Vec::new(),
+        };
+        // WorksAt edges go contact → account, so look for incoming neighbors
+        self.graph
+            .neighbors_directed(account_idx, petgraph::Direction::Incoming)
+            .filter_map(|n| {
+                if let Node::Contact { ref name, .. } = self.graph[n] {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Get account name for a contact (via outgoing WorksAt edge).
+    pub fn account_for_contact(&self, contact_name: &str) -> Option<String> {
+        let &idx = self.name_index.get(&contact_name.to_lowercase())?;
+        self.graph.neighbors(idx).find_map(|n| {
+            if let Node::Account { ref name } = self.graph[n] {
+                Some(name.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Find all contacts matching a query (exact, substring, fuzzy).
+    /// Returns Vec<(name, score)> sorted by score descending.
+    pub fn find_all_matching_contacts(&self, query: &str) -> Vec<(String, f64)> {
+        if query.len() < 2 { return Vec::new(); }
+        let query_lower = query.to_lowercase();
+        let mut matches = Vec::new();
+
+        for (name, &idx) in &self.name_index {
+            if !matches!(self.graph[idx], Node::Contact { .. }) {
+                continue;
+            }
+            if name == &query_lower {
+                matches.push((name.clone(), 1.0));
+            } else if name.contains(&query_lower) || query_lower.contains(name) {
+                matches.push((name.clone(), 0.85));
+            } else {
+                // Partial: check if any word in the query matches any word in the name
+                let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+                let name_words: Vec<&str> = name.split_whitespace().collect();
+                let has_word_match = query_words.iter().any(|qw| {
+                    qw.len() >= 3 && name_words.iter().any(|nw| nw == qw)
+                });
+                if has_word_match {
+                    matches.push((name.clone(), 0.8));
+                } else {
+                    let score = strsim::normalized_levenshtein(&query_lower, name);
+                    if score > 0.6 {
+                        matches.push((name.clone(), score));
+                    }
+                }
+            }
+        }
+
+        matches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        matches
+    }
+
+    /// Iterator over known contact names (lowercase).
+    pub fn contact_names(&self) -> Vec<String> {
+        self.name_index.iter()
+            .filter(|(_, idx)| matches!(self.graph[**idx], Node::Contact { .. }))
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     /// Number of nodes in the graph.
     pub fn node_count(&self) -> usize {
         self.graph.node_count()
@@ -407,6 +483,68 @@ mod tests {
     fn fuzzy_find_short_query_none() {
         let g = build_test_graph();
         assert!(g.fuzzy_find_contact("Jo").is_none());
+    }
+
+    #[test]
+    fn contacts_for_account_found() {
+        let g = build_test_graph();
+        let mut contacts = g.contacts_for_account("Acme Corp");
+        contacts.sort();
+        assert_eq!(contacts, vec!["Jane Doe", "John Smith"]);
+    }
+
+    #[test]
+    fn contacts_for_account_single() {
+        let g = build_test_graph();
+        assert_eq!(g.contacts_for_account("Globex Inc"), vec!["Bob Wilson"]);
+    }
+
+    #[test]
+    fn contacts_for_account_nonexistent() {
+        let g = build_test_graph();
+        assert!(g.contacts_for_account("Unknown Corp").is_empty());
+    }
+
+    #[test]
+    fn account_for_contact_found() {
+        let g = build_test_graph();
+        assert_eq!(g.account_for_contact("John Smith"), Some("Acme Corp".to_string()));
+    }
+
+    #[test]
+    fn account_for_contact_not_found() {
+        let g = build_test_graph();
+        assert_eq!(g.account_for_contact("Unknown Person"), None);
+    }
+
+    #[test]
+    fn find_all_matching_exact() {
+        let g = build_test_graph();
+        let m = g.find_all_matching_contacts("John Smith");
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].0, "john smith");
+        assert_eq!(m[0].1, 1.0);
+    }
+
+    #[test]
+    fn find_all_matching_surname() {
+        let mut g = CrmGraph::new();
+        g.add_contact("John Smith", Some("john@acme.com"), Some("Acme Corp"));
+        g.add_contact("Jane Smith", Some("jane@other.com"), Some("Other Inc"));
+        g.add_account("Acme Corp", Some("acme.com"));
+        g.add_account("Other Inc", Some("other.com"));
+        let m = g.find_all_matching_contacts("Smith");
+        assert_eq!(m.len(), 2, "Both Smith contacts should match");
+    }
+
+    #[test]
+    fn contact_names_only_contacts() {
+        let g = build_test_graph();
+        let names = g.contact_names();
+        assert!(names.contains(&"john smith".to_string()));
+        assert!(names.contains(&"bob wilson".to_string()));
+        // Accounts should NOT be in contact_names
+        assert!(!names.contains(&"acme corp".to_string()));
     }
 
     #[test]
