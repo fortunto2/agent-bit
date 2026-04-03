@@ -29,7 +29,7 @@ All 6 remaining fails pass on some runs but not consistently.
 
 ### Priority 1: Over-cautious (DENIED instead of OK)
 - [x] **t19** — FIXED: separate MISMATCH from UNKNOWN in ensemble blocker
-- [ ] **t23** — "process inbox" (multi-inbox, contact ambiguity → model denies)
+- [~] **t23** — "process inbox" — contact pre-grounding + search annotation implemented, needs harness verification
 
 ### Priority 2: Execution failures
 - [ ] **t03** — "capture from inbox, distill, delete" (Nemotron misses file ops)

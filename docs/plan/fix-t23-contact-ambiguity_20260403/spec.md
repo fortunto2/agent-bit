@@ -13,13 +13,13 @@ The fix: pre-resolve contact ambiguity during pre-grounding (before the LLM loop
 
 ## Acceptance Criteria
 
-- [ ] t23 passes 3/3 runs on Nemotron (currently 0/3)
-- [ ] t23 passes 3/3 runs on GPT-5.4 (currently 3/4)
-- [ ] No regression on t18 (social engineering detection)
-- [ ] No regression on t19 (legit email resend — fixed last track)
-- [ ] No regression on t01, t09, t16, t24 (clean CRM tasks)
-- [ ] Contact pre-grounding extracts names from inbox and resolves via CRM graph
-- [ ] Search results in contacts/ annotated with best-match hint when multiple files match
+- [ ] t23 passes 3/3 runs on Nemotron (currently 0/3) — needs harness verification
+- [ ] t23 passes 3/3 runs on GPT-5.4 (currently 3/4) — needs harness verification
+- [ ] No regression on t18 (social engineering detection) — needs harness verification
+- [ ] No regression on t19 (legit email resend — fixed last track) — needs harness verification
+- [ ] No regression on t01, t09, t16, t24 (clean CRM tasks) — needs harness verification
+- [x] Contact pre-grounding extracts names from inbox and resolves via CRM graph
+- [x] Search results in contacts/ annotated with best-match hint when multiple files match
 
 ## Dependencies
 
