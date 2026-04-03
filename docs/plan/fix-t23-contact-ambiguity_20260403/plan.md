@@ -41,17 +41,17 @@ When search returns multiple contacts, annotate results with CRM graph context.
 
 ### Tasks
 
-- [ ] Task 2.1: Add `annotate_contact_results()` helper in `src/tools.rs` — when search root is "contacts" and multiple files match, use CRM graph to add "[BEST MATCH]" annotation based on the current inbox context (sender domain, referenced account).
+- [x] Task 2.1: Add `annotate_contact_results()` helper in `src/tools.rs` — when search root is "contacts" and multiple files match, use CRM graph to add "[BEST MATCH]" annotation based on the current inbox context (sender domain, referenced account).
 
-- [ ] Task 2.2: Thread `CrmGraph` (or a lightweight contact ranking closure) into `SearchTool` — add `Option<Arc<CrmGraph>>` field so search can access graph context. Wire it in `run_agent()` at tool registry construction (~line 1369).
+- [x] Task 2.2: Thread `CrmGraph` (or a lightweight contact ranking closure) into `SearchTool` — add `Option<Arc<CrmGraph>>` field so search can access graph context. Wire it in `run_agent()` at tool registry construction (~line 1369).
 
-- [ ] Task 2.3: In `SearchTool::execute()`, after `auto_expand_search()`, call `annotate_contact_results()` when search root starts with "contacts". Append "[BEST MATCH: ...]" to the best-ranked result.
+- [x] Task 2.3: In `SearchTool::execute()`, after `auto_expand_search()`, call `annotate_contact_results()` when search root starts with "contacts". Append "[BEST MATCH: ...]" to the best-ranked result.
 
-- [ ] Task 2.4: Unit test for `annotate_contact_results()` — two contacts same surname different accounts, one matching sender domain.
+- [x] Task 2.4: Unit test for `annotate_contact_results()` — two contacts same surname different accounts, one matching sender domain.
 
 ### Verification
 
-- [ ] `cargo test` passes
+- [x] `cargo test` passes (103 tests)
 - [ ] `make task T=t23` passes on Nemotron
 - [ ] `make task T=t23 PROVIDER=openai` passes on GPT-5.4
 

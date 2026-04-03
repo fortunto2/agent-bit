@@ -1250,7 +1250,7 @@ async fn run_planning_phase(
     // Read-only tools for planning + submit_plan
     let registry = ToolRegistry::new()
         .register(tools::ReadTool(pcm.clone()))
-        .register(tools::SearchTool(pcm.clone()))
+        .register(tools::SearchTool(pcm.clone(), None))
         .register(tools::FindTool(pcm.clone()))
         .register(tools::ListTool(pcm.clone()))
         .register(tools::TreeTool(pcm.clone()))
@@ -1495,6 +1495,8 @@ async fn run_agent(
         }
     }
 
+    let crm_graph = Arc::new(crm_graph);
+
     // Build OutcomeValidator using the shared classifier
     let outcome_validator: Option<Arc<classifier::OutcomeValidator>> = {
         let store_path = std::path::PathBuf::from(".agent/outcome_store.json");
@@ -1511,7 +1513,7 @@ async fn run_agent(
     let registry = ToolRegistry::new()
         .register(tools::ReadTool(pcm.clone()))
         .register(tools::WriteTool(pcm.clone()))
-        .register(tools::SearchTool(pcm.clone()))
+        .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
         .register(tools::FindTool(pcm.clone()))
         .register(tools::ListTool(pcm.clone()))
         .register(tools::TreeTool(pcm.clone()))
