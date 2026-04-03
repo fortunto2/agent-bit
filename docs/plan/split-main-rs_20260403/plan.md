@@ -23,7 +23,7 @@ Extract static text (system prompt, planning prompt, examples) into a dedicated 
 - [x] `cargo test` passes
 - [x] `cargo build` clean
 
-## Phase 2: Extract scanner.rs
+## Phase 2: Extract scanner.rs <!-- checkpoint:7c35206 -->
 
 Extract security scanning, inbox classification, and domain matching into scanner module (~570 code lines + ~200 test lines).
 
@@ -43,24 +43,15 @@ Extract security scanning, inbox classification, and domain matching into scanne
 Extract contact pre-grounding, inbox reading, planning phase, and agent execution (~630 code lines + ~80 test lines).
 
 ### Tasks
-- [ ] Task 3.1: Create `src/pregrounding.rs` with these functions (all `pub(crate)`):
-  - `extract_mentioned_names`, `resolve_contact_hints`
-  - `read_inbox_files`
-  - `run_planning_phase`
-  - `make_llm_config`
-  - `run_agent`
-  - Add required `use` imports (scanner, prompts, classifier, tools, agent, pcm, crm_graph, sgr_agent types)
-- [ ] Task 3.2: Move corresponding tests from `main.rs::tests` to `pregrounding.rs` `#[cfg(test)] mod tests`:
-  - `extract_names_*` tests (4 tests)
-  - `resolve_hints_*` tests (3 tests)
-  - `make_test_crm()` helper
-- [ ] Task 3.3: In `src/main.rs`, remove moved code, add `mod pregrounding;`, update `run_trial` to call `pregrounding::run_agent(...)`. Update `run_leaderboard` to call `pregrounding::make_llm_config(...)`.
-- [ ] Task 3.4: Run `cargo test` + `cargo build` — verify all 113 tests pass.
+- [x] Task 3.1: Create `src/pregrounding.rs` with 6 functions (all `pub(crate)`)
+- [x] Task 3.2: Move corresponding tests (4 extract_names + 3 resolve_hints + helper)
+- [x] Task 3.3: In `src/main.rs`, remove moved code, add `mod pregrounding;`, update references
+- [x] Task 3.4: Run `cargo test` + `cargo build` — verify all 113 tests pass.
 
 ### Verification
-- [ ] `src/pregrounding.rs` exists with 6 functions + ~7 tests
-- [ ] `src/main.rs` is under 500 lines
-- [ ] `cargo test` passes (113 tests)
+- [x] `src/pregrounding.rs` exists with 6 functions + 7 tests
+- [x] `src/main.rs` is 384 lines (under 500)
+- [x] `cargo test` passes (113 tests)
 
 ## Phase 4: Docs & Cleanup
 
