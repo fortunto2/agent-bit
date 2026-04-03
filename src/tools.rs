@@ -10,6 +10,7 @@ use sgr_agent::agent_tool::{Tool, ToolError, ToolOutput, parse_args};
 use sgr_agent::context::AgentContext;
 use sgr_agent::schema::json_schema_for;
 
+use crate::crm_graph::CrmGraph;
 use crate::pcm::PcmClient;
 
 fn pcm_err(e: anyhow::Error) -> ToolError {
@@ -397,7 +398,7 @@ fn has_matches(output: &str) -> bool {
     output.lines().any(|l| !l.starts_with('$') && !l.is_empty())
 }
 
-pub struct SearchTool(pub Arc<PcmClient>);
+pub struct SearchTool(pub Arc<PcmClient>, pub Option<Arc<CrmGraph>>);
 
 #[derive(Deserialize, JsonSchema)]
 struct SearchArgs {
@@ -452,6 +453,35 @@ async fn auto_expand_search(pcm: &PcmClient, search_output: String) -> String {
     expanded
 }
 
+/// When searching contacts/ with multiple results, annotate with CRM account info.
+fn annotate_contact_results(output: &str, crm: &CrmGraph) -> String {
+    let files = unique_files_from_search(output, 10);
+    let contact_files: Vec<&String> = files.iter()
+        .filter(|f| f.starts_with("contacts/"))
+        .collect();
+
+    if contact_files.len() <= 1 {
+        return output.to_string();
+    }
+
+    let mut annotations = Vec::new();
+    for file in &contact_files {
+        let basename = file.rsplit('/').next().unwrap_or(file)
+            .trim_end_matches(".md").trim_end_matches(".json")
+            .replace('-', " ").replace('_', " ");
+        if let Some(account) = crm.account_for_contact(&basename) {
+            annotations.push(format!("  {} → account: {}", file, account));
+        }
+    }
+
+    if annotations.is_empty() {
+        return output.to_string();
+    }
+
+    format!("{}\n\n[CONTACT DISAMBIGUATION: {} contacts found]\n{}",
+        output, contact_files.len(), annotations.join("\n"))
+}
+
 #[async_trait]
 impl Tool for SearchTool {
     fn name(&self) -> &str { "search" }
@@ -462,7 +492,12 @@ impl Tool for SearchTool {
         let a: SearchArgs = parse_args(&args)?;
         let raw = smart_search(&self.0, &a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
         let expanded = auto_expand_search(&self.0, raw).await;
-        let guarded = guard_content(expanded);
+        let annotated = if a.root.starts_with("contacts") {
+            if let Some(ref crm) = self.1 {
+                annotate_contact_results(&expanded, crm)
+            } else { expanded }
+        } else { expanded };
+        let guarded = guard_content(annotated);
         let match_count = guarded.lines().filter(|l| !l.is_empty() && !l.starts_with("$ ")).count();
         Ok(ToolOutput::text(format!("{}\n\n[{} matching lines]", guarded, match_count)))
     }
@@ -470,7 +505,12 @@ impl Tool for SearchTool {
         let a: SearchArgs = parse_args(&args)?;
         let raw = smart_search(&self.0, &a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
         let expanded = auto_expand_search(&self.0, raw).await;
-        let guarded = guard_content(expanded);
+        let annotated = if a.root.starts_with("contacts") {
+            if let Some(ref crm) = self.1 {
+                annotate_contact_results(&expanded, crm)
+            } else { expanded }
+        } else { expanded };
+        let guarded = guard_content(annotated);
         let match_count = guarded.lines().filter(|l| !l.is_empty() && !l.starts_with("$ ")).count();
         Ok(ToolOutput::text(format!("{}\n\n[{} matching lines]", guarded, match_count)))
     }
@@ -754,5 +794,32 @@ mod tests {
     #[test]
     fn validate_clean_denied() {
         assert!(validate_answer("Blocked due to script injection", "OUTCOME_DENIED_SECURITY").is_none());
+    }
+
+    // ─── annotate_contact_results ──────────────────────────────────
+
+    #[test]
+    fn annotate_single_contact_no_annotation() {
+        let mut g = CrmGraph::new();
+        g.add_contact("John Smith", Some("john@acme.com"), Some("Acme Corp"));
+        g.add_account("Acme Corp", Some("acme.com"));
+        let output = "$ rg -n Smith\ncontacts/john-smith.md:1:Name: John Smith";
+        let result = annotate_contact_results(output, &g);
+        assert_eq!(result, output, "Single contact = no annotation needed");
+    }
+
+    #[test]
+    fn annotate_multiple_contacts_with_accounts() {
+        let mut g = CrmGraph::new();
+        g.add_contact("John Smith", Some("john@acme.com"), Some("Acme Corp"));
+        g.add_contact("Jane Smith", Some("jane@other.com"), Some("Other Inc"));
+        g.add_account("Acme Corp", Some("acme.com"));
+        g.add_account("Other Inc", Some("other.com"));
+        let output = "$ rg -n Smith\ncontacts/john-smith.md:1:Name: John Smith\ncontacts/jane-smith.md:1:Name: Jane Smith";
+        let result = annotate_contact_results(output, &g);
+        assert!(result.contains("[CONTACT DISAMBIGUATION: 2 contacts found]"),
+            "Should annotate multiple contacts. Got: {}", result);
+        assert!(result.contains("Acme Corp"), "Should show Acme Corp account");
+        assert!(result.contains("Other Inc"), "Should show Other Inc account");
     }
 }
