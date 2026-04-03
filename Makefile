@@ -1,5 +1,8 @@
 .PHONY: build test run list dry-run task sample revert
 
+-include .env
+export
+
 PROVIDER ?= nemotron
 
 build:
