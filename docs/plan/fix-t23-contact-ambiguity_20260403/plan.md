@@ -3,7 +3,7 @@
 **Track ID:** fix-t23-contact-ambiguity_20260403
 **Spec:** [spec.md](./spec.md)
 **Created:** 2026-04-03
-**Status:** [ ] Not Started
+**Status:** [~] In Progress (Phase 1-2 complete, Phase 3 blocked by disk space)
 
 ## Overview
 
@@ -27,11 +27,11 @@ Extract names from inbox emails and resolve them against the CRM graph before th
 
 - [x] Task 1.6: Unit tests for `resolve_contact_hints()` — single match (no hint needed), multiple matches (ranked), no match.
 
-- [x] Task 1.7: Unit tests for `contacts_for_account()` in `src/crm_graph.rs` — account with contacts, account with no contacts, nonexistent account.
+- [x] Task 1.7: Unit tests for `contacts_for_account()` in `src/crm_graph.rs` — account with contacts, account with no contacts, nonexistent account. <!-- sha:1da298a -->
 
 ### Verification
 
-- [x] `cargo test` passes (all 101 tests)
+- [x] `cargo test` passes (all 105 tests)
 - [x] `cargo build` succeeds
 - [ ] `make task T=t23` passes on Nemotron
 
@@ -47,11 +47,11 @@ When search returns multiple contacts, annotate results with CRM graph context.
 
 - [x] Task 2.3: In `SearchTool::execute()`, after `auto_expand_search()`, call `annotate_contact_results()` when search root starts with "contacts". Append "[BEST MATCH: ...]" to the best-ranked result.
 
-- [x] Task 2.4: Unit test for `annotate_contact_results()` — two contacts same surname different accounts, one matching sender domain.
+- [x] Task 2.4: Unit test for `annotate_contact_results()` — two contacts same surname different accounts, one matching sender domain. <!-- sha:fab9fb0 -->
 
 ### Verification
 
-- [x] `cargo test` passes (103 tests)
+- [x] `cargo test` passes (105 tests)
 - [ ] `make task T=t23` passes on Nemotron
 - [ ] `make task T=t23 PROVIDER=openai` passes on GPT-5.4
 
@@ -59,11 +59,11 @@ When search returns multiple contacts, annotate results with CRM graph context.
 
 ### Tasks
 
-- [~] Task 3.1: Run full regression: `make task T=t18` (social engineering), `make task T=t19` (legit resend), `make task T=t01`, `make task T=t09`, `make task T=t16`, `make task T=t24`. All must pass.
+- [ ] Task 3.1: Run full regression: `make task T=t18` (social engineering), `make task T=t19` (legit resend), `make task T=t01`, `make task T=t09`, `make task T=t16`, `make task T=t24`. All must pass. (BLOCKED: disk full, need `cargo clean` + rebuild)
 
-- [x] Task 3.2: Update `CLAUDE.md` — add contact pre-grounding to Decision Pipeline section, document the new CRM graph method.
+- [x] Task 3.2: Update `CLAUDE.md` — add contact pre-grounding to Decision Pipeline section, document the new CRM graph method. <!-- sha:ba10bbd -->
 
-- [~] Task 3.3: Update `docs/roadmap.md` — mark t23 as fixed, update scores if improved.
+- [ ] Task 3.3: Update `docs/roadmap.md` — mark t23 as fixed, update scores if improved.
 
 ### Verification
 
