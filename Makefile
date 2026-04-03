@@ -34,3 +34,15 @@ full:
 # Revert failed evolve hypothesis
 revert:
 	bash .claude/skills/evolve/scripts/revert.sh
+
+# Evolve all failing tasks (bighead-style loop)
+evolve-all:
+	bash scripts/evolve-all.sh --provider $(PROVIDER)
+
+# Evolve specific tasks
+evolve-tasks:
+	bash scripts/evolve-all.sh --provider $(PROVIDER) --tasks "$(T)"
+
+# Evolve only known failures
+evolve-fails:
+	bash scripts/evolve-all.sh --provider $(PROVIDER) --tasks "t03 t08 t19 t23 t25 t29"
