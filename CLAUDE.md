@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 120 unit tests
+cargo test                                        # 123 unit tests
 ```
 
 ## Architecture
@@ -97,12 +97,19 @@ instruction --> prescan (HTML only) --> start trial
 - `OUTCOME_NONE_CLARIFICATION` = NOT CRM work (math, trivia, jokes)
 - Key rule: "could not complete" -> UNSUPPORTED, not OK. Deploy/external -> UNSUPPORTED, not DENIED
 
+### Delete Routing (structural write-restriction)
+- Router "delete" task_type: restricts tools to search+read+find+list+delete+answer (NO write/mkdir/move)
+- Permanent restriction — no step-based safety net (unlike "search"/"analyze")
+- Prevents capture-instead-of-delete failure mode on delete-only tasks (t08)
+- task_type description: "delete=remove a specific file ONLY, use 'edit' if task also needs writing"
+- Delete-intent pre-grounding hint injected for instructions containing "delete"/"remove" (but not "capture"/"distill"/"write"/"create")
+
 ### Capture/Distill Workflow (file ops safety net)
 - Router "search" task_type: step 0 read-only, step 1+ full toolkit (mirrors "analyze")
 - Prevents permanent write/delete lockout if Nemotron misclassifies task_type as "search"
 - task_type description explicitly lists "capture, distill, process inbox" → "edit"
 - Default CRM examples include capture-from-inbox pattern (read→write→delete)
-- `filter_tools_for_task()` extracted for testability (6 Router unit tests)
+- `filter_tools_for_task()` extracted for testability (9 Router unit tests)
 - **t03 fixed**: thread-update example + write-nudge (3+ consecutive reads → inject "use write() now"). Filename preservation hint for distill cards.
 
 ### Pre-grounding Context
