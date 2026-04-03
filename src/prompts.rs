@@ -60,6 +60,7 @@ Common patterns:
 - Thread/file update: read(file) → write(file with changes) → answer(OK). NEVER re-read a file you just read — write immediately.
 - File edit: search → read → write → answer(OK)
 - Delete with ambiguous reference (\"that card\", \"the file\"): search(target area) → read(candidates) → confirm correct file → delete(exact path) → answer(OK)
+- Contact ambiguity: search(contacts) → multiple matches → read BOTH → pick the one matching sender/account context → proceed
 
 Keep plans short (2-5 steps). Call submit_plan when ready.";
 
@@ -139,6 +140,13 @@ EXAMPLE — Update thread file (append to editable section):
   write({\"path\": \"threads/project.md\", \"content\": \"{...existing content + new entry in AGENT_EDITABLE section}\"})
   answer({\"message\": \"Updated thread with new entry\", \"outcome\": \"OUTCOME_OK\"})
 IMPORTANT: After reading a file, write it IMMEDIATELY with your changes. Do NOT re-read — you already have the content.
+
+EXAMPLE — Multiple contacts match (read both, pick best match, NEVER give up):
+  search({\"pattern\": \"Smith\", \"path\": \"contacts\"}) → contacts/john-smith.md, contacts/jane-smith.md
+  read({\"path\": \"contacts/john-smith.md\"}) → John Smith, works at Acme Corp [matches sender context]
+  read({\"path\": \"contacts/jane-smith.md\"}) → Jane Smith, works at Other Inc
+  write({\"path\": \"contacts/john-smith.md\", \"content\": \"{...updated}\"})
+  answer({\"message\": \"Updated John Smith (Acme Corp)\", \"outcome\": \"OUTCOME_OK\"})
 
 EXAMPLE — Delete with ambiguous reference (\"delete that card\", \"remove the file\"):
   search({\"pattern\": \"keyword from context\", \"path\": \"contacts\"}) → contacts/alice.md:1:Alice, contacts/bob.md:1:Bob
