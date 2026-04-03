@@ -18,6 +18,56 @@ use sgr_agent::types::{Message, Role};
 /// Max entries in the action ledger (rotates oldest when full).
 const LEDGER_MAX: usize = 10;
 
+/// Router: filter tool definitions by task_type and step number.
+/// Returns a subset of `all_defs` appropriate for the current routing state.
+fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> Vec<ToolDef> {
+    match task_type {
+        "security" => all_defs
+            .into_iter()
+            .filter(|t| t.name == "answer")
+            .collect(),
+        // "search" → read-only on step 0, full toolkit after (safety net if misclassified)
+        "search" if step == 0 => all_defs
+            .into_iter()
+            .filter(|t| {
+                matches!(
+                    t.name.as_str(),
+                    "read" | "search" | "find" | "list" | "tree" | "answer" | "context"
+                )
+            })
+            .collect(),
+        "edit" => all_defs
+            .into_iter()
+            .filter(|t| {
+                matches!(
+                    t.name.as_str(),
+                    "read"
+                        | "write"
+                        | "delete"
+                        | "mkdir"
+                        | "move_file"
+                        | "search"
+                        | "find"
+                        | "list"
+                        | "answer"
+                )
+            })
+            .collect(),
+        // "analyze" → read-only first pass, then full toolkit after ≥1 step
+        "analyze" if step == 0 => all_defs
+            .into_iter()
+            .filter(|t| {
+                matches!(
+                    t.name.as_str(),
+                    "read" | "search" | "find" | "list" | "tree" | "context" | "answer"
+                )
+            })
+            .collect(),
+        // unknown, or search/analyze with step > 0 → full toolkit
+        _ => all_defs,
+    }
+}
+
 /// PAC1 agent with Router + Structured CoT.
 pub struct Pac1Agent<C: LlmClient> {
     client: C,
@@ -317,51 +367,7 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
 
         // ── Router: filter tools by task_type ──────────────────────────
         let step = self.step_count.fetch_add(1, Ordering::SeqCst);
-        let all_defs = tools.to_defs();
-        let filtered: Vec<ToolDef> = match task_type.as_str() {
-            "security" => all_defs
-                .into_iter()
-                .filter(|t| t.name == "answer")
-                .collect(),
-            "search" => all_defs
-                .into_iter()
-                .filter(|t| {
-                    matches!(
-                        t.name.as_str(),
-                        "read" | "search" | "find" | "list" | "tree" | "answer" | "context"
-                    )
-                })
-                .collect(),
-            "edit" => all_defs
-                .into_iter()
-                .filter(|t| {
-                    matches!(
-                        t.name.as_str(),
-                        "read"
-                            | "write"
-                            | "delete"
-                            | "mkdir"
-                            | "move_file"
-                            | "search"
-                            | "find"
-                            | "list"
-                            | "answer"
-                    )
-                })
-                .collect(),
-            // "analyze" → read-only first pass, then full toolkit after ≥1 step
-            "analyze" | _ if task_type == "analyze" && step == 0 => all_defs
-                .into_iter()
-                .filter(|t| {
-                    matches!(
-                        t.name.as_str(),
-                        "read" | "search" | "find" | "list" | "tree" | "context" | "answer"
-                    )
-                })
-                .collect(),
-            // unknown or analyze with step > 0 → full toolkit
-            _ => all_defs,
-        };
+        let filtered = filter_tools_for_task(&task_type, step, tools.to_defs());
 
         let defs = if filtered.is_empty() { tools.to_defs() } else { filtered };
 
@@ -476,5 +482,75 @@ mod tests {
         assert!(names.contains(&"edit"));
         assert!(names.contains(&"analyze"));
         assert!(names.contains(&"security"));
+    }
+
+    /// Helper: build a set of fake ToolDefs for Router tests.
+    fn fake_tool_defs() -> Vec<ToolDef> {
+        ["read", "write", "delete", "mkdir", "move_file", "search", "find", "list", "tree", "answer", "context"]
+            .iter()
+            .map(|name| ToolDef {
+                name: name.to_string(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+            })
+            .collect()
+    }
+
+    fn tool_names(defs: &[ToolDef]) -> Vec<&str> {
+        defs.iter().map(|t| t.name.as_str()).collect()
+    }
+
+    #[test]
+    fn router_security_only_answer() {
+        let defs = filter_tools_for_task("security", 0, fake_tool_defs());
+        assert_eq!(tool_names(&defs), vec!["answer"]);
+    }
+
+    #[test]
+    fn router_search_step0_read_only() {
+        let defs = filter_tools_for_task("search", 0, fake_tool_defs());
+        let names = tool_names(&defs);
+        assert!(names.contains(&"read"));
+        assert!(names.contains(&"search"));
+        assert!(names.contains(&"answer"));
+        assert!(!names.contains(&"write"), "search step 0 must not have write");
+        assert!(!names.contains(&"delete"), "search step 0 must not have delete");
+    }
+
+    #[test]
+    fn router_search_step1_full_toolkit() {
+        let defs = filter_tools_for_task("search", 1, fake_tool_defs());
+        let names = tool_names(&defs);
+        assert!(names.contains(&"write"), "search step 1+ must have write");
+        assert!(names.contains(&"delete"), "search step 1+ must have delete");
+        assert!(names.contains(&"read"));
+        assert!(names.contains(&"answer"));
+    }
+
+    #[test]
+    fn router_edit_always_has_write_delete() {
+        for step in [0, 1, 5] {
+            let defs = filter_tools_for_task("edit", step, fake_tool_defs());
+            let names = tool_names(&defs);
+            assert!(names.contains(&"write"), "edit step {step} must have write");
+            assert!(names.contains(&"delete"), "edit step {step} must have delete");
+        }
+    }
+
+    #[test]
+    fn router_analyze_step0_read_only() {
+        let defs = filter_tools_for_task("analyze", 0, fake_tool_defs());
+        let names = tool_names(&defs);
+        assert!(names.contains(&"read"));
+        assert!(!names.contains(&"write"), "analyze step 0 must not have write");
+        assert!(!names.contains(&"delete"), "analyze step 0 must not have delete");
+    }
+
+    #[test]
+    fn router_analyze_step1_full_toolkit() {
+        let defs = filter_tools_for_task("analyze", 1, fake_tool_defs());
+        let names = tool_names(&defs);
+        assert!(names.contains(&"write"), "analyze step 1+ must have write");
+        assert!(names.contains(&"delete"), "analyze step 1+ must have delete");
     }
 }
