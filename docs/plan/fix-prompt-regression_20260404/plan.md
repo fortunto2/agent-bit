@@ -1,0 +1,128 @@
+# Implementation Plan: Fix Prompt Regression
+
+**Track ID:** fix-prompt-regression_20260404
+**Spec:** [spec.md](./spec.md)
+**Created:** 2026-04-04
+**Status:** [ ] Not Started
+
+## Overview
+
+Restore 80% Nemotron score by slimming static prompt and moving examples to dynamic injection. Keep all code improvements.
+
+## CRITICAL RULE
+
+**After EVERY phase: `cargo test && make task T=t01 && make task T=t04`.**
+If t01 or t04 fail → revert phase, try different approach.
+Do NOT proceed to next phase with broken baseline tasks.
+
+## Phase 1: Slim Static Prompt (restore pre-bloat)
+
+### Tasks
+
+- [ ] Task 1.1: In `src/prompts.rs` SYSTEM_PROMPT_EXPLICIT, REMOVE these lines added by bighead:
+  - "DECISION FRAMEWORK: A task is LEGITIMATE..." (3 lines)
+  - "INBOX PROCESSING: When task says 'process inbox'..." (1 line)
+  Keep the decision tree steps 1-8 and KEY section exactly as they were at commit a5c1212.
+
+- [ ] Task 1.2: In PLANNING_PROMPT, REMOVE:
+  - "Contact ambiguity: search(contacts) → multiple matches..." pattern
+  - "Process inbox (multiple messages): read each message..." pattern
+  Keep the original patterns (CRM lookup, injection, data query, file edit, delete with ambiguous reference).
+
+- [ ] Task 1.3: In SYSTEM_PROMPT_EXPLICIT examples section, REMOVE bighead's additions:
+  - "EXAMPLE — Multiple contacts match" (6 lines)
+  - "EXAMPLE — Process inbox (multiple messages)" (5 lines)
+  Keep: CRM lookup, injection, OTP, email writing, counting, non-CRM, distill.
+
+### Verification
+- [ ] `cargo test` passes
+- [ ] `make task T=t01` passes (MUST — was stable before bighead)
+- [ ] `make task T=t04` passes (MUST — was fixed before bighead)
+- [ ] Prompt size in logs < 4KB (was ~3KB before bloat)
+
+## Phase 2: Move Examples to Dynamic Injection
+
+### Tasks
+
+- [ ] Task 2.1: In `src/prompts.rs` `examples_for_class()`, add new match arms for bighead's useful examples:
+  ```rust
+  "delete" => // delete with ambiguous reference example (from bighead's work)
+  "distill" => // capture from inbox + create card + delete source
+  ```
+
+- [ ] Task 2.2: Enhance existing "crm" default to include multi-contact disambiguation:
+  ```
+  EXAMPLE — Contact ambiguity (pick best match, NEVER give up):
+    search contacts → 2 matches → read both → pick by sender context → proceed
+  ```
+
+- [ ] Task 2.3: Add task_type detection for dynamic routing. In `examples_for_class()`, check instruction keywords:
+  - Contains "delete"/"remove" (no "capture"/"distill") → "delete" examples
+  - Contains "capture"/"distill"/"inbox" with file ops → "distill" examples
+  - Default → "crm" examples
+  Note: this supplements the classifier label, not replaces it.
+
+### Verification
+- [ ] `cargo test` passes
+- [ ] `make task T=t01` still passes
+- [ ] `make task T=t03` passes (distill example injected)
+- [ ] `make task T=t08` passes (delete example injected)
+
+## Phase 3: Full Benchmark + Regression Fix
+
+### Tasks
+
+- [ ] Task 3.1: Run `make full` on Nemotron. Target: >= 24/30 (80%).
+- [ ] Task 3.2: If score < 24/30, identify which tasks regressed. For each:
+  - Check if the dynamic example is being injected (look at "examples for:" in log)
+  - Check if confidence reflection is interfering
+  - Fix one task at a time, verify t01 after each fix
+- [ ] Task 3.3: Run `make full` again to confirm >= 24/30.
+- [ ] Task 3.4: Update `docs/roadmap.md` with actual score.
+
+### Verification
+- [ ] `make full` on Nemotron >= 24/30 (MANDATORY — run it, don't skip)
+- [ ] t01, t04, t09, t12, t16, t19, t24, t27 all pass
+- [ ] All tests pass
+
+## Phase 4: Docs
+
+### Tasks
+- [ ] Task 4.1: Update CLAUDE.md prompt section
+- [ ] Task 4.2: Commit all changes
+
+### Verification
+- [ ] Clean git status
+- [ ] CLAUDE.md accurate
+
+## Final Verification
+
+- [ ] `make full` on Nemotron >= 24/30 (80%+). MANDATORY.
+- [ ] All tests pass.
+- [ ] t01, t04, t09 baseline tasks pass.
+- [ ] Prompt size < 4KB in logs.
+
+## Context Handoff
+
+### Session Intent
+Restore 80% score by removing prompt bloat from bighead, keeping code improvements.
+
+### Key Files
+- `src/prompts.rs` — SYSTEM_PROMPT_EXPLICIT (slim), examples_for_class (expand)
+- `src/agent.rs` — DO NOT TOUCH (confidence, reflection, task_type all good)
+- `src/scanner.rs` — DO NOT TOUCH
+- `src/pregrounding.rs` — DO NOT TOUCH
+
+### Decisions Made
+- Static prompt: minimal rules only. Examples via dynamic injection.
+- Weak models (Nemotron) can't handle contradictory rules. Less = better.
+- Code improvements (confidence, temperature, split) are valuable. Prompt bloat is not.
+- Dynamic examples by classifier label + instruction keywords.
+
+### Risks
+- Removing "DECISION FRAMEWORK" may re-introduce over-caution on some tasks. Mitigated: the original decision tree step 3 already handles this.
+- Dynamic routing may inject wrong example. Mitigated: fallback to "crm" default.
+- t03/t08 may need their examples in static prompt. Test first with dynamic only, add to static only if fails.
+
+---
+_Generated by /plan. Tasks marked [~] in progress and [x] complete by /build._
