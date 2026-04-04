@@ -78,6 +78,27 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
     }
 }
 
+/// Structural task-type forcing: detect delete-only instructions regardless of LLM classification.
+/// Returns `Some("delete")` when instruction clearly indicates delete-only intent.
+fn detect_forced_task_type(instruction: &str) -> Option<&'static str> {
+    let lower = instruction.to_lowercase();
+    let has_delete = lower.contains("delete") || lower.contains("remove");
+    if !has_delete {
+        return None;
+    }
+    // Exclusion: if instruction also implies file creation/editing, it's not delete-only
+    let has_write_intent = lower.contains("captur")  // capture, capturing, captured
+        || lower.contains("distill")
+        || lower.contains("write")
+        || lower.contains("creat")  // create, creating, created
+        || lower.contains("updat")  // update, updating, updated
+        || lower.contains("process");
+    if has_write_intent {
+        return None;
+    }
+    Some("delete")
+}
+
 /// PAC1 agent with Router + Structured CoT.
 pub struct Pac1Agent<C: LlmClient> {
     client: C,
@@ -427,6 +448,25 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             } else {
                 (task_type, security, situation, plan, done)
             };
+
+        // ── Structural task_type override ────────────────────────────────
+        // Extract instruction from original messages and force task_type if pattern is unambiguous
+        let task_type = {
+            let instruction = messages.iter()
+                .find(|m| m.role == Role::User)
+                .map(|m| m.content.as_str())
+                .unwrap_or("");
+            if let Some(forced) = detect_forced_task_type(instruction) {
+                if task_type != forced {
+                    eprintln!("  🔒 Task-type override: {} → {} (structural)", task_type, forced);
+                    forced.to_string()
+                } else {
+                    task_type
+                }
+            } else {
+                task_type
+            }
+        };
 
         // ── Router: security → immediate answer ────────────────────────
         // If security_assessment is "blocked", inject strong guidance
@@ -850,5 +890,44 @@ mod tests {
             && !done
             && !(security == "blocked" && confidence >= 0.9);
         assert!(!should_reflect, "blocked + high confidence: security guard skips reflection");
+    }
+
+    // ── detect_forced_task_type tests ────────────────────────────────
+
+    #[test]
+    fn forced_task_type_delete_card() {
+        assert_eq!(detect_forced_task_type("delete the card about quarterly review"), Some("delete"));
+    }
+
+    #[test]
+    fn forced_task_type_remove_contact() {
+        assert_eq!(detect_forced_task_type("remove that contact file"), Some("delete"));
+    }
+
+    #[test]
+    fn forced_task_type_delete_with_capture_excluded() {
+        // Contains "capturing" → not delete-only
+        assert_eq!(detect_forced_task_type("delete the inbox message after capturing its content"), None);
+    }
+
+    #[test]
+    fn forced_task_type_write_instruction() {
+        assert_eq!(detect_forced_task_type("write a new email"), None);
+    }
+
+    #[test]
+    fn forced_task_type_process_and_remove() {
+        // "process" implies file ops beyond delete
+        assert_eq!(detect_forced_task_type("process inbox and remove spam"), None);
+    }
+
+    #[test]
+    fn forced_task_type_no_delete_keyword() {
+        assert_eq!(detect_forced_task_type("read all contacts and summarize"), None);
+    }
+
+    #[test]
+    fn forced_task_type_delete_with_update_excluded() {
+        assert_eq!(detect_forced_task_type("delete old data and update the log"), None);
     }
 }
