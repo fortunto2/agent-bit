@@ -199,3 +199,34 @@ Pipeline: build→deploy→review | Tracks: 12 (full 17.5h session) | Iters: 65 
 - Technical output excellent: CRM graph, contact disambiguation, OTP hardening, confidence reflection, temperature annealing, outcome validator blocking, delete routing
 - CLAUDE.md kept lean (13KB) despite massive feature growth
 - Mid-to-late tracks highly efficient — the pipeline is good when auth works
+
+## 2026-04-04 (Final Pipeline) | agent-bit | Factory Score: 3/10
+
+Pipeline: build→deploy→review | Tracks: 13 (12 completed + 1 aborted) | Iters: 70 | Waste: 41.4%
+
+### Defects
+- **CRITICAL** | solo-dev.sh: No stall detection — 14-iter deploy spin-loop (split-main-rs) + 9-iter auth loop (stabilize-decisions). 23/29 wasted iters (79% of all waste) from 2 known patterns.
+  - Fix: `solo-dev.sh` — track `last_sha`, abort after 3 consecutive same-SHA + no-signal
+- **CRITICAL** | solo-lib.sh: Auth error circuit breaker unfixed across **9 retros**. Content-based detection still absent.
+  - Fix: `solo-lib.sh:check_circuit_breaker()` — add `grep -qiE 'authentication_error|401'` before fingerprint
+- **HIGH** | solo:deploy: No local-only project detection (9th retro).
+  - Fix: `/deploy` SKILL.md — pre-check CLAUDE.md, auto-done if no deploy target
+- **MEDIUM** | solo:build: No per-iteration timeout. 329m single build (harden-t23).
+  - Fix: `solo-dev.sh` — 60m build / 30m deploy-review timeout
+
+### Harness Gaps
+- **Context:** CLAUDE.md at 14KB — healthy. 6 modules clean. Prompt regression identified (bloat from bighead additions).
+- **Constraints:** Retro→fix feedback loop STILL broken. 9 retros, same 3 factory defects, zero fixes applied. This IS the #1 problem.
+- **Precedents:** Escalation discipline proven: suggestive→directive→structural works for all task fixes. Dynamic example injection (pending fix-prompt-regression) should replace static prompt bloat.
+
+### Missing
+- **META-CRITICAL:** Retro→fix pipeline. 9 retros documenting same defects = process theater.
+- Auth error detection, stall detection, local-only deploy, per-iteration timeout — all designed, none applied.
+
+### What worked well
+- Auto-planning: 13 tracks across 21h, only 1 aborted
+- Test suite 105→156 (+51 tests), zero regressions, all green
+- 93.4% conventional commits (257 total)
+- Last 7 tracks: 21 iters, 0 waste — pipeline is excellent when infrastructure works
+- Technical output: 9/10 axis. CRM graph, confidence reflection, temperature annealing, outcome validator, delete routing, UTF-8 safe truncation, structural task-type forcing
+- Prompt regression correctly diagnosed (spec created, plan ready, not started yet)
