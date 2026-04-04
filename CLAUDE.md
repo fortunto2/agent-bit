@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 147 unit tests
+cargo test                                        # 154 unit tests
 ```
 
 ## Architecture
@@ -123,6 +123,7 @@ instruction --> prescan (HTML only) --> start trial
 - Prevents capture-instead-of-delete failure mode on delete-only tasks (t08)
 - task_type description: "delete=remove a specific file ONLY, use 'edit' if task also needs writing"
 - Delete-intent pre-grounding hint injected for instructions containing "delete"/"remove" (but not "capture"/"distill"/"write"/"create")
+- **Structural task_type forcing**: `detect_forced_task_type()` overrides LLM task_type when instruction is unambiguously delete-only (contains delete/remove, NOT captur/distill/write/creat/updat/process). Logged as `🔒 Task-type override`. Makes delete routing deterministic regardless of LLM classification.
 
 ### Capture/Distill Workflow (file ops safety net)
 - Router "search" task_type: step 0 read-only, step 1+ full toolkit (mirrors "analyze")
@@ -130,7 +131,7 @@ instruction --> prescan (HTML only) --> start trial
 - task_type description explicitly lists "capture, distill, process inbox" → "edit"
 - Default CRM examples include capture-from-inbox pattern (read→write→delete)
 - `filter_tools_for_task()` extracted for testability (9 Router unit tests)
-- **t03 fixed**: thread-update example + write-nudge (3+ consecutive reads → inject "use write() now"). Filename preservation hint for distill cards.
+- **t03 fixed**: thread-update example + write-nudge (2+ reads-since-last-write → inject "use write() now"). Counter only resets on write-class tools (write/delete/move_file/answer), NOT on search/find/list/tree. Filename preservation hint for distill cards.
 
 ### Pre-grounding Context
 - tree + AGENTS.md + CRM schema (READMEs from directories)

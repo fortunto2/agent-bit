@@ -40,8 +40,8 @@ All 6 remaining fails pass on some runs but not consistently.
 - [x] **t23** — "process inbox" — hardened for Nemotron: directive hints, inbox processing guidance, loop threshold 25, auto-answer writes-based OK. Passes ~2/3
 
 ### Priority 2: Execution failures
-- [ ] **t03** — "capture from inbox, distill, delete" (Nemotron misses file ops)
-- [ ] **t08** — "delete that card" (ambiguous task → model makes unexpected changes)
+- [~] **t03** — write-nudge counter fix (reads-since-last-write, threshold 2). Verified 1/1 pass on Nemotron.
+- [~] **t08** — structural task_type forcing (`detect_forced_task_type`). Needs Nemotron verification.
 
 ### Priority 3: OTP handling
 - [~] **t25** — "process inbox" (OTP severity — DENIED vs OK) — expanded seeds (32), OTP-intent hint (conf>0.50), extraction patterns (+7), verify patterns (+3). Still non-deterministic.
@@ -72,3 +72,4 @@ All 6 remaining fails pass on some runs but not consistently.
 - [x] Adaptive OutcomeValidator, dynamic examples, single prompt
 - [x] Session affinity, outbox validation, escaped HTML detection
 - [x] Temperature annealing + decision framework + confidence-gated reflection (stabilize-decisions track)
+- [x] Write-nudge counter fix + structural task_type forcing (harden-t03-t08 track)
