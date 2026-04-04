@@ -137,6 +137,8 @@ pub struct Pac1Agent<C: LlmClient> {
     write_nudge_sent: AtomicU32,
     /// Confidence reflection count per decide_stateful call (max 1)
     confidence_reflections: AtomicU32,
+    /// Whether the capture-delete nudge has been injected (one-time)
+    capture_delete_nudge_sent: AtomicU32,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -153,6 +155,7 @@ impl<C: LlmClient> Pac1Agent<C> {
             consecutive_reads: AtomicU32::new(0),
             write_nudge_sent: AtomicU32::new(0),
             confidence_reflections: AtomicU32::new(0),
+            capture_delete_nudge_sent: AtomicU32::new(0),
         }
     }
 
@@ -313,6 +316,31 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             );
             eprintln!("  ✏️ Write nudge: {} consecutive reads", reads);
             msgs.push(Message::user(&nudge));
+        }
+
+        // Capture-delete nudge: at 75% of steps, if task involves inbox capture,
+        // strongly remind to delete inbox files before answering
+        if step >= (self.max_steps * 3 / 4)
+            && self.capture_delete_nudge_sent.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+        {
+            // Check if messages mention inbox/capture (instruction or pre-grounding hints)
+            let has_inbox_context = msgs.iter().any(|m| {
+                let txt = m.content.to_lowercase();
+                txt.contains("inbox") || txt.contains("capture") || txt.contains("distill")
+            });
+            // Check if action ledger shows inbox reads (output contains "inbox" paths)
+            let ledger = self.action_ledger.lock().unwrap();
+            let has_inbox_read = ledger.iter().any(|e| e.contains("inbox"));
+            let has_inbox_delete = ledger.iter().any(|e| e.contains("delete") && e.contains("inbox"));
+            drop(ledger);
+
+            if has_inbox_context && has_inbox_read && !has_inbox_delete {
+                let nudge = "⚠ URGENT: You have read inbox files but NOT deleted them. \
+                     You MUST delete ALL processed inbox files (from 00_inbox/) BEFORE calling answer(). \
+                     Use delete() on each inbox file now.";
+                eprintln!("  🗑️ Capture-delete nudge at step {}/{}", step, self.max_steps);
+                msgs.push(Message::user(nudge));
+            }
         }
 
         // ── Phase 1: SGR Cascade reasoning (function calling) ──────────
