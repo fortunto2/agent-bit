@@ -58,7 +58,7 @@ All 6 remaining fails pass on some runs but not consistently.
 - [x] Temperature annealing: planning_temperature=0.4, execution=0.1 (EAD-inspired)
 - [x] Decision framework reframing: "DENIED requires EXPLICIT evidence" in system prompt
 - [x] Confidence-gated reflection: confidence<0.7 triggers re-evaluation (AUQ-inspired)
-- [ ] Blocking OutcomeValidator (calibrate on 50+ examples, currently at 32 seeds)
+- [x] Blocking OutcomeValidator (calibrated: 50 seeds, threshold 0.80 validated, store audited)
 - [ ] NLI model for zero-shot classification (rust-bert)
 - [ ] Gemma 4 26B testing (CF access pending)
 

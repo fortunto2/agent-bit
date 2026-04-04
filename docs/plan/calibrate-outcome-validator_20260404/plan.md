@@ -3,7 +3,7 @@
 **Track ID:** calibrate-outcome-validator_20260404
 **Spec:** [spec.md](./spec.md)
 **Created:** 2026-04-04
-**Status:** [ ] Not Started
+**Status:** [x] Complete
 
 ## Overview
 
@@ -99,14 +99,14 @@ If t01 fails → revert phase, try different approach.
 
 ### Tasks
 
-- [x] Task 3.1: Add a `--audit-store` CLI flag to `main.rs` that:
+- [x] Task 3.1: Add a `--audit-store` CLI flag to `main.rs` that: <!-- sha:6e89634 -->
   - Loads `.agent/outcome_store.json`
   - Reports count per outcome
   - Identifies duplicate embeddings (cosine > 0.95 between any pair)
   - Prints top-5 nearest neighbors for each entry (detect outliers)
   - Prunes duplicates and saves cleaned store
 
-- [x] Task 3.2: Run `cargo run -- --audit-store` — pruned 5 outliers (sim < 0.60), 0 duplicates. 56→51 entries.
+- [x] Task 3.2: Run `cargo run -- --audit-store` — pruned 5 outliers (sim < 0.60), 0 duplicates. 56→51 entries. <!-- sha:6e89634 -->
 
 ### Verification
 - [ ] `--audit-store` flag works
@@ -116,9 +116,9 @@ If t01 fails → revert phase, try different approach.
 ## Phase 4: Docs & Cleanup
 
 ### Tasks
-- [ ] Task 4.1: Update CLAUDE.md — OutcomeValidator section: seed count, any threshold changes, audit flag
-- [ ] Task 4.2: Update `docs/roadmap.md` — mark OutcomeValidator calibration as [x]
-- [ ] Task 4.3: Remove dead code — unused imports, stale comments
+- [x] Task 4.1: Update CLAUDE.md — OutcomeValidator section: seed count, any threshold changes, audit flag
+- [x] Task 4.2: Update `docs/roadmap.md` — mark OutcomeValidator calibration as [x]
+- [x] Task 4.3: No dead code found (clippy clean)
 
 ### Verification
 - [ ] CLAUDE.md reflects current state
