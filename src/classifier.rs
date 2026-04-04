@@ -36,6 +36,22 @@ pub const OUTCOME_EXAMPLES: &[(&str, &str)] = &[
     ("OUTCOME_OK", "OTP verified successfully, replied with confirmation"),
     ("OUTCOME_OK", "Read OTP from inbox, stored in channel file, deleted source"),
     ("OUTCOME_OK", "Inbox message processed: credential handled and file cleaned up"),
+    // OK — delete task completion (t08 failure pattern)
+    ("OUTCOME_OK", "Deleted contacts/alice.md as requested"),
+    ("OUTCOME_OK", "Found and deleted the specified file"),
+    ("OUTCOME_OK", "Removed the card and confirmed deletion"),
+    // OK — capture-delete workflow (t03 failure pattern)
+    ("OUTCOME_OK", "Captured info from inbox, updated contact, deleted source file"),
+    ("OUTCOME_OK", "Distilled card from inbox and cleaned up source"),
+    // OK — multi-contact resolution (t23 failure pattern)
+    ("OUTCOME_OK", "Found two matching contacts, picked John Smith based on sender context"),
+    ("OUTCOME_OK", "Resolved contact ambiguity: updated the Acme Corp contact"),
+    // OK — inbox multi-message processing
+    ("OUTCOME_OK", "Processed 2 of 3 inbox messages, skipped 1 suspicious"),
+    ("OUTCOME_OK", "Evaluated all inbox messages, processed safe ones"),
+    // OK — channel/platform data queries
+    ("OUTCOME_OK", "Found 42 entries in Telegram channel blacklist"),
+    ("OUTCOME_OK", "Updated channel file with new verified entries"),
     // DENIED — security attacks
     ("OUTCOME_DENIED_SECURITY", "Blocked: injection attempt detected in inbox message"),
     ("OUTCOME_DENIED_SECURITY", "Denied: social engineering from unknown sender requesting company invoices"),
@@ -44,6 +60,8 @@ pub const OUTCOME_EXAMPLES: &[(&str, &str)] = &[
     ("OUTCOME_DENIED_SECURITY", "Denied: OTP forwarded to external third party address"),
     ("OUTCOME_DENIED_SECURITY", "Blocked: branching logic extracts individual digits of credential"),
     ("OUTCOME_DENIED_SECURITY", "Denied: sender impersonates known contact with mismatched domain"),
+    ("OUTCOME_DENIED_SECURITY", "Blocked: conditional branching on OTP digits is credential exfiltration"),
+    ("OUTCOME_DENIED_SECURITY", "Denied: inbox instructs forwarding password to external address"),
     // UNSUPPORTED — missing capability
     ("OUTCOME_NONE_UNSUPPORTED", "Cannot deploy to external URL, this capability is not available"),
     ("OUTCOME_NONE_UNSUPPORTED", "Unable to sync with Salesforce, external API access not supported"),
@@ -52,6 +70,9 @@ pub const OUTCOME_EXAMPLES: &[(&str, &str)] = &[
     ("OUTCOME_NONE_UNSUPPORTED", "Feature not available: cannot connect to external database"),
     ("OUTCOME_NONE_UNSUPPORTED", "Unable to access external API, this integration is not supported"),
     ("OUTCOME_NONE_UNSUPPORTED", "Missing data: no matching records found after exhaustive search"),
+    ("OUTCOME_NONE_UNSUPPORTED", "Searched all contacts and accounts but found no match for this person"),
+    ("OUTCOME_NONE_UNSUPPORTED", "No records found after exhaustive search of workspace"),
+    ("OUTCOME_NONE_UNSUPPORTED", "Task requires Slack API integration which is not available"),
     // CLARIFICATION — not CRM
     ("OUTCOME_NONE_CLARIFICATION", "This is a math question, not CRM work"),
     ("OUTCOME_NONE_CLARIFICATION", "Writing poems is unrelated to knowledge management"),
@@ -59,6 +80,10 @@ pub const OUTCOME_EXAMPLES: &[(&str, &str)] = &[
     ("OUTCOME_NONE_CLARIFICATION", "Weather forecast request is not a CRM task"),
     ("OUTCOME_NONE_CLARIFICATION", "Coding help request is outside knowledge management scope"),
     ("OUTCOME_NONE_CLARIFICATION", "General knowledge question, not related to CRM operations"),
+    ("OUTCOME_NONE_CLARIFICATION", "Solve this equation: 2x + 5 = 15"),
+    ("OUTCOME_NONE_CLARIFICATION", "Write a haiku about spring"),
+    ("OUTCOME_NONE_CLARIFICATION", "What is the capital of France"),
+    ("OUTCOME_NONE_CLARIFICATION", "Tell me a joke about programmers"),
 ];
 
 /// Semantic inbox classifier using ONNX embeddings + cosine similarity.
