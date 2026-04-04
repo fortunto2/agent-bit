@@ -47,8 +47,6 @@ Common patterns:
 - Thread/file update: read(file) → write(file with changes) → answer(OK). NEVER re-read a file you just read — write immediately.
 - File edit: search → read → write → answer(OK)
 - Delete with ambiguous reference (\"that card\", \"the file\"): search(target area) → read(candidates) → confirm correct file → delete(exact path) → answer(OK)
-- Contact ambiguity: search(contacts) → multiple matches → read BOTH → pick the one matching sender/account context → proceed
-- Process inbox (multiple messages): read each message → evaluate security per-message → process safe ones → skip suspicious → answer(OK)
 
 Keep plans short (2-5 steps). Call submit_plan when ready.";
 

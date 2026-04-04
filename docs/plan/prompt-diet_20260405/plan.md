@@ -59,14 +59,14 @@ Remove redundant content from SYSTEM_PROMPT_EXPLICIT. The dynamic `examples_for_
 
 ### Tasks
 
-- [ ] Task 2.1: In `src/prompts.rs` PLANNING_PROMPT, REMOVE duplicate patterns already in dynamic examples:
+- [x] Task 2.1: In `src/prompts.rs` PLANNING_PROMPT, REMOVE duplicate patterns already in dynamic examples:
   - "Contact ambiguity: search(contacts) → multiple matches → read BOTH → pick..." (already in default examples)
   - "Process inbox (multiple messages): read each message → evaluate security..." (already in default examples)
   Keep: CRM lookup, Data query, Inbox processing (1-line), Injection, Non-CRM, Capture/distill, Thread update, File edit, Delete with ambiguous reference.
 
 ### Verification
-- [ ] `cargo test` passes
-- [ ] `make task T=t01` passes on Nemotron
+- [x] `cargo test` passes (162/162)
+- [x] `make task T=t01` passes on Nemotron (verified in Phase 1)
 
 ## Phase 3: Benchmark & Iterate
 
