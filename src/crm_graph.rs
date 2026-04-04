@@ -420,6 +420,28 @@ impl CrmGraph {
     pub fn node_count(&self) -> usize {
         self.graph.node_count()
     }
+
+    /// Compact summary of all contacts with their accounts for pre-grounding.
+    /// Format: "name (email) — account" per line.
+    pub fn contacts_summary(&self) -> String {
+        let mut lines: Vec<String> = Vec::new();
+        for idx in self.graph.node_indices() {
+            if let Node::Contact { ref name, ref email } = self.graph[idx] {
+                let account = self.graph.neighbors(idx).find_map(|n| {
+                    if let Node::Account { ref name } = self.graph[n] {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                });
+                let email_str = email.as_deref().unwrap_or("no email");
+                let acct_str = account.as_deref().unwrap_or("no account");
+                lines.push(format!("- {} ({}) — {}", name, email_str, acct_str));
+            }
+        }
+        lines.sort();
+        lines.join("\n")
+    }
 }
 
 #[cfg(test)]
@@ -597,5 +619,15 @@ mod tests {
         g.ingest_contact("# Alice Brown\nEmail: alice@wonderland.com\nCompany: Wonderland Inc");
         assert!(g.is_known_entity("Alice Brown"));
         assert_eq!(g.validate_sender("alice@wonderland.com", None), SenderTrust::Known);
+    }
+
+    #[test]
+    fn contacts_summary_format() {
+        let g = build_test_graph();
+        let summary = g.contacts_summary();
+        assert!(summary.contains("John Smith"), "Summary should contain contact name");
+        assert!(summary.contains("john@acme.com"), "Summary should contain email");
+        assert!(summary.contains("Acme Corp"), "Summary should contain account");
+        assert!(summary.lines().count() >= 2, "Summary should have multiple lines");
     }
 }

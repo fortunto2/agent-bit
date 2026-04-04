@@ -431,6 +431,15 @@ pub(crate) async fn run_agent(
         messages.push(Message::user(&format!("CRM Schema:\n{}", crm_schema)));
     }
 
+    // Pre-load contact summary so the model doesn't need to read each contact file
+    let contacts_summary = crm_graph.contacts_summary();
+    if !contacts_summary.is_empty() {
+        messages.push(Message::user(&format!(
+            "CONTACTS (pre-loaded — use these instead of reading individual files):\n{}", contacts_summary
+        )));
+        eprintln!("  Contacts pre-loaded: {} entries", contacts_summary.lines().count());
+    }
+
     // Pre-load inbox files with semantic classification
     if let Ok(inbox_content) = read_inbox_files(pcm, shared_clf, Some(&crm_graph)).await {
         if !inbox_content.is_empty() {
