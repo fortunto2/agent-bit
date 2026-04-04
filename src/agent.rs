@@ -271,9 +271,9 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             msgs.push(Message::user(&nudge));
         }
 
-        // Write nudge: if 3+ consecutive reads without a write, prompt the model to write
+        // Write nudge: if 2+ reads-since-last-write, prompt the model to write
         let reads = self.consecutive_reads.load(Ordering::SeqCst);
-        if reads >= 3
+        if reads >= 2
             && self.write_nudge_sent.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok()
         {
             let nudge = format!(
@@ -502,10 +502,12 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         let step = ctx.iteration as u32;
         self.record_action(step, tool_name, "", output);
 
-        // Track consecutive reads without writes (for write-nudge)
+        // Track reads-since-last-write (for write-nudge)
+        // Only write-class tools reset the counter; search/find/list/tree do NOT
         if matches!(tool_name, "read") {
             self.consecutive_reads.fetch_add(1, Ordering::SeqCst);
-        } else if matches!(tool_name, "write" | "delete") {
+        }
+        if matches!(tool_name, "write" | "delete" | "move_file" | "answer") {
             self.consecutive_reads.store(0, Ordering::SeqCst);
         }
 
@@ -701,11 +703,18 @@ mod tests {
         let mut ctx = AgentContext::new();
         ctx.iteration = 1;
 
-        // 3 reads increment counter
+        // reads increment counter
         agent.after_action(&mut ctx, "read", "$ cat file.md\ncontent");
         agent.after_action(&mut ctx, "read", "$ cat file2.md\ncontent");
-        agent.after_action(&mut ctx, "read", "$ cat file3.md\ncontent");
-        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 3);
+        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 2);
+
+        // search does NOT reset counter (reads-since-last-write, not consecutive reads)
+        agent.after_action(&mut ctx, "search", "found 3 results");
+        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 2, "search must not reset reads counter");
+
+        // find does NOT reset counter
+        agent.after_action(&mut ctx, "find", "contacts/john.md");
+        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 2, "find must not reset reads counter");
 
         // write resets counter
         agent.after_action(&mut ctx, "write", "OK");
@@ -716,6 +725,16 @@ mod tests {
         agent.after_action(&mut ctx, "read", "$ cat y.md\ndata");
         agent.after_action(&mut ctx, "delete", "OK");
         assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 0);
+
+        // move_file resets counter
+        agent.after_action(&mut ctx, "read", "$ cat a.md\ndata");
+        agent.after_action(&mut ctx, "move_file", "OK");
+        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 0, "move_file must reset reads counter");
+
+        // answer resets counter
+        agent.after_action(&mut ctx, "read", "$ cat b.md\ndata");
+        agent.after_action(&mut ctx, "answer", "OUTCOME_OK");
+        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 0, "answer must reset reads counter");
     }
 
     /// Dummy LlmClient for unit tests that don't need LLM calls.
