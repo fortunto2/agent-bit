@@ -91,33 +91,33 @@ Pipeline: build→deploy→review | Tracks: 6 total (t19, t23, t03, split-main-r
 - Plan SHA annotations — good commit traceability in all completed tracks
 - Pipeline grew test suite from 105 → 120 tests across the day (net +15 tests)
 
-## 2026-04-04 (Final) | agent-bit | Factory Score: 5/10
+## 2026-04-04 (Full) | agent-bit | Factory Score: 5/10
 
-Pipeline: build→deploy→review | Tracks: 7 total (t19, t23, t03, split-main-rs, otp, t08×2) | Iters: 43 | Waste: 48.8%
+Pipeline: build→deploy→review | Tracks: 8 total (t19, t23, t03, split-main-rs, otp, t08×2, blocking-validator) | Iters: 46 | Waste: 45.7%
 
 ### Defects
-- **CRITICAL** | solo-lib.sh: Auth error circuit breaker STILL missing (4th retro flagging). 16 auth-failure iters (76% of all waste). Fingerprint-based detection at `solo-lib.sh:163` is structurally unable to catch varying session IDs.
-  - Fix: `solo-lib.sh:143` — add content-based auth regex check BEFORE fingerprint: `grep -qiE 'authentication_error|OAuth token has expired|401.*unauthorized'`
-- **HIGH** | solo:deploy SKILL.md: No local-only project detection. Deploy has skip rules for `python-ml` and `ios-swift` but no generic CLI/local detection. agent-bit = competition agent with no server.
-  - Fix: `/deploy` SKILL.md Step 3b — add `CLI/competition agent | Skip — local only` detection row
-- **HIGH** | solo:build SKILL.md: Spec checkbox maintenance still absent (4th retro). 2/7 tracks had 0% checked specs despite 100% actual delivery.
+- **CRITICAL** | solo-lib.sh: Auth error circuit breaker STILL missing (**5th retro**). 16 auth-failure iters (76% of all waste). `check_circuit_breaker()` at line 143 has no content-based auth check — fingerprint at line 163 can't catch varying session IDs.
+  - Fix: `solo-lib.sh:143` — add `grep -qiE 'authentication_error|OAuth token has expired|401.*unauthorized'` BEFORE fingerprint
+- **HIGH** | solo:deploy SKILL.md: No local-only project detection (5th retro). SKILL.md:81 maps `Cargo.toml + [[bin]]` to crates.io — wrong for competition agents.
+  - Fix: `/deploy` SKILL.md:91 — add `CLI/competition agent | Skip — local only` row
+- **HIGH** | solo:build SKILL.md: Spec checkbox maintenance absent (5th retro). 3/8 tracks had stale spec checkboxes despite 100% delivery.
   - Fix: `/build` SKILL.md — add post-phase spec.md checkbox pass
 
 ### Harness Gaps
-- **Context:** CLAUDE.md at 10,483 chars — healthy. Module boundaries clean (prompts.rs, scanner.rs, pregrounding.rs, agent.rs, crm_graph.rs).
-- **Constraints:** Escalation discipline working well — t08 went prompt (iteration 1) → structural (iteration 2). This is the "prompt > classifier > structural > new code" rule from roadmap in action.
-- **Precedents:** Late tracks consistently efficient: last 3 tracks averaged 3.7 iters, 13% waste, 30 min/track. Focused prompt/structural fixes execute cleanly. The factory works when not fighting infrastructure.
+- **Context:** CLAUDE.md at 10,918 chars — healthy. 6 modules clean. Blocking OutcomeValidator adds depth (classifier.rs: validation + learning lifecycle).
+- **Constraints:** Escalation discipline confirmed: t08 prompt→structural, validator 4-phase plan. Clean arch maintained.
+- **Precedents:** Last 4 tracks: 14 iters, 0 waste, avg 33 min/track. Pipeline is excellent when not fighting auth. Blocking validator pattern (confidence-gated kNN + retry limit + security exception) is reusable.
 
 ### Missing
-- Auth error content-based detection in circuit breaker (CRITICAL — unfixed across 4 retros)
+- Auth error content-based detection in circuit breaker (CRITICAL — unfixed across 5 retros)
 - Local-only project detection in deploy skill
 - Spec checkbox auto-update in build skill
 - Stall detection (same SHA + no signal for 2+ iters)
 
 ### What worked well
-- Auto-planning: 7 tracks auto-created and executed across full day
-- Escalation discipline: t08 prompt → structural → clean completion
-- Last 3 tracks: 11 iters, 0 waste — pipeline at its best
-- Test suite grew 105 → 123 (+18 tests) with zero regressions
-- Plan SHA annotations maintained across all completed tracks
+- Auto-planning: 8 tracks auto-created and executed across full day
+- Last 4 tracks: 14 iters, 0 waste — pipeline at its best
+- Test suite grew 105 → 131 (+26 tests) with zero regressions
+- Blocking OutcomeValidator: clean 4-phase feature delivery (kNN + learning + security exception)
+- Plan SHA annotations + spec checkboxes maintained on 5/8 tracks
 - Redo limit + rate limit detection both worked correctly
