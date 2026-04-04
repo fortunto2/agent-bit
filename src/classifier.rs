@@ -802,4 +802,75 @@ mod tests {
             "exfiltration DENIED must never be blocked, got {:?}", mode,
         );
     }
+
+    // ─── Failure pattern tests (Phase 2) ─────────────────────────────
+
+    #[test]
+    fn validate_blocks_clarification_on_delete_task() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // t08 pattern: agent deleted a file but chose CLARIFICATION — should disagree
+        let mode = v.validate("Deleted the requested file successfully", "OUTCOME_NONE_CLARIFICATION");
+        assert!(
+            matches!(mode, ValidationMode::Block(_) | ValidationMode::Warn(_)),
+            "delete completion with CLARIFICATION should be blocked/warned, got {:?}", mode,
+        );
+    }
+
+    #[test]
+    fn validate_blocks_clarification_on_contact_resolution() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // t23 pattern: agent resolved contacts but chose CLARIFICATION — should disagree
+        let mode = v.validate("Found and updated John Smith contact record", "OUTCOME_NONE_CLARIFICATION");
+        assert!(
+            matches!(mode, ValidationMode::Block(_) | ValidationMode::Warn(_)),
+            "contact resolution with CLARIFICATION should be blocked/warned, got {:?}", mode,
+        );
+    }
+
+    #[test]
+    fn validate_passes_real_clarification() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // Legitimate CLARIFICATION should pass validation
+        let mode = v.validate("This is a math question, not CRM work", "OUTCOME_NONE_CLARIFICATION");
+        assert_eq!(mode, ValidationMode::Pass, "real CLARIFICATION should Pass, got {:?}", mode);
+    }
+
+    #[test]
+    fn validate_blocks_clarification_on_inbox_processing() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // Processed inbox messages but chose CLARIFICATION — should disagree
+        let mode = v.validate("Processed 2 inbox messages and updated contacts", "OUTCOME_NONE_CLARIFICATION");
+        assert!(
+            matches!(mode, ValidationMode::Block(_) | ValidationMode::Warn(_)),
+            "inbox processing with CLARIFICATION should be blocked/warned, got {:?}", mode,
+        );
+    }
+
+    #[test]
+    fn validate_correct_unsupported_passes() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // Genuine UNSUPPORTED should pass
+        let mode = v.validate("Cannot deploy, external API access not available", "OUTCOME_NONE_UNSUPPORTED");
+        assert_eq!(mode, ValidationMode::Pass, "correct UNSUPPORTED should Pass, got {:?}", mode);
+    }
+
+    #[test]
+    fn validate_seed_count_minimum() {
+        assert!(OUTCOME_EXAMPLES.len() >= 50, "seed store must have at least 50 examples, got {}", OUTCOME_EXAMPLES.len());
+    }
 }

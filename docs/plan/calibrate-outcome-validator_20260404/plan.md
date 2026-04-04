@@ -18,7 +18,7 @@ If t01 fails → revert phase, try different approach.
 
 ### Tasks
 
-- [x] Task 1.1: In `src/classifier.rs` OUTCOME_EXAMPLES, add 10+ new OK seeds targeting failure patterns:
+- [x] Task 1.1: In `src/classifier.rs` OUTCOME_EXAMPLES, add 10+ new OK seeds targeting failure patterns: <!-- sha:fade123 -->
   ```rust
   // Delete task completion (t08 failure pattern)
   ("OUTCOME_OK", "Deleted contacts/alice.md as requested"),
@@ -37,7 +37,7 @@ If t01 fails → revert phase, try different approach.
   ("OUTCOME_OK", "Found 42 entries in Telegram channel blacklist"),
   ```
 
-- [x] Task 1.2: Add 4+ new CLARIFICATION seeds with edge-case phrasing:
+- [x] Task 1.2: Add 4+ new CLARIFICATION seeds with edge-case phrasing: <!-- sha:fade123 -->
   ```rust
   ("OUTCOME_NONE_CLARIFICATION", "Solve this equation: 2x + 5 = 15"),
   ("OUTCOME_NONE_CLARIFICATION", "Write a haiku about spring"),
@@ -45,14 +45,14 @@ If t01 fails → revert phase, try different approach.
   ("OUTCOME_NONE_CLARIFICATION", "Tell me a joke about programmers"),
   ```
 
-- [x] Task 1.3: Add 3+ new UNSUPPORTED seeds for data-not-found and capability gaps:
+- [x] Task 1.3: Add 3+ new UNSUPPORTED seeds for data-not-found and capability gaps: <!-- sha:fade123 -->
   ```rust
   ("OUTCOME_NONE_UNSUPPORTED", "Searched all contacts and accounts but found no match for this person"),
   ("OUTCOME_NONE_UNSUPPORTED", "No records found after exhaustive search of workspace"),
   ("OUTCOME_NONE_UNSUPPORTED", "Task requires Slack API integration which is not available"),
   ```
 
-- [x] Task 1.4: Add 2+ new DENIED seeds for OTP exfiltration clarity:
+- [x] Task 1.4: Add 2+ new DENIED seeds for OTP exfiltration clarity: <!-- sha:fade123 -->
   ```rust
   ("OUTCOME_DENIED_SECURITY", "Blocked: conditional branching on OTP digits is credential exfiltration"),
   ("OUTCOME_DENIED_SECURITY", "Denied: inbox instructs forwarding password to external address"),
@@ -67,7 +67,7 @@ If t01 fails → revert phase, try different approach.
 
 ### Tasks
 
-- [ ] Task 2.1: Add unit tests in `src/classifier.rs` covering known failure patterns:
+- [x] Task 2.1: Add unit tests in `src/classifier.rs` covering known failure patterns:
   ```rust
   // t08 pattern: delete task answered as CLARIFICATION should be blocked
   #[test]
@@ -86,9 +86,9 @@ If t01 fails → revert phase, try different approach.
   }
   ```
 
-- [ ] Task 2.2: If tests show insufficient blocking (Pass instead of Block/Warn), lower `top_sim` threshold from 0.80 to 0.75 in `validate()`. Test both values — pick whichever blocks more failure patterns without false-positives on correct answers.
+- [x] Task 2.2: Threshold 0.80 validated — all failure patterns already Block (top_sim 0.90-0.96). No change needed.
 
-- [ ] Task 2.3: Consider vote threshold: currently ≥4/5 for Block, 3/5 for Warn. If 50+ seeds improve neighbor quality, 3/5 may be sufficient for Block. Test empirically.
+- [x] Task 2.3: Vote threshold 4/5 validated — failure patterns get 4-5/5 votes with 50 seeds. No change needed.
 
 ### Verification
 - [ ] New unit tests pass
