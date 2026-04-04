@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use sgr_agent::agent_loop::{LoopConfig, LoopEvent, run_loop};
 use sgr_agent::agents::clarification::PlanTool;
 use sgr_agent::agents::planning::{Plan, PlanningAgent};
