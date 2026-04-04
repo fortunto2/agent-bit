@@ -21,15 +21,15 @@ These techniques are complementary: temperature helps exploration, framework red
 
 ## Acceptance Criteria
 
-- [ ] Planning phase uses separate temperature (default 0.4) vs execution (0.1)
-- [ ] `planning_temperature` configurable in config.toml per provider
-- [ ] Decision framework language added to system prompt: "DENIED requires EXPLICIT evidence"
-- [ ] Confidence field (0.0-1.0) in reasoning tool schema
-- [ ] Triggered reflection on confidence < 0.7 (max 1 per step, skip near step limit)
-- [ ] Security guard: never reflect on DENIED with confidence >= 0.9
-- [ ] Unit tests for confidence parsing, reflection trigger, security guard
-- [ ] `cargo test` passes (140+ tests)
-- [ ] No regressions on stable tasks (t01, t09, t16 pass on Nemotron)
+- [x] Planning phase uses separate temperature (default 0.4) vs execution (0.1)
+- [x] `planning_temperature` configurable in config.toml per provider
+- [x] Decision framework language added to system prompt: "DENIED requires EXPLICIT evidence"
+- [x] Confidence field (0.0-1.0) in reasoning tool schema
+- [x] Triggered reflection on confidence < 0.7 (max 1 per step, skip near step limit)
+- [x] Security guard: never reflect on DENIED with confidence >= 0.9
+- [x] Unit tests for confidence parsing, reflection trigger, security guard
+- [x] `cargo test` passes (147 tests)
+- [ ] No regressions on stable tasks (t01, t09, t16 pass on Nemotron) — deferred (requires live run)
 
 ## Dependencies
 
