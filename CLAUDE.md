@@ -11,7 +11,8 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 156 unit tests
+cargo test                                        # 162 unit tests
+cargo run -- --audit-store                        # audit adaptive store
 ```
 
 ## Architecture
@@ -81,7 +82,7 @@ instruction --> prescan (HTML only) --> start trial
 
 ### OutcomeValidator (adaptive kNN)
 - **Hypothesis template**: `"The CRM task result: {msg}"` for better embedding discrimination
-- **Seed store**: 32 static examples across 4 outcomes (OUTCOME_EXAMPLES in classifier.rs) — 10 OK, 7 DENIED, 7 UNSUPPORTED, 6 CLARIFICATION
+- **Seed store**: 50 static examples across 4 outcomes (OUTCOME_EXAMPLES in classifier.rs) — 21 OK, 9 DENIED, 10 UNSUPPORTED, 10 CLARIFICATION
 - **Adaptive store**: grows from confirmed correct trials only (score ≥ 1.0), persisted to `.agent/outcome_store.json`
 - **k-NN (k=5)**: nearest-neighbor voting (no lossy centroid averaging)
 - **Confidence-gated blocking**: `ValidationMode::Block` when ≥4/5 votes + top_sim > 0.80, `Warn` for 3/5 (log only), `Pass` otherwise
@@ -159,6 +160,7 @@ instruction --> prescan (HTML only) --> start trial
 | `--parallel` | 1 | Concurrency limit |
 | `--list` | false | List tasks and exit |
 | `--dry-run` | false | Pre-scan only, no LLM |
+| `--audit-store` | false | Audit adaptive outcome store |
 | `--run` | - | Leaderboard run mode |
 
 ## Config
