@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 131 unit tests
+cargo test                                        # 134 unit tests
 ```
 
 ## Architecture
@@ -65,12 +65,14 @@ instruction --> prescan (HTML only) --> start trial
 
 ### Contact Pre-Grounding (disambiguation)
 - `extract_mentioned_names()` — parses inbox content for names (From: headers + body mentions of CRM contacts)
-- `resolve_contact_hints()` — for ambiguous names (multiple CRM matches), ranks by sender domain affiliation
-- Injected as pre-grounding message before LLM loop: "Contact disambiguation hints: name → best match (account)"
+- `resolve_contact_hints()` — directive format: `RESOLVED: "Smith" = john smith (account: Acme Corp). USE this contact, not: jane smith`
+- Injected as pre-grounding message: "⚠ CONTACT RESOLUTION (use these, do NOT ask for clarification)"
+- `contacts_summary()` — pre-loads all contacts (name, email, account) to avoid 10+ individual file reads that trigger loop detection
 - CrmGraph methods: `contacts_for_account()`, `account_for_contact()`, `find_all_matching_contacts()`, `contact_names()`
 - SearchTool carries `Option<Arc<CrmGraph>>` — annotates multi-contact search results with account info
 - CrmGraph `ingest_contact/account` strips PCM `$ cat` header and supports `full_name` field
 - UNKNOWN sender annotation is neutral ("new or external sender, process normally") — prevents over-cautious DENIED
+- Prompt includes explicit disambiguation example (search both contacts → pick best match → proceed)
 
 ### Credential Detection
 - **Exfiltration** (DENIED): OTP + branching logic ("first character", "branch", "depending on")
@@ -117,10 +119,17 @@ instruction --> prescan (HTML only) --> start trial
 
 ### Pre-grounding Context
 - tree + AGENTS.md + CRM schema (READMEs from directories)
+- Contacts summary: pre-loaded from CrmGraph (name, email, account) — avoids 10+ file reads that trigger loop detection
 - Classified inbox with [CLASSIFICATION], [SENDER TRUST] annotations
+- Inbox processing guidance: evaluate EACH message separately, OK if at least one processed
 - Channel file statistics: auto-count entries by category (blacklist, verified, etc.)
 - OTP cleanup: after processing OTP inbox, delete source file (docs/channels/otp.txt)
 - Outbox: read README.MD for format, include `"sent": false`
+
+### Agent Loop Configuration
+- `loop_abort_threshold: 25` — high to avoid tier-2 false positives from parallel reads (10 contacts in 1 step)
+- History preserved on agent error (max steps, loop detected) — `run_agent` returns Ok with accumulated context
+- `guess_outcome()` — last_msg priority, "Written to" in history = strong OK signal
 
 ## CLI Flags
 
@@ -188,7 +197,7 @@ make evolve-fails                  # evolve known failures (bighead-style)
 
 **Current failing tasks** (all non-deterministic, pass on some runs):
 - t08: delete routing + pre-grounding fix applied (structural write-restriction), still non-deterministic due to task randomization
-- t23: contact pre-grounding implemented, needs harness verification (Phase 4 open)
+- t23: hardened for Nemotron (directive hints, inbox processing guidance, loop threshold 25, auto-answer fix). Passes ~2/3 on Nemotron
 - t25, t29: OTP classification refined (exfiltration vs verification vs passive), still non-deterministic
 
 Plans: `docs/plan/`, roadmap: `docs/roadmap.md`

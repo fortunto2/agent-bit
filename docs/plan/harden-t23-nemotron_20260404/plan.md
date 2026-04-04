@@ -3,7 +3,7 @@
 **Track ID:** harden-t23-nemotron_20260404
 **Spec:** [spec.md](./spec.md)
 **Created:** 2026-04-04
-**Status:** [ ] Not Started
+**Status:** [x] Complete
 
 ## Overview
 
@@ -63,21 +63,21 @@ Make hints impossible for Nemotron to ignore. Three changes: directive hint form
 
 ### Tasks
 
-- [ ] Task 4.1: Update CLAUDE.md — note directive hint format and disambiguation example in Key Design Decisions
-- [ ] Task 4.2: Update `docs/roadmap.md` — mark t23 status based on results
+- [x] Task 4.1: Update CLAUDE.md — directive hints, contacts summary, loop config, auto-answer, failing tasks status <!-- sha:a2c193a -->
+- [x] Task 4.2: Update `docs/roadmap.md` — mark t23 as fixed (~2/3) <!-- sha:a2c193a -->
 
 ### Verification
 
-- [ ] CLAUDE.md reflects current project state
-- [ ] Linter clean, tests pass
+- [x] CLAUDE.md reflects current project state
+- [x] Linter clean, tests pass (134/134)
 
 ## Final Verification
 
-- [ ] All acceptance criteria from spec met
-- [ ] Tests pass
-- [ ] Linter clean
-- [ ] Build succeeds
-- [ ] Documentation up to date
+- [x] All acceptance criteria from spec met
+- [x] Tests pass (134/134)
+- [x] Linter clean
+- [x] Build succeeds
+- [x] Documentation up to date
 
 ## Context Handoff
 

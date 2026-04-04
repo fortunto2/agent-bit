@@ -37,7 +37,7 @@ All 6 remaining fails pass on some runs but not consistently.
 
 ### Priority 1: Over-cautious (DENIED instead of OK)
 - [x] **t19** — FIXED: separate MISMATCH from UNKNOWN in ensemble blocker
-- [~] **t23** — "process inbox" — contact pre-grounding + search annotation implemented, needs harness verification
+- [x] **t23** — "process inbox" — hardened for Nemotron: directive hints, inbox processing guidance, loop threshold 25, auto-answer writes-based OK. Passes ~2/3
 
 ### Priority 2: Execution failures
 - [ ] **t03** — "capture from inbox, distill, delete" (Nemotron misses file ops)
@@ -60,6 +60,7 @@ All 6 remaining fails pass on some runs but not consistently.
 - [ ] Gemma 4 26B testing (CF access pending)
 
 ## Done
+- [x] t23: Nemotron hardening (directive hints, loop threshold, auto-answer, contacts pre-load)
 - [x] t19: ensemble blocker MISMATCH/UNKNOWN split
 - [x] 13 tasks fixed (t04,t06,t08,t12,t18,t19,t20,t22,t23,t24,t25,t28,t30)
 - [x] bitgn-sdk v0.2.0 published (first Rust SDK)
