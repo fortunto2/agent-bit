@@ -387,7 +387,8 @@ pub(crate) async fn run_agent(
                 }
             }
         }
-        readmes.truncate(2000);
+        let trunc = readmes.floor_char_boundary(2000);
+        readmes.truncate(trunc);
         readmes
     };
 
@@ -598,12 +599,12 @@ pub(crate) async fn run_agent(
             LoopEvent::Decision(ref d) => {
                 for tc in &d.tool_calls {
                     let args_str = tc.arguments.to_string();
-                    let preview = if args_str.len() > 120 { &args_str[..120] } else { &args_str };
+                    let preview = if args_str.len() > 120 { &args_str[..args_str.floor_char_boundary(120)] } else { &args_str };
                     eprintln!("    → {}({})", tc.name, preview);
                 }
             }
             LoopEvent::ToolResult { name, output } => {
-                let p = if output.len() > 150 { &output[..150] } else { &output };
+                let p = if output.len() > 150 { &output[..output.floor_char_boundary(150)] } else { &output };
                 eprintln!("    {} = {}", name, p.replace('\n', "↵"));
                 run_stats.successful_calls += 1;
                 run_stats.cost_chars += output.len();
