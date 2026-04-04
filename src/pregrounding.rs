@@ -542,7 +542,7 @@ pub(crate) async fn run_agent(
 
     let loop_config = LoopConfig {
         max_steps,
-        loop_abort_threshold: 6,
+        loop_abort_threshold: 10,
         max_messages: 80,
         auto_complete_threshold: 5,
     };
