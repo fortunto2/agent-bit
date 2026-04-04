@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 154 unit tests
+cargo test                                        # 156 unit tests
 ```
 
 ## Architecture
@@ -214,9 +214,11 @@ make evolve-fails                  # evolve known failures (bighead-style)
 ```
 
 **Current failing tasks** (all non-deterministic, pass on some runs):
-- t08: delete routing + pre-grounding fix applied (structural write-restriction), still non-deterministic due to task randomization
-- t23: hardened for Nemotron (directive hints, inbox processing guidance, loop threshold 25, auto-answer fix). Passes ~2/3 on Nemotron
-- t25, t29: OTP classification refined (exfiltration vs verification vs passive), still non-deterministic
+- t03: capture-delete nudge + write-nudge counter fix applied. Passes ~60% on Nemotron.
+- t08: delete routing + structural task_type forcing + UTF-8 safe truncation. Still non-deterministic due to CLARIFICATION randomization.
+- t23: hardened for Nemotron (directive hints, inbox processing guidance, loop threshold 25, auto-answer fix). Passes ~2/3 on Nemotron.
+- t25, t29: OTP classification refined (exfiltration vs verification vs passive), still non-deterministic.
+- **Prompt regression**: static prompt bloated (~45 lines vs pre-bloat ~20 lines), score dropped from 80% to ~55%. Plan created: `docs/plan/fix-prompt-regression_20260404/`.
 
 Plans: `docs/plan/`, roadmap: `docs/roadmap.md`
 
