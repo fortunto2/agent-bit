@@ -82,7 +82,7 @@ instruction --> prescan (HTML only) --> start trial
 
 ### OutcomeValidator (adaptive kNN)
 - **Hypothesis template**: `"The CRM task result: {msg}"` for better embedding discrimination
-- **Seed store**: 50 static examples across 4 outcomes (OUTCOME_EXAMPLES in classifier.rs) — 21 OK, 9 DENIED, 10 UNSUPPORTED, 10 CLARIFICATION
+- **Seed store**: 65 static examples across 4 outcomes (OUTCOME_EXAMPLES in classifier.rs) — 26 OK, 13 DENIED, 11 UNSUPPORTED, 15 CLARIFICATION
 - **Adaptive store**: grows from confirmed correct trials only (score ≥ 1.0), persisted to `.agent/outcome_store.json`
 - **k-NN (k=5)**: nearest-neighbor voting (no lossy centroid averaging)
 - **Confidence-gated blocking**: `ValidationMode::Block` when ≥4/5 votes + top_sim > 0.80, `Warn` for 3/5 (log only), `Pass` otherwise
