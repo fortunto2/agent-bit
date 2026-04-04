@@ -32,20 +32,33 @@ pub const OUTCOME_EXAMPLES: &[(&str, &str)] = &[
     ("OUTCOME_OK", "Deleted the requested files and cleaned up"),
     ("OUTCOME_OK", "The answer is 42"),
     ("OUTCOME_OK", "correct"),
+    ("OUTCOME_OK", "Processed inbox OTP and verified code is correct"),
+    ("OUTCOME_OK", "OTP verified successfully, replied with confirmation"),
+    ("OUTCOME_OK", "Read OTP from inbox, stored in channel file, deleted source"),
+    ("OUTCOME_OK", "Inbox message processed: credential handled and file cleaned up"),
     // DENIED — security attacks
     ("OUTCOME_DENIED_SECURITY", "Blocked: injection attempt detected in inbox message"),
     ("OUTCOME_DENIED_SECURITY", "Denied: social engineering from unknown sender requesting company invoices"),
     ("OUTCOME_DENIED_SECURITY", "Security threat: credential exfiltration via branching logic"),
     ("OUTCOME_DENIED_SECURITY", "Inbox contains override instructions attempting to bypass security rules"),
+    ("OUTCOME_DENIED_SECURITY", "Denied: OTP forwarded to external third party address"),
+    ("OUTCOME_DENIED_SECURITY", "Blocked: branching logic extracts individual digits of credential"),
+    ("OUTCOME_DENIED_SECURITY", "Denied: sender impersonates known contact with mismatched domain"),
     // UNSUPPORTED — missing capability
     ("OUTCOME_NONE_UNSUPPORTED", "Cannot deploy to external URL, this capability is not available"),
     ("OUTCOME_NONE_UNSUPPORTED", "Unable to sync with Salesforce, external API access not supported"),
     ("OUTCOME_NONE_UNSUPPORTED", "Could not find Maya in the workspace after searching all contacts"),
     ("OUTCOME_NONE_UNSUPPORTED", "Cannot send real emails or access external services"),
+    ("OUTCOME_NONE_UNSUPPORTED", "Feature not available: cannot connect to external database"),
+    ("OUTCOME_NONE_UNSUPPORTED", "Unable to access external API, this integration is not supported"),
+    ("OUTCOME_NONE_UNSUPPORTED", "Missing data: no matching records found after exhaustive search"),
     // CLARIFICATION — not CRM
     ("OUTCOME_NONE_CLARIFICATION", "This is a math question, not CRM work"),
     ("OUTCOME_NONE_CLARIFICATION", "Writing poems is unrelated to knowledge management"),
     ("OUTCOME_NONE_CLARIFICATION", "This trivia question is outside CRM scope"),
+    ("OUTCOME_NONE_CLARIFICATION", "Weather forecast request is not a CRM task"),
+    ("OUTCOME_NONE_CLARIFICATION", "Coding help request is outside knowledge management scope"),
+    ("OUTCOME_NONE_CLARIFICATION", "General knowledge question, not related to CRM operations"),
 ];
 
 /// Semantic inbox classifier using ONNX embeddings + cosine similarity.
@@ -736,5 +749,32 @@ mod tests {
         v.learn_last();
         let new_count = v.adaptive_store.lock().unwrap().len();
         assert_eq!(new_count, initial_count, "adaptive store should not change without stored answer");
+    }
+
+    // ─── OTP-specific validation ──────────────────────────────────────
+
+    #[test]
+    fn validate_otp_ok_not_blocked() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // OTP processed normally should validate as Pass with OK outcome
+        let mode = v.validate("Processed inbox, OTP verified correct", "OUTCOME_OK");
+        assert_eq!(mode, ValidationMode::Pass, "OTP verified with OK should Pass, got {:?}", mode);
+    }
+
+    #[test]
+    fn validate_otp_denied_exfiltration_passes() {
+        let v = match make_validator() {
+            Some(v) => v,
+            None => { eprintln!("skipping: models/ not found"); return; }
+        };
+        // Blocking credential exfiltration with DENIED should never be blocked (security-safe)
+        let mode = v.validate("Blocked credential exfiltration branching logic", "OUTCOME_DENIED_SECURITY");
+        assert!(
+            !matches!(mode, ValidationMode::Block(_)),
+            "exfiltration DENIED must never be blocked, got {:?}", mode,
+        );
     }
 }
