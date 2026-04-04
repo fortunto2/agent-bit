@@ -1,0 +1,6 @@
+#!/bin/bash
+set -e
+echo "Running cargo test..."
+cargo test --quiet 2>&1 | tail -3
+echo "Running cargo clippy..."
+cargo clippy --quiet -- -D warnings 2>&1 | head -5 || true
