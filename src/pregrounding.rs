@@ -623,20 +623,23 @@ pub(crate) async fn run_agent(
         stats: run_stats,
     });
 
-    result.context("agent loop")?;
-
+    // Extract history BEFORE error check — auto_submit_if_needed needs it even on error
     let last_assistant = messages
         .iter().rev()
         .find(|m| m.role == Role::Assistant && !m.content.is_empty())
         .map(|m| m.content.clone())
         .unwrap_or_default();
 
-    // Build history text from all messages for outcome guessing
     let history: String = messages
         .iter()
         .map(|m| m.content.as_str())
         .collect::<Vec<_>>()
         .join("\n");
+
+    if let Err(e) = result {
+        eprintln!("  ⚠ Agent error: agent loop: {:#}", e);
+        return Ok((last_assistant, history));
+    }
 
     Ok((last_assistant, history))
 }
