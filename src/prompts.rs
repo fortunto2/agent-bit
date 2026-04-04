@@ -135,11 +135,13 @@ EXAMPLE — Capture from inbox (distill + delete source):
   delete({\"path\": \"inbox/msg.md\"})
   answer({\"message\": \"Captured info from inbox and deleted source\", \"outcome\": \"OUTCOME_OK\"})
 
-EXAMPLE — Distill: create card from capture source:
-  read({\"path\": \"01_capture/topic/2026-03-01__article-title.md\"}) → [source content]
+EXAMPLE — Distill: create card from capture source AND delete inbox:
+  read({\"path\": \"00_inbox/2026-03-01__article-title.md\"}) → [inbox content to process]
   read({\"path\": \"02_distill/cards/_card-template.md\"}) → [template]
   write({\"path\": \"02_distill/cards/2026-03-01__article-title.md\", \"content\": \"{...card from template + source}\"})
-  IMPORTANT: Keep the EXACT source filename when creating the card. Do NOT rename.
+  delete({\"path\": \"00_inbox/2026-03-01__article-title.md\"})
+  answer({\"message\": \"Created card and deleted inbox source\", \"outcome\": \"OUTCOME_OK\"})
+  IMPORTANT: Keep the EXACT source filename when creating the card. Do NOT rename. ALWAYS delete the inbox file after processing.
 
 EXAMPLE — Update thread file (append to editable section):
   read({\"path\": \"threads/project.md\"}) → [existing thread with AGENT_EDITABLE sections]

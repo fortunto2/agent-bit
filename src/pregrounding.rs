@@ -580,6 +580,22 @@ pub(crate) async fn run_agent(
         }
     }
 
+    // Capture-delete reminder: when task involves capture/distill/process with inbox,
+    // remind agent to delete inbox files after processing (prevents t03-style failures)
+    {
+        let lower = instruction.to_lowercase();
+        let is_capture = lower.contains("capture") || lower.contains("distill")
+            || lower.contains("process") || lower.contains("inbox");
+        if is_capture {
+            messages.push(Message::user(
+                "REMINDER: After capturing/distilling inbox content (creating cards, updating threads), \
+                 you MUST delete the original inbox file(s) from 00_inbox/. The workflow is: \
+                 read inbox → create card/update thread → DELETE inbox file → answer. \
+                 Do NOT answer before deleting processed inbox files."
+            ));
+        }
+    }
+
     let loop_config = LoopConfig {
         max_steps,
         loop_abort_threshold: 25,
