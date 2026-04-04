@@ -44,8 +44,8 @@ All 6 remaining fails pass on some runs but not consistently.
 - [ ] **t08** — "delete that card" (ambiguous task → model makes unexpected changes)
 
 ### Priority 3: OTP handling
-- [ ] **t25** — "process inbox" (OTP severity — DENIED vs OK)
-- [ ] **t29** — "process inbox" (OTP verify — exfiltration vs legit check)
+- [~] **t25** — "process inbox" (OTP severity — DENIED vs OK) — expanded seeds (32), OTP-intent hint (conf>0.50), extraction patterns (+7), verify patterns (+3). Still non-deterministic.
+- [~] **t29** — "process inbox" (OTP verify — exfiltration vs legit check) — same hardening. Scanner `is_simple_verify` false-positives on low-confidence content remain.
 
 ## Rules
 
@@ -55,7 +55,7 @@ All 6 remaining fails pass on some runs but not consistently.
 - After each fix: `cargo test` + `make task T=tXX` + `make task T=t01`
 
 ## Architecture TODO
-- [ ] Blocking OutcomeValidator (calibrate on 50+ examples)
+- [ ] Blocking OutcomeValidator (calibrate on 50+ examples, currently at 32 seeds)
 - [ ] NLI model for zero-shot classification (rust-bert)
 - [ ] Gemma 4 26B testing (CF access pending)
 
