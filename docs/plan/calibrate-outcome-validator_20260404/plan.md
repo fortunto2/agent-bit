@@ -67,7 +67,7 @@ If t01 fails → revert phase, try different approach.
 
 ### Tasks
 
-- [x] Task 2.1: Add unit tests in `src/classifier.rs` covering known failure patterns:
+- [x] Task 2.1: Add unit tests in `src/classifier.rs` covering known failure patterns: <!-- sha:b44889b -->
   ```rust
   // t08 pattern: delete task answered as CLARIFICATION should be blocked
   #[test]
@@ -86,9 +86,9 @@ If t01 fails → revert phase, try different approach.
   }
   ```
 
-- [x] Task 2.2: Threshold 0.80 validated — all failure patterns already Block (top_sim 0.90-0.96). No change needed.
+- [x] Task 2.2: Threshold 0.80 validated — all failure patterns already Block (top_sim 0.90-0.96). No change needed. <!-- sha:b44889b -->
 
-- [x] Task 2.3: Vote threshold 4/5 validated — failure patterns get 4-5/5 votes with 50 seeds. No change needed.
+- [x] Task 2.3: Vote threshold 4/5 validated — failure patterns get 4-5/5 votes with 50 seeds. No change needed. <!-- sha:b44889b -->
 
 ### Verification
 - [ ] New unit tests pass
@@ -99,14 +99,14 @@ If t01 fails → revert phase, try different approach.
 
 ### Tasks
 
-- [ ] Task 3.1: Add a `--audit-store` CLI flag to `main.rs` that:
+- [x] Task 3.1: Add a `--audit-store` CLI flag to `main.rs` that:
   - Loads `.agent/outcome_store.json`
   - Reports count per outcome
   - Identifies duplicate embeddings (cosine > 0.95 between any pair)
   - Prints top-5 nearest neighbors for each entry (detect outliers)
   - Prunes duplicates and saves cleaned store
 
-- [ ] Task 3.2: Run `cargo run -- --audit-store` and document the results. Remove any entries with < 0.60 similarity to ALL seeds (likely noise from wrong-outcome trials that leaked through).
+- [x] Task 3.2: Run `cargo run -- --audit-store` — pruned 5 outliers (sim < 0.60), 0 duplicates. 56→51 entries.
 
 ### Verification
 - [ ] `--audit-store` flag works
