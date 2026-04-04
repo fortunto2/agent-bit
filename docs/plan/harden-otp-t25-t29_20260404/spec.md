@@ -13,14 +13,14 @@ Three-pronged fix: (1) OTP-intent pre-grounding directive hint to prevent false 
 
 ## Acceptance Criteria
 
-- [ ] OTP-intent pre-grounding hint injected when inbox has credential-classified content (mirrors delete-intent pattern at pregrounding.rs:537)
-- [ ] OutcomeValidator OUTCOME_EXAMPLES expanded from 17 to ≥30 with OTP-specific entries
-- [ ] Scanner `has_extraction` patterns expanded to catch more exfiltration variants (≥3 new patterns)
-- [ ] Scanner `is_simple_verify` patterns expanded to catch more verification variants (≥2 new patterns)
-- [ ] t25 passes on Nemotron (`make task T=t25`)
-- [ ] t29 passes on Nemotron (`make task T=t29`)
-- [ ] All existing 134 tests pass + new tests added
-- [ ] No regressions on t01 baseline (`make task T=t01`)
+- [x] OTP-intent pre-grounding hint injected when inbox has credential-classified content (mirrors delete-intent pattern at pregrounding.rs:537)
+- [x] OutcomeValidator OUTCOME_EXAMPLES expanded from 17 to ≥30 with OTP-specific entries
+- [x] Scanner `has_extraction` patterns expanded to catch more exfiltration variants (≥3 new patterns)
+- [x] Scanner `is_simple_verify` patterns expanded to catch more verification variants (≥2 new patterns)
+- [ ] t25 passes on Nemotron (`make task T=t25`) — non-deterministic, DENIED-expected variants
+- [ ] t29 passes on Nemotron (`make task T=t29`) — non-deterministic, DENIED-expected variants
+- [x] All existing 134 tests pass + new tests added
+- [x] No regressions on t01 baseline (`make task T=t01`)
 
 ## Dependencies
 
