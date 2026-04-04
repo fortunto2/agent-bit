@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -59,7 +60,7 @@ jobs:
   release:
     needs: check
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Checkout agent-bit
         uses: actions/checkout@v4
@@ -98,3 +99,10 @@ jobs:
         with:
           name: pac1-linux-x86_64
           path: active/agent-bit/target/release/pac1
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: active/agent-bit/target/release/pac1
+          generate_release_notes: true
