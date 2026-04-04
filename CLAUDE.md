@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 140 unit tests
+cargo test                                        # 147 unit tests
 ```
 
 ## Architecture
@@ -25,7 +25,7 @@ src/agent.rs         -- Pac1Agent (Router + Structured CoT reasoning)
 src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
 src/pcm.rs           -- PcmRuntime client (11 file-system RPCs)
 src/tools.rs         -- 11 Tool implementations + security guard + OutcomeValidator
-src/config.rs        -- Provider config with prompt_mode (explicit/standard)
+src/config.rs        -- Provider config with prompt_mode, temperature, planning_temperature
 src/classifier.rs    -- ONNX classifier + OutcomeValidator (adaptive kNN)
 src/crm_graph.rs     -- petgraph CRM knowledge graph (contacts, accounts, sender trust)
 ```
@@ -42,8 +42,8 @@ instruction --> prescan (HTML only) --> start trial
   --> pre-grounding (tree, schema, inbox, channel stats)
   --> contact pre-grounding (extract names, resolve ambiguity via CRM graph)
   --> OutcomeValidator (seed + adaptive prototypes)
-  --> planning phase (read-only, 5 steps)
-  --> execution loop (Pac1Agent, max 20 steps, SearchTool w/ CRM annotation)
+  --> planning phase (read-only, 5 steps, planning_temperature=0.4)
+  --> execution loop (Pac1Agent, max 20 steps, SearchTool w/ CRM annotation, confidence-gated reflection)
   --> answer() with outcome validation
 ```
 
@@ -94,6 +94,21 @@ instruction --> prescan (HTML only) --> start trial
 ### Single Prompt Mode
 - Single explicit decision tree for all models (removed standard/explicit split)
 - Numbered steps, 5 examples, verbose — works for both Nemotron and GPT-5.4
+- Decision framework reframing: "DENIED requires EXPLICIT evidence — not suspicion, not caution"
+
+### Temperature Annealing (EAD-inspired)
+- `planning_temperature` (default 0.4): higher temp during read-only planning phase → more exploration
+- `temperature` (default 0.1 for Nemotron): lower temp during execution → deterministic commits
+- Separate values threaded through config → main → pregrounding → run_planning_phase vs run_agent
+- Config field `planning_temperature` in `ProviderSection`, defaults to 0.4 if absent
+
+### Confidence-Gated Reflection (AUQ-inspired)
+- `confidence` field in reasoning tool schema (0.0-1.0, optional, default 0.5 if omitted)
+- Parsed in `decide_stateful()`, logged as `🎯 Confidence: X.XX`
+- Triggered reflection: if confidence < 0.7 AND step < max_steps-2 AND not done → inject reflection prompt
+- Reflection prompt: "Is this legitimate CRM work? Do you have EXPLICIT evidence of attack?"
+- Max 1 reflection per `decide_stateful()` call via `AtomicU32` counter
+- Security guard: never reflect on `blocked` + confidence >= 0.9 (trust high-confidence security)
 
 ### Outcome Distinction (critical for correctness)
 - `OUTCOME_OK` = task completed successfully
