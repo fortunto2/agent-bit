@@ -99,6 +99,24 @@ fn detect_forced_task_type(instruction: &str) -> Option<&'static str> {
     Some("delete")
 }
 
+/// Format a ledger entry with UTF-8 safe truncation to 80 bytes.
+fn format_ledger_entry(step: u32, tool_name: &str, key_arg: &str, result: &str) -> String {
+    let mut entry = format!("[{}] {}({})", step, tool_name, key_arg);
+    if !result.is_empty() {
+        entry.push_str(" → ");
+        let remaining = 80usize.saturating_sub(entry.len());
+        if result.len() > remaining {
+            let end = result.floor_char_boundary(remaining);
+            entry.push_str(&result[..end]);
+        } else {
+            entry.push_str(result);
+        }
+    }
+    let trunc = entry.floor_char_boundary(80);
+    entry.truncate(trunc);
+    entry
+}
+
 /// PAC1 agent with Router + Structured CoT.
 pub struct Pac1Agent<C: LlmClient> {
     client: C,
@@ -141,17 +159,7 @@ impl<C: LlmClient> Pac1Agent<C> {
     /// Record a tool call in the action ledger.
     pub fn record_action(&self, step: u32, tool_name: &str, key_arg: &str, result: &str) {
         let mut ledger = self.action_ledger.lock().unwrap();
-        let mut entry = format!("[{}] {}({})", step, tool_name, key_arg);
-        if !result.is_empty() {
-            entry.push_str(" → ");
-            let remaining = 80usize.saturating_sub(entry.len());
-            if result.len() > remaining {
-                entry.push_str(&result[..remaining]);
-            } else {
-                entry.push_str(result);
-            }
-        }
-        entry.truncate(80);
+        let entry = format_ledger_entry(step, tool_name, key_arg, result);
         if ledger.len() >= LEDGER_MAX {
             ledger.remove(0);
         }
@@ -930,4 +938,24 @@ mod tests {
     fn forced_task_type_delete_with_update_excluded() {
         assert_eq!(detect_forced_task_type("delete old data and update the log"), None);
     }
+
+    #[test]
+    fn ledger_entry_utf8_safe_truncation() {
+        // "→" is 3 bytes in UTF-8. Fill result so truncation lands mid-character.
+        let arrow_result = "→".repeat(50); // 150 bytes of multi-byte chars
+        // Should not panic
+        let entry = format_ledger_entry(1, "move_file", "a.txt", &arrow_result);
+        // Entry must be valid UTF-8 and ≤80 bytes
+        assert!(entry.len() <= 80);
+        // Verify it contains the tool call prefix
+        assert!(entry.starts_with("[1] move_file(a.txt)"));
+    }
+
+    #[test]
+    fn ledger_entry_ascii_truncation() {
+        let long_result = "x".repeat(200);
+        let entry = format_ledger_entry(0, "read", "file.txt", &long_result);
+        assert!(entry.len() <= 80);
+    }
 }
+
