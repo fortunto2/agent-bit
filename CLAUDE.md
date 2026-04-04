@@ -81,7 +81,7 @@ instruction --> prescan (HTML only) --> start trial
 
 ### OutcomeValidator (adaptive kNN)
 - **Hypothesis template**: `"The CRM task result: {msg}"` for better embedding discrimination
-- **Seed store**: 17 static examples across 4 outcomes (OUTCOME_EXAMPLES in classifier.rs)
+- **Seed store**: 32 static examples across 4 outcomes (OUTCOME_EXAMPLES in classifier.rs) — 10 OK, 7 DENIED, 7 UNSUPPORTED, 6 CLARIFICATION
 - **Adaptive store**: grows from confirmed correct trials only (score ≥ 1.0), persisted to `.agent/outcome_store.json`
 - **k-NN (k=5)**: nearest-neighbor voting (no lossy centroid averaging)
 - **Confidence-gated blocking**: `ValidationMode::Block` when ≥4/5 votes + top_sim > 0.80, `Warn` for 3/5 (log only), `Pass` otherwise
@@ -124,6 +124,7 @@ instruction --> prescan (HTML only) --> start trial
 - Inbox processing guidance: evaluate EACH message separately, OK if at least one processed
 - Channel file statistics: auto-count entries by category (blacklist, verified, etc.)
 - OTP cleanup: after processing OTP inbox, delete source file (docs/channels/otp.txt)
+- OTP-intent hint: injected when inbox has high-confidence (>0.50) credential classification without exfiltration — prevents false DENIED on legit OTP tasks
 - Outbox: read README.MD for format, include `"sent": false`
 
 ### Agent Loop Configuration
