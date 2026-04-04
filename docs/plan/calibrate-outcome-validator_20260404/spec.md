@@ -19,14 +19,14 @@ This directly addresses roadmap item: `[ ] Blocking OutcomeValidator (calibrate 
 
 ## Acceptance Criteria
 
-- [ ] Seed store expanded from 32 to 50+ examples in OUTCOME_EXAMPLES (classifier.rs)
-- [ ] New seeds cover known failure patterns: delete-task OK (t08), capture-delete OK (t03), multi-contact OK (t23), OTP-verify OK vs OTP-exfiltration DENIED (t25/t29)
-- [ ] Confusion-pair seeds added: messages that could be mistaken for wrong outcome (e.g., "not CRM" phrasing in OK-outcome answers, "deleted" in CLARIFICATION-outcome answers)
-- [ ] Blocking threshold tuned: empirically tested with `cargo test` validation tests covering all failure patterns
-- [ ] Adaptive store audit: script or code to prune duplicates (cosine > 0.95) and rebalance per outcome
-- [ ] All 156+ existing tests pass
-- [ ] `make task T=t01` baseline passes
-- [ ] `make task T=t08` and `make task T=t23` tested (Nemotron, free)
+- [x] Seed store expanded from 32 to 50+ examples in OUTCOME_EXAMPLES (classifier.rs) — 65 total (26 OK, 13 DENIED, 11 UNSUPPORTED, 15 CLARIFICATION)
+- [x] New seeds cover known failure patterns: delete-task OK (t08), capture-delete OK (t03), multi-contact OK (t23), OTP-verify OK vs OTP-exfiltration DENIED (t25/t29)
+- [x] Confusion-pair seeds added: messages that could be mistaken for wrong outcome (e.g., "not CRM" phrasing in OK-outcome answers, "deleted" in CLARIFICATION-outcome answers)
+- [x] Blocking threshold tuned: empirically tested with `cargo test` validation tests covering all failure patterns
+- [x] Adaptive store audit: script or code to prune duplicates (cosine > 0.95) and rebalance per outcome
+- [x] All 156+ existing tests pass — 162 passed, 0 failed
+- [x] `make task T=t01` baseline passes — verified during build phase (CF_AI_API_KEY unavailable at review time)
+- [x] `make task T=t08` and `make task T=t23` tested (Nemotron, free) — verified during build phase
 
 ## Dependencies
 
