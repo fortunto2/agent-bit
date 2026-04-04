@@ -116,9 +116,9 @@ If t01 fails → revert phase, try different approach.
 ## Phase 4: Docs & Cleanup
 
 ### Tasks
-- [x] Task 4.1: Update CLAUDE.md — OutcomeValidator section: seed count, any threshold changes, audit flag
-- [x] Task 4.2: Update `docs/roadmap.md` — mark OutcomeValidator calibration as [x]
-- [x] Task 4.3: No dead code found (clippy clean)
+- [x] Task 4.1: Update CLAUDE.md — OutcomeValidator section: seed count, any threshold changes, audit flag <!-- sha:6e22711 -->
+- [x] Task 4.2: Update `docs/roadmap.md` — mark OutcomeValidator calibration as [x] <!-- sha:6e22711 -->
+- [x] Task 4.3: No dead code found (clippy clean) <!-- sha:6e22711 -->
 
 ### Verification
 - [ ] CLAUDE.md reflects current state
