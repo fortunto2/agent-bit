@@ -11,13 +11,13 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 134 unit tests
+cargo test                                        # 140 unit tests
 ```
 
 ## Architecture
 
 ```
-src/main.rs          -- CLI, orchestration, guess_outcome (~384 lines)
+src/main.rs          -- CLI, orchestration, guess_outcome (~459 lines)
 src/prompts.rs       -- system prompts, planning prompt, dynamic examples
 src/scanner.rs       -- security scanning, inbox classification, domain matching
 src/pregrounding.rs  -- contact pre-grounding, inbox reading, planning, agent execution
