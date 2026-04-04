@@ -91,33 +91,36 @@ Pipeline: build→deploy→review | Tracks: 6 total (t19, t23, t03, split-main-r
 - Plan SHA annotations — good commit traceability in all completed tracks
 - Pipeline grew test suite from 105 → 120 tests across the day (net +15 tests)
 
-## 2026-04-04 (Full) | agent-bit | Factory Score: 5/10
+## 2026-04-04 (Comprehensive) | agent-bit | Factory Score: 4/10
 
-Pipeline: build→deploy→review | Tracks: 8 total (t19, t23, t03, split-main-rs, otp, t08×2, blocking-validator) | Iters: 46 | Waste: 45.7%
+Pipeline: build→deploy→review | Tracks: 9 total (t19, t23, t03, split-main-rs, otp, t08×2, blocking-validator, harden-t23) | Iters: 48 | Waste: 41.7%
 
 ### Defects
-- **CRITICAL** | solo-lib.sh: Auth error circuit breaker STILL missing (**5th retro**). 16 auth-failure iters (76% of all waste). `check_circuit_breaker()` at line 143 has no content-based auth check — fingerprint at line 163 can't catch varying session IDs.
+- **CRITICAL** | solo-lib.sh: Auth error circuit breaker unfixed across **6 retros**. 14 wasted iters (70% of all waste). `check_circuit_breaker()` fingerprint-based — varying session IDs defeat md5 matching.
   - Fix: `solo-lib.sh:143` — add `grep -qiE 'authentication_error|OAuth token has expired|401.*unauthorized'` BEFORE fingerprint
-- **HIGH** | solo:deploy SKILL.md: No local-only project detection (5th retro). SKILL.md:81 maps `Cargo.toml + [[bin]]` to crates.io — wrong for competition agents.
-  - Fix: `/deploy` SKILL.md:91 — add `CLI/competition agent | Skip — local only` row
-- **HIGH** | solo:build SKILL.md: Spec checkbox maintenance absent (5th retro). 3/8 tracks had stale spec checkboxes despite 100% delivery.
+- **HIGH** | solo:deploy SKILL.md: No local-only project detection (6th retro). Caused catastrophic 14-iter spin-loop on split-main-rs.
+  - Fix: `/deploy` SKILL.md — add CLI/competition agent detection, emit `<solo:done/>` if no deploy target
+- **HIGH** | solo:build SKILL.md: Spec checkbox maintenance absent (6th retro). 3/9 tracks had stale spec checkboxes.
   - Fix: `/build` SKILL.md — add post-phase spec.md checkbox pass
+- **MEDIUM** | solo:build: Background task explosion — 24 parallel tasks on harden-t23 caused 5.5h build + global timeout
+  - Fix: `/build` SKILL.md — cap concurrent background tasks at 3-5
 
 ### Harness Gaps
-- **Context:** CLAUDE.md at 10,918 chars — healthy. 6 modules clean. Blocking OutcomeValidator adds depth (classifier.rs: validation + learning lifecycle).
-- **Constraints:** Escalation discipline confirmed: t08 prompt→structural, validator 4-phase plan. Clean arch maintained.
-- **Precedents:** Last 4 tracks: 14 iters, 0 waste, avg 33 min/track. Pipeline is excellent when not fighting auth. Blocking validator pattern (confidence-gated kNN + retry limit + security exception) is reusable.
+- **Context:** CLAUDE.md at 11,785 chars — healthy. 6 modules clean. harden-t23 added directive contact disambiguation + inbox processing guidance.
+- **Constraints:** Escalation discipline remains strong (suggestive→directive for Nemotron, prompt→structural for t08). Clean arch maintained.
+- **Precedents:** Last 5 tracks: 15 iters, 0 waste, avg 35 min/track. Escalation pattern (prompt fix → structural fix) should be documented as standard approach.
 
 ### Missing
-- Auth error content-based detection in circuit breaker (CRITICAL — unfixed across 5 retros)
+- Auth error content-based detection in circuit breaker (CRITICAL — 6 retros unfixed)
 - Local-only project detection in deploy skill
 - Spec checkbox auto-update in build skill
+- Background task limits in build skill
 - Stall detection (same SHA + no signal for 2+ iters)
 
 ### What worked well
-- Auto-planning: 8 tracks auto-created and executed across full day
-- Last 4 tracks: 14 iters, 0 waste — pipeline at its best
-- Test suite grew 105 → 131 (+26 tests) with zero regressions
-- Blocking OutcomeValidator: clean 4-phase feature delivery (kNN + learning + security exception)
-- Plan SHA annotations + spec checkboxes maintained on 5/8 tracks
-- Redo limit + rate limit detection both worked correctly
+- Auto-planning: 9 tracks auto-created and executed across ~14.5h
+- Last 5 tracks: 15 iters, 0 waste — pipeline runs clean when not fighting auth
+- Test suite grew 105 → 134 (+29 tests) with zero regressions
+- Cost policy enforced: Nemotron primary, no unnecessary OpenAI runs
+- harden-t23 achieved target (0% → 2/3 on Nemotron) through directive hints + contact pre-loading
+- Global timeout correctly caught runaway 5.5h build — prevented unlimited credit burn
