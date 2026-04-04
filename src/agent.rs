@@ -318,10 +318,10 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             msgs.push(Message::user(&nudge));
         }
 
-        // Capture-delete nudge: at 50% of steps, if task involves inbox capture,
-        // strongly remind to delete inbox files before answering
+        // Capture-delete nudge: at 50%+ of steps, if task involves inbox capture
+        // and inbox files were read but not deleted, strongly remind to delete
         if step >= (self.max_steps / 2)
-            && self.capture_delete_nudge_sent.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+            && self.capture_delete_nudge_sent.load(Ordering::SeqCst) == 0
         {
             // Check if messages mention inbox/capture (instruction or pre-grounding hints)
             let has_inbox_context = msgs.iter().any(|m| {
@@ -335,6 +335,8 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             drop(ledger);
 
             if has_inbox_context && has_inbox_read && !has_inbox_delete {
+                // Only set flag when we actually inject the nudge
+                self.capture_delete_nudge_sent.store(1, Ordering::SeqCst);
                 let nudge = "⚠ URGENT: You have read inbox files but NOT deleted them. \
                      You MUST delete ALL processed inbox files (from 00_inbox/) BEFORE calling answer(). \
                      Use delete() on each inbox file now.";
