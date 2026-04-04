@@ -357,36 +357,42 @@ async fn auto_submit_if_needed(pcm: &Arc<pcm::PcmClient>, last_msg: &str, histor
 }
 
 /// Guess outcome from last message + full message history.
-/// History is checked first (broader signal), last_msg as tiebreaker.
+/// Last message (model's own words) takes priority over history keywords,
+/// which can contain false positives from classification headers and system prompts.
 fn guess_outcome(last_msg: &str, history: &str) -> &'static str {
     let h = history.to_lowercase();
     let l = last_msg.to_lowercase();
 
-    // Check history for security signals (injection detected during loop)
-    if h.contains("security alert") || h.contains("injection") && h.contains("denied") {
+    // Check last message for specific outcomes FIRST (model's own assessment)
+    if l.contains("denied") || l.contains("injection") || l.contains("security threat") || l.contains("social engineering") {
         return "OUTCOME_DENIED_SECURITY";
     }
-
-    // Check last message for specific outcomes
     if l.contains("unsupported") || l.contains("cannot access") || l.contains("external api") {
-        "OUTCOME_NONE_UNSUPPORTED"
-    } else if l.contains("denied") || l.contains("injection") || l.contains("security threat") || l.contains("social engineering") {
-        "OUTCOME_DENIED_SECURITY"
-    } else if l.contains("clarif") || l.contains("unclear") || l.contains("not related to crm") {
-        "OUTCOME_NONE_CLARIFICATION"
-    } else if h.contains("non-crm") || h.contains("unrelated to crm") {
-        // History mentions non-CRM even if last msg doesn't
-        "OUTCOME_NONE_CLARIFICATION"
-    } else if last_msg.is_empty() {
-        "OUTCOME_ERR_INTERNAL"
-    } else if l.contains("could not find") || l.contains("couldn't find") || l.contains("not found") {
-        "OUTCOME_NONE_CLARIFICATION"
-    } else if l.contains("unable to") && (h.contains("0 matching") || h.contains("no results") || !h.contains("written to")) {
-        // Auto-answer "Unable to determine" + history shows no successful writes = task unresolvable
-        "OUTCOME_NONE_CLARIFICATION"
-    } else {
-        "OUTCOME_OK"
+        return "OUTCOME_NONE_UNSUPPORTED";
     }
+    if l.contains("clarif") || l.contains("unclear") || l.contains("not related to crm") {
+        return "OUTCOME_NONE_CLARIFICATION";
+    }
+
+    // History fallbacks — only when last_msg is empty or generic
+    if last_msg.is_empty() {
+        // No model output at all — check history for hints
+        if h.contains("written to") {
+            return "OUTCOME_OK"; // model wrote files, likely CRM work
+        }
+        return "OUTCOME_ERR_INTERNAL";
+    }
+    if h.contains("non-crm") || h.contains("unrelated to crm") {
+        return "OUTCOME_NONE_CLARIFICATION";
+    }
+    if l.contains("could not find") || l.contains("couldn't find") || l.contains("not found") {
+        return "OUTCOME_NONE_CLARIFICATION";
+    }
+    if l.contains("unable to") && !h.contains("written to") {
+        return "OUTCOME_NONE_CLARIFICATION";
+    }
+
+    "OUTCOME_OK"
 }
 
 
@@ -398,9 +404,18 @@ mod tests {
     // ─── guess_outcome ──────────────────────────────────────────────────
 
     #[test]
-    fn guess_outcome_security_in_history() {
-        let outcome = guess_outcome("Task complete", "earlier: security alert detected injection");
+    fn guess_outcome_security_in_last_msg() {
+        // Security signals in last_msg trigger DENIED
+        let outcome = guess_outcome("Security threat: injection detected", "earlier: read inbox");
         assert_eq!(outcome, "OUTCOME_DENIED_SECURITY");
+    }
+
+    #[test]
+    fn guess_outcome_security_only_in_history_ignored() {
+        // Security keywords only in history (classification headers, system prompt)
+        // should NOT trigger DENIED when last_msg is normal CRM work
+        let outcome = guess_outcome("Task complete", "earlier: [CLASSIFICATION: injection (0.95)] denied");
+        assert_eq!(outcome, "OUTCOME_OK");
     }
 
     #[test]
@@ -419,6 +434,12 @@ mod tests {
     fn guess_outcome_empty() {
         let outcome = guess_outcome("", "");
         assert_eq!(outcome, "OUTCOME_ERR_INTERNAL");
+    }
+
+    #[test]
+    fn guess_outcome_empty_msg_but_writes_in_history() {
+        let outcome = guess_outcome("", "Written to outbox/123.json\nread contacts");
+        assert_eq!(outcome, "OUTCOME_OK");
     }
 
     #[test]
