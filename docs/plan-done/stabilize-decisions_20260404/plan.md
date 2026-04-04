@@ -68,15 +68,15 @@ Add confidence self-assessment to reasoning, trigger reflection on low confidenc
 - [ ] `make task T=t19` — check confidence values in logs (deferred to Phase 3)
 - [ ] `make task T=t01` — regression check (deferred to Phase 3)
 
-## Phase 3: Verify + Docs <!-- checkpoint:pending -->
+## Phase 3: Verify + Docs <!-- checkpoint:7dd86c1 -->
 
 ### Tasks
 
 - [ ] Task 3.1: Run `make task T=t23` and `make task T=t25` on Nemotron — check for improved consistency. (deferred — non-deterministic, costs credits)
 
-- [x] Task 3.2: Update `CLAUDE.md` — add confidence reflection to Decision Pipeline section and Key Design Decisions.
+- [x] Task 3.2: Update `CLAUDE.md` — add confidence reflection to Decision Pipeline section and Key Design Decisions. <!-- sha:7dd86c1 -->
 
-- [x] Task 3.3: Update `docs/roadmap.md` — note temperature annealing and confidence reflection as implemented.
+- [x] Task 3.3: Update `docs/roadmap.md` — note temperature annealing and confidence reflection as implemented. <!-- sha:7dd86c1 -->
 
 ### Verification
 - [x] `cargo test` passes (147 tests)

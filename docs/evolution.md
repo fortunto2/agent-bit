@@ -124,3 +124,78 @@ Pipeline: build→deploy→review | Tracks: 9 total (t19, t23, t03, split-main-r
 - Cost policy enforced: Nemotron primary, no unnecessary OpenAI runs
 - harden-t23 achieved target (0% → 2/3 on Nemotron) through directive hints + contact pre-loading
 - Global timeout correctly caught runaway 5.5h build — prevented unlimited credit burn
+
+## 2026-04-04 (Final) | agent-bit | Factory Score: 4/10
+
+Pipeline: build→deploy→review | Tracks: 10 (full session) | Iters: 51 | Waste: 39.2%
+
+### Defects
+- **CRITICAL** | solo-dev.sh: No stall detection. 14-iter deploy spin-loop on split-main-rs burned 27% of all iterations. Same commit SHA repeated 14×, no circuit break.
+  - Fix: `solo-dev.sh` — track `last_sha`, increment `stall_count` when SHA unchanged + no signal, abort at 3
+- **CRITICAL** | solo-lib.sh: Auth error circuit breaker STILL unfixed across **7 retros**. Fingerprint-based detection defeated by varying session IDs.
+  - Fix: `solo-lib.sh` — add content-based `grep -qiE 'authentication_error|401'` before fingerprint matching
+- **HIGH** | solo:deploy: No local-only project detection (7th retro). CLI/competition agents have nothing to deploy.
+  - Fix: `/deploy` SKILL.md — pre-check CLAUDE.md for deploy target, auto-`<solo:done/>` if none
+- **HIGH** | solo:build: Spec checkbox maintenance absent (7th retro). Average 76% criteria met vs 93% tasks done.
+  - Fix: `/build` SKILL.md — add post-phase spec.md checkbox pass
+- **MEDIUM** | solo:build: No session time limit. harden-t23 build ran 329m (5.5h) in single session.
+  - Fix: `solo-dev.sh` — per-iteration timeout: 60m build, 30m deploy/review
+
+### Harness Gaps
+- **Context:** CLAUDE.md at 12KB — healthy. 6 clean modules. No scratch/ for observation masking.
+- **Constraints:** Pipeline improved: last 6 tracks clean (18 iters, 0 waste). Early tracks carried all the waste.
+- **Precedents:** Auto-plan from backlog produced 10 tracks autonomously — impressive throughput. Escalation discipline (prompt→structural) consistently effective.
+
+### Missing
+- Stall detection in pipeline script (CRITICAL — would save 14 iters)
+- Auth error content-based detection (CRITICAL — 7 retros unfixed)
+- Local-only project detection in deploy skill
+- Spec checkbox auto-update in build skill
+- Per-iteration timeout (session time limit)
+- Observation masking (scratch/ convention)
+
+### What worked well
+- Auto-planning: 10 tracks auto-created and executed across ~24h
+- Last 6 tracks (t08-pregrounding through harden-otp): 18 iters, 0 waste, avg 68m/track
+- Test suite grew 105 → 140 (+35 tests) with zero regressions
+- Code quality excellent: 93% conventional commits, all 140 tests green
+- harden-otp track: OTP classification refined (exfiltration vs verification vs passive)
+- CLAUDE.md kept lean (12KB) despite massive feature additions
+- Pipeline learned: later tracks dramatically more efficient than early ones
+
+## 2026-04-04 (Session Retro) | agent-bit | Factory Score: 3/10
+
+Pipeline: build→deploy→review | Tracks: 12 (full 17.5h session) | Iters: 65 | Waste: 47.7%
+
+### Defects
+- **CRITICAL** | solo-lib.sh: Auth error circuit breaker unfixed across **8+ retros**. 22 wasted iters (34% of total). Fingerprint-based detection defeated by varying session IDs in 401 responses.
+  - Fix: `solo-lib.sh:check_circuit_breaker()` — add `grep -qiE 'authentication_error|OAuth token has expired|401'` BEFORE fingerprint, abort after 2 consecutive matches
+- **CRITICAL** | solo-dev.sh: No stall detection. 14-iter deploy spin-loop (split-main-rs) + 8-iter auth loop (stabilize-decisions). Same SHA repeated N times with no break.
+  - Fix: `solo-dev.sh` — track `last_sha`, abort after 3 consecutive same-SHA + no-signal iterations
+- **HIGH** | solo:deploy: No local-only project detection (8th retro). CLI tools have nothing to deploy.
+  - Fix: `/deploy` SKILL.md — detect CLI/local in CLAUDE.md, auto-`<solo:done/>`
+- **HIGH** | solo:build: Spec checkbox maintenance absent (8th retro). 4/11 tracks had <50% spec checkboxes.
+  - Fix: `/build` SKILL.md — add post-phase spec.md checkbox pass
+- **MEDIUM** | solo:build: No session time limit. harden-t23 ran 329m before global timeout.
+  - Fix: `solo-dev.sh` — per-iteration timeout: 60m build, 30m deploy/review
+
+### Harness Gaps
+- **Context:** CLAUDE.md at 13KB — healthy. 6 modules clean. confidence-gated reflection and temperature annealing added. No scratch/ for observation masking.
+- **Constraints:** Same 3 factory defects repeated for 8 retros. No feedback loop from retro findings to factory fixes. Retros document problems but nothing changes.
+- **Precedents:** Last 6 clean tracks (18 iters, 0 waste) prove the pipeline works when not fighting auth infrastructure. Escalation pattern (suggestive→directive→structural) proven across all task fix tracks.
+
+### Missing
+- **Retro → Fix feedback loop (META-CRITICAL):** 8 retros identified the same defects. The retro skill generates reports but has no mechanism to apply patches or track fix status. Need: retro findings → auto-issue creation or patch application.
+- Auth error content-based detection (8 retros)
+- Stall detection (8 retros)
+- Local-only project detection (8 retros)
+- Spec checkbox auto-update (8 retros)
+- Per-iteration timeout
+
+### What worked well
+- Auto-planning: 12 tracks auto-created and executed across 17.5h
+- Test suite grew 105 → 147 (+42 tests) with zero regressions
+- Code quality: 92% conventional commits, all 147 tests green, build clean
+- Technical output excellent: CRM graph, contact disambiguation, OTP hardening, confidence reflection, temperature annealing, outcome validator blocking, delete routing
+- CLAUDE.md kept lean (13KB) despite massive feature growth
+- Mid-to-late tracks highly efficient — the pipeline is good when auth works
