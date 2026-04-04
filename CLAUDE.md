@@ -132,6 +132,7 @@ instruction --> prescan (HTML only) --> start trial
 - Default CRM examples include capture-from-inbox pattern (read→write→delete)
 - `filter_tools_for_task()` extracted for testability (9 Router unit tests)
 - **t03 fixed**: thread-update example + write-nudge (2+ reads-since-last-write → inject "use write() now"). Counter only resets on write-class tools (write/delete/move_file/answer), NOT on search/find/list/tree. Filename preservation hint for distill cards.
+- **Capture-delete nudge**: at 50%+ steps, if inbox files read but not deleted → inject strong "DELETE inbox files NOW" reminder. Deferred flag pattern — only marks sent when conditions are met (inbox read in ledger + no inbox delete). Pre-grounding also injects reminder for capture/distill/process/inbox instructions. Distill example in prompts.rs includes delete step.
 
 ### Pre-grounding Context
 - tree + AGENTS.md + CRM schema (READMEs from directories)
