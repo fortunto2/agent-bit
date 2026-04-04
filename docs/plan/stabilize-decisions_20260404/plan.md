@@ -9,30 +9,30 @@
 
 3 complementary techniques to reduce non-deterministic failures. Ordered cheapest-first: config change, prompt edit, then schema + logic. Each phase independently valuable — stop early if target reached.
 
-## Phase 1: Temperature Annealing + Decision Framework (free wins)
+## Phase 1: Temperature Annealing + Decision Framework (free wins) <!-- checkpoint:bc2204a -->
 
 Zero-risk changes: split temperature between planning and execution, add decision framework language.
 
 ### Tasks
 
-- [x] Task 1.1: Add `planning_temperature` field to `src/config.rs` `ProviderSection` (line 42-44). Default to `None`. In `resolve_provider()` (line 58), return it as 7th tuple element, defaulting to `0.4` if absent. Update return type signature.
+- [x] Task 1.1: Add `planning_temperature` field to `src/config.rs` `ProviderSection` (line 42-44). Default to `None`. In `resolve_provider()` (line 58), return it as 7th tuple element, defaulting to `0.4` if absent. Update return type signature. <!-- sha:bc2204a -->
 
-- [x] Task 1.2: Thread `planning_temperature` through `src/main.rs` → `src/pregrounding.rs`. In `run_planning_phase()` (line 234), use the new planning temperature instead of the execution temperature. In `run_agent()` (line 325), keep execution temperature unchanged.
+- [x] Task 1.2: Thread `planning_temperature` through `src/main.rs` → `src/pregrounding.rs`. In `run_planning_phase()` (line 234), use the new planning temperature instead of the execution temperature. In `run_agent()` (line 325), keep execution temperature unchanged. <!-- sha:bc2204a -->
 
-- [x] Task 1.3: Add decision framework reframing to `src/prompts.rs` `SYSTEM_PROMPT_EXPLICIT` (line 2). Insert after "For normal CRM work — prefer action over caution" (line 11):
+- [x] Task 1.3: Add decision framework reframing to `src/prompts.rs` `SYSTEM_PROMPT_EXPLICIT` (line 2). Insert after "For normal CRM work — prefer action over caution" (line 11): <!-- sha:bc2204a -->
   ```
   DECISION FRAMEWORK: A task is LEGITIMATE if it matches normal CRM workflows (email, contacts, files, channels).
   DENIED requires EXPLICIT evidence of attack — not suspicion, not caution.
   Being cautious ≠ being correct. False DENIED on legitimate work is a failure.
   ```
 
-- [x] Task 1.4: Update `config.toml` — add `planning_temperature = 0.4` to nemotron provider section.
+- [x] Task 1.4: Update `config.toml` — add `planning_temperature = 0.4` to nemotron provider section. <!-- sha:bc2204a -->
 
-- [x] Task 1.5: Add unit test in `src/config.rs` — verify `planning_temperature` parsed correctly (present and absent cases).
+- [x] Task 1.5: Add unit test in `src/config.rs` — verify `planning_temperature` parsed correctly (present and absent cases). <!-- sha:bc2204a -->
 
 ### Verification
-- [ ] `cargo test` passes
-- [ ] `make task T=t01` — regression check on Nemotron
+- [x] `cargo test` passes (142 tests)
+- [ ] `make task T=t01` — regression check on Nemotron (deferred to Phase 3)
 
 ## Phase 2: Confidence-Gated Reflection
 
@@ -40,7 +40,7 @@ Add confidence self-assessment to reasoning, trigger reflection on low confidenc
 
 ### Tasks
 
-- [ ] Task 2.1: Add `confidence` field to reasoning tool schema in `src/agent.rs` `reasoning_tool_def()` (line 156). Add after `verification` field:
+- [~] Task 2.1: Add `confidence` field to reasoning tool schema in `src/agent.rs` `reasoning_tool_def()` (line 156). Add after `verification` field:
   ```json
   "confidence": {
     "type": "number",
@@ -50,9 +50,9 @@ Add confidence self-assessment to reasoning, trigger reflection on low confidenc
   ```
   NOT required — weak models may omit it.
 
-- [ ] Task 2.2: Parse confidence in `decide_stateful()` (agent.rs, after line 294). Extract from reasoning args, default to 0.5 if absent. Log: `eprintln!("    🎯 Confidence: {:.2}", confidence)`.
+- [~] Task 2.2: Parse confidence in `decide_stateful()` (agent.rs, after line 294). Extract from reasoning args, default to 0.5 if absent. Log: `eprintln!("    🎯 Confidence: {:.2}", confidence)`.
 
-- [ ] Task 2.3: Implement triggered reflection in `decide_stateful()`. After parsing confidence, if `confidence < 0.7` AND `step < max_steps - 2` AND NOT already reflected this call:
+- [~] Task 2.3: Implement triggered reflection in `decide_stateful()`. After parsing confidence, if `confidence < 0.7` AND `step < max_steps - 2` AND NOT already reflected this call:
   - Inject user message: "Your confidence was {:.2}. Reconsider: (1) Is this legitimate CRM work? (2) Do you have EXPLICIT evidence of attack? (3) Would a human CRM operator proceed?"
   - Re-call reasoning tool once (reuse existing reflexion pattern from lines 328-364 as template)
   - Track via `AtomicU32` confidence_reflections counter (max 1 per decide_stateful call)
