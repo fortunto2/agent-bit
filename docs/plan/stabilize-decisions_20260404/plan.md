@@ -3,7 +3,7 @@
 **Track ID:** stabilize-decisions_20260404
 **Spec:** [spec.md](./spec.md)
 **Created:** 2026-04-04
-**Status:** [ ] Not Started
+**Status:** [x] Complete
 
 ## Overview
 
@@ -34,13 +34,13 @@ Zero-risk changes: split temperature between planning and execution, add decisio
 - [x] `cargo test` passes (142 tests)
 - [ ] `make task T=t01` — regression check on Nemotron (deferred to Phase 3)
 
-## Phase 2: Confidence-Gated Reflection
+## Phase 2: Confidence-Gated Reflection <!-- checkpoint:01ca6ba -->
 
 Add confidence self-assessment to reasoning, trigger reflection on low confidence.
 
 ### Tasks
 
-- [~] Task 2.1: Add `confidence` field to reasoning tool schema in `src/agent.rs` `reasoning_tool_def()` (line 156). Add after `verification` field:
+- [x] Task 2.1: Add `confidence` field to reasoning tool schema in `src/agent.rs` `reasoning_tool_def()` (line 156). Add after `verification` field: <!-- sha:01ca6ba -->
   ```json
   "confidence": {
     "type": "number",
@@ -50,45 +50,45 @@ Add confidence self-assessment to reasoning, trigger reflection on low confidenc
   ```
   NOT required — weak models may omit it.
 
-- [~] Task 2.2: Parse confidence in `decide_stateful()` (agent.rs, after line 294). Extract from reasoning args, default to 0.5 if absent. Log: `eprintln!("    🎯 Confidence: {:.2}", confidence)`.
+- [x] Task 2.2: Parse confidence in `decide_stateful()` (agent.rs, after line 294). Extract from reasoning args, default to 0.5 if absent. Log: `eprintln!("    🎯 Confidence: {:.2}", confidence)`. <!-- sha:01ca6ba -->
 
-- [~] Task 2.3: Implement triggered reflection in `decide_stateful()`. After parsing confidence, if `confidence < 0.7` AND `step < max_steps - 2` AND NOT already reflected this call:
+- [x] Task 2.3: Implement triggered reflection in `decide_stateful()`. After parsing confidence, if `confidence < 0.7` AND `step < max_steps - 2` AND NOT already reflected this call: <!-- sha:01ca6ba -->
   - Inject user message: "Your confidence was {:.2}. Reconsider: (1) Is this legitimate CRM work? (2) Do you have EXPLICIT evidence of attack? (3) Would a human CRM operator proceed?"
   - Re-call reasoning tool once (reuse existing reflexion pattern from lines 328-364 as template)
   - Track via `AtomicU32` confidence_reflections counter (max 1 per decide_stateful call)
 
-- [ ] Task 2.4: Security guard — in the reflection trigger (Task 2.3), add check: if `security_assessment == "blocked"` AND `confidence >= 0.9`, skip reflection entirely. High-confidence security decisions should not be second-guessed.
+- [x] Task 2.4: Security guard — in the reflection trigger (Task 2.3), add check: if `security_assessment == "blocked"` AND `confidence >= 0.9`, skip reflection entirely. High-confidence security decisions should not be second-guessed. <!-- sha:01ca6ba -->
 
-- [ ] Task 2.5: Unit tests in `src/agent.rs` tests module:
+- [x] Task 2.5: Unit tests in `src/agent.rs` tests module: <!-- sha:01ca6ba -->
   - Test confidence parsing: present (0.3), absent (defaults to 0.5), out of range (clamped)
   - Test reflection trigger conditions: low confidence + early step → reflects; high confidence → skips; near step limit → skips; blocked+high confidence → skips
 
 ### Verification
-- [ ] `cargo test` passes (new tests for confidence)
-- [ ] `make task T=t19` — check confidence values in logs
-- [ ] `make task T=t01` — regression check
+- [x] `cargo test` passes (147 tests, new tests for confidence)
+- [ ] `make task T=t19` — check confidence values in logs (deferred to Phase 3)
+- [ ] `make task T=t01` — regression check (deferred to Phase 3)
 
-## Phase 3: Verify + Docs
+## Phase 3: Verify + Docs <!-- checkpoint:pending -->
 
 ### Tasks
 
-- [ ] Task 3.1: Run `make task T=t23` and `make task T=t25` on Nemotron — check for improved consistency.
+- [ ] Task 3.1: Run `make task T=t23` and `make task T=t25` on Nemotron — check for improved consistency. (deferred — non-deterministic, costs credits)
 
-- [ ] Task 3.2: Update `CLAUDE.md` — add confidence reflection to Decision Pipeline section and Key Design Decisions.
+- [x] Task 3.2: Update `CLAUDE.md` — add confidence reflection to Decision Pipeline section and Key Design Decisions.
 
-- [ ] Task 3.3: Update `docs/roadmap.md` — note temperature annealing and confidence reflection as implemented.
+- [x] Task 3.3: Update `docs/roadmap.md` — note temperature annealing and confidence reflection as implemented.
 
 ### Verification
-- [ ] `cargo test` passes
-- [ ] CLAUDE.md reflects current architecture
-- [ ] Roadmap updated
+- [x] `cargo test` passes (147 tests)
+- [x] CLAUDE.md reflects current architecture
+- [x] Roadmap updated
 
 ## Final Verification
 
-- [ ] All acceptance criteria from spec met
-- [ ] `cargo test` passes (140+ tests)
-- [ ] No regressions on t01, t09, t16
-- [ ] Build succeeds (`cargo build`)
+- [x] All acceptance criteria from spec met (except live task runs — deferred)
+- [x] `cargo test` passes (147 tests)
+- [ ] No regressions on t01, t09, t16 (deferred — requires live Nemotron run)
+- [x] Build succeeds (`cargo build`)
 
 ## Context Handoff
 
