@@ -76,6 +76,10 @@ struct Cli {
     /// Dry-run: show pre-scan decisions without running LLM
     #[arg(long)]
     dry_run: bool,
+
+    /// Audit outcome store: report stats, find duplicates, prune noise
+    #[arg(long)]
+    audit_store: bool,
 }
 
 /// Standard mode: concise prompt for strong models (GPT-5, etc.)
@@ -85,6 +89,10 @@ struct Cli {
 async fn main() -> Result<()> {
     let _telemetry = sgr_agent::init_telemetry(".agent", "pac1");
     let cli = Cli::parse();
+
+    if cli.audit_store {
+        return audit_outcome_store();
+    }
 
     let cfg = config::Config::load(&cli.config)?;
     let provider_name = cli.provider.as_deref().unwrap_or(&cfg.llm.provider);
@@ -396,7 +404,103 @@ fn guess_outcome(last_msg: &str, history: &str) -> &'static str {
     "OUTCOME_OK"
 }
 
+/// Audit the adaptive outcome store: report stats, find duplicates, prune noise.
+fn audit_outcome_store() -> Result<()> {
+    let store_path = std::path::PathBuf::from(".agent/outcome_store.json");
+    if !store_path.exists() {
+        eprintln!("No adaptive store found at {}", store_path.display());
+        return Ok(());
+    }
 
+    let data = std::fs::read_to_string(&store_path)?;
+    let raw: Vec<(String, Vec<f32>)> = serde_json::from_str(&data)?;
+    let total = raw.len();
+    eprintln!("=== Outcome Store Audit ===");
+    eprintln!("Store: {}", store_path.display());
+    eprintln!("Total entries: {}", total);
+
+    // Count per outcome
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (outcome, _) in &raw {
+        *counts.entry(outcome.as_str()).or_default() += 1;
+    }
+    eprintln!("\nPer-outcome counts:");
+    let mut sorted_counts: Vec<_> = counts.iter().collect();
+    sorted_counts.sort_by_key(|(_, c)| std::cmp::Reverse(**c));
+    for (outcome, count) in &sorted_counts {
+        eprintln!("  {}: {}", outcome, count);
+    }
+
+    // Find duplicates (cosine > 0.95 between same-outcome pairs)
+    let embeddings: Vec<(&str, ndarray::Array1<f32>)> = raw.iter()
+        .map(|(o, v)| (o.as_str(), ndarray::Array1::from_vec(v.clone())))
+        .collect();
+
+    let mut dup_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for i in 0..embeddings.len() {
+        if dup_indices.contains(&i) { continue; }
+        for j in (i + 1)..embeddings.len() {
+            if dup_indices.contains(&j) { continue; }
+            if embeddings[i].0 == embeddings[j].0 {
+                let sim = classifier::cosine_similarity(
+                    embeddings[i].1.view(),
+                    embeddings[j].1.view(),
+                );
+                if sim > 0.95 {
+                    dup_indices.insert(j); // keep i, remove j
+                }
+            }
+        }
+    }
+    eprintln!("\nDuplicates (cosine > 0.95): {}", dup_indices.len());
+
+    // Find outliers: entries with low max similarity to all seeds
+    let models_dir = std::path::Path::new("models");
+    let mut low_sim_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    if classifier::InboxClassifier::is_available(models_dir) {
+        if let Ok(mut clf) = classifier::InboxClassifier::load(models_dir) {
+            let seed_embeddings: Vec<(String, ndarray::Array1<f32>)> = classifier::OUTCOME_EXAMPLES.iter()
+                .filter_map(|(outcome, example)| {
+                    let text = format!("The CRM task result: {}", example);
+                    clf.encode(&text).ok().map(|emb| (outcome.to_string(), emb))
+                })
+                .collect();
+
+            for (i, (outcome, emb)) in embeddings.iter().enumerate() {
+                let max_sim = seed_embeddings.iter()
+                    .filter(|(o, _)| o.as_str() == *outcome)
+                    .map(|(_, se)| classifier::cosine_similarity(emb.view(), se.view()))
+                    .fold(0.0f32, f32::max);
+                if max_sim < 0.60 {
+                    low_sim_indices.insert(i);
+                }
+            }
+            eprintln!("Low-similarity outliers (max seed sim < 0.60): {}", low_sim_indices.len());
+        }
+    }
+
+    // Prune
+    let to_remove: std::collections::HashSet<usize> = dup_indices.union(&low_sim_indices).copied().collect();
+    if to_remove.is_empty() {
+        eprintln!("\n✅ Store is clean — no pruning needed.");
+    } else {
+        // Backup
+        let backup_path = store_path.with_extension("json.bak");
+        std::fs::copy(&store_path, &backup_path)?;
+        eprintln!("\nBackup: {}", backup_path.display());
+
+        let pruned: Vec<&(String, Vec<f32>)> = raw.iter().enumerate()
+            .filter(|(i, _)| !to_remove.contains(i))
+            .map(|(_, e)| e)
+            .collect();
+        let json = serde_json::to_string(&pruned)?;
+        std::fs::write(&store_path, json)?;
+        eprintln!("Pruned {} entries ({} duplicates, {} outliers). {} remaining.",
+            to_remove.len(), dup_indices.len(), low_sim_indices.len(), pruned.len());
+    }
+
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
