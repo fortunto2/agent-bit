@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
 
     let cfg = config::Config::load(&cli.config)?;
     let provider_name = cli.provider.as_deref().unwrap_or(&cfg.llm.provider);
-    let (model, base_url, llm_api_key, extra_headers, prompt_mode, temperature) = cfg.resolve_provider(provider_name)?;
+    let (model, base_url, llm_api_key, extra_headers, prompt_mode, temperature, planning_temperature) = cfg.resolve_provider(provider_name)?;
     let max_steps = cli.max_steps.unwrap_or(cfg.agent.max_steps);
     let benchmark = &cfg.agent.benchmark;
 
@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
     eprintln!("[pac1] BitGN: {}", status);
 
     if let Some(ref run_name) = cli.run {
-        return run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, run_name, &prompt_mode, temperature).await;
+        return run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, run_name, &prompt_mode, temperature, planning_temperature).await;
     }
 
     let bm = harness.get_benchmark(benchmark).await?;
@@ -204,7 +204,7 @@ async fn main() -> Result<()> {
             let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
             let (last_msg, history) = run_trial(
                 &pcm, &trial.instruction, &model,
-                base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature,
+                base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature,
                 &clf, ov.clone(),
             ).await;
             auto_submit_if_needed(&pcm, &last_msg, &history).await;
@@ -265,6 +265,7 @@ async fn run_leaderboard(
     extra_headers: &[(String, String)], max_steps: usize, run_name: &str,
     prompt_mode: &str,
     temperature: f32,
+    planning_temperature: f32,
 ) -> Result<()> {
     if cli.api_key.is_none() {
         anyhow::bail!("--api-key or BITGN_API_KEY required for leaderboard mode");
@@ -296,7 +297,7 @@ async fn run_leaderboard(
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, &shared_clf, outcome_validator.clone()).await;
+        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, outcome_validator.clone()).await;
         auto_submit_if_needed(&pcm, &last_msg, &history).await;
 
         let result = harness.end_trial(&trial.trial_id).await?;
@@ -334,11 +335,11 @@ use scanner::SharedClassifier;
 async fn run_trial(
     pcm: &Arc<pcm::PcmClient>, instruction: &str,
     model: &str, base_url: Option<&str>, api_key: &str,
-    extra_headers: &[(String, String)], max_steps: usize, prompt_mode: &str, temperature: f32,
+    extra_headers: &[(String, String)], max_steps: usize, prompt_mode: &str, temperature: f32, planning_temperature: f32,
     shared_clf: &SharedClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
 ) -> (String, String) {
-    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, shared_clf, outcome_validator).await {
+    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, outcome_validator).await {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);

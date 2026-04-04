@@ -42,6 +42,9 @@ pub struct ProviderSection {
     /// LLM temperature (default 0.2). Use 0.0 for deterministic output.
     #[serde(default)]
     pub temperature: Option<f32>,
+    /// Separate temperature for planning phase (default 0.4). Higher = more exploration.
+    #[serde(default)]
+    pub planning_temperature: Option<f32>,
 }
 
 fn default_max_steps() -> usize { 20 }
@@ -54,11 +57,11 @@ impl Config {
         toml::from_str(&text).context("parsing config.toml")
     }
 
-    /// Resolve provider by name, return (model, base_url, api_key, extra_headers, prompt_mode, temperature).
+    /// Resolve provider by name, return (model, base_url, api_key, extra_headers, prompt_mode, temperature, planning_temperature).
     pub fn resolve_provider(
         &self,
         name: &str,
-    ) -> Result<(String, Option<String>, String, Vec<(String, String)>, String, f32)> {
+    ) -> Result<(String, Option<String>, String, Vec<(String, String)>, String, f32, f32)> {
         let p = self
             .providers
             .get(name)
@@ -81,7 +84,59 @@ impl Config {
         let headers: Vec<(String, String)> = p.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         let prompt_mode = p.prompt_mode.clone().unwrap_or_else(|| "standard".into());
         let temperature = p.temperature.unwrap_or(0.2);
+        let planning_temperature = p.planning_temperature.unwrap_or(0.4);
 
-        Ok((p.model.clone(), p.base_url.clone(), api_key, headers, prompt_mode, temperature))
+        Ok((p.model.clone(), p.base_url.clone(), api_key, headers, prompt_mode, temperature, planning_temperature))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planning_temperature_parsed_when_present() {
+        let toml_str = r#"
+[agent]
+max_steps = 10
+benchmark = "test"
+
+[llm]
+provider = "test"
+
+[providers.test]
+model = "test-model"
+api_key = "sk-test"
+temperature = 0.1
+planning_temperature = 0.4
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        let p = cfg.providers.get("test").unwrap();
+        assert_eq!(p.planning_temperature, Some(0.4));
+        let (_, _, _, _, _, temp, plan_temp) = cfg.resolve_provider("test").unwrap();
+        assert!((temp - 0.1).abs() < 0.001);
+        assert!((plan_temp - 0.4).abs() < 0.001);
+    }
+
+    #[test]
+    fn planning_temperature_defaults_when_absent() {
+        let toml_str = r#"
+[agent]
+max_steps = 10
+benchmark = "test"
+
+[llm]
+provider = "test"
+
+[providers.test]
+model = "test-model"
+api_key = "sk-test"
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        let p = cfg.providers.get("test").unwrap();
+        assert_eq!(p.planning_temperature, None);
+        let (_, _, _, _, _, temp, plan_temp) = cfg.resolve_provider("test").unwrap();
+        assert!((temp - 0.2).abs() < 0.001); // default temperature
+        assert!((plan_temp - 0.4).abs() < 0.001); // default planning_temperature
     }
 }

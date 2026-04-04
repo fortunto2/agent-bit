@@ -332,6 +332,7 @@ pub(crate) async fn run_agent(
     max_steps: usize,
     prompt_mode: &str,
     temperature: f32,
+    planning_temperature: f32,
     shared_clf: &SharedClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
 ) -> Result<(String, String)> {
@@ -553,7 +554,7 @@ pub(crate) async fn run_agent(
     // ── Planning phase: decompose task into steps ─────────────────────
     let plan = run_planning_phase(
         pcm, instruction, model, base_url, api_key,
-        extra_headers, prompt_mode, temperature, &messages,
+        extra_headers, prompt_mode, planning_temperature, &messages,
     ).await;
 
     if let Some(ref plan) = plan {
