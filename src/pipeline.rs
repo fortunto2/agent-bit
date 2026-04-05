@@ -117,6 +117,46 @@ impl std::fmt::Debug for Ready {
     }
 }
 
+// ── Completeness Check ──────────────────────────────────────────────────
+
+/// Detect truncated instructions using the ONNX tokenizer.
+/// A word is "truncated" if the tokenizer splits it into subword pieces
+/// starting with `##` (WordPiece continuation tokens). Full words tokenize
+/// into either 1 token or tokens without `##` prefix.
+/// Short last words (≤3 chars) that produce continuation tokens = truncated.
+pub(crate) fn looks_truncated(instruction: &str, shared_clf: &SharedClassifier) -> bool {
+    let trimmed = instruction.trim();
+    if trimmed.is_empty() || trimmed.len() < 5 {
+        return true;
+    }
+    if let Some(last) = trimmed.chars().last() {
+        if matches!(last, '.' | '!' | '?' | '"' | ')' | ']') {
+            return false;
+        }
+    }
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if words.len() < 3 {
+        return false;
+    }
+    let last = words.last().unwrap();
+    if last.len() > 5 {
+        return false; // long words unlikely truncated
+    }
+    // Use tokenizer: if last word produces continuation tokens (##), it's a word fragment
+    let mut guard = shared_clf.lock().unwrap();
+    if let Some(clf) = guard.as_mut() {
+        if let Ok(encoding) = clf.tokenizer().encode(last.to_string(), false) {
+            let tokens = encoding.get_tokens();
+            // If any token starts with ## → subword split → word fragment
+            let has_continuation = tokens.iter().any(|t| t.starts_with("##"));
+            if has_continuation && last.len() <= 3 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 // ── Transitions ─────────────────────────────────────────────────────────
 
 impl New {
@@ -151,6 +191,16 @@ impl New {
             }
             fc.label
         };
+
+        // Completeness check: detect truncated instructions via tokenizer
+        if looks_truncated(&self.instruction, shared_clf) {
+            eprintln!("  [STAGE:classify] ⚠ Instruction looks truncated (tokenizer: subword split)");
+            return Err(BlockReason {
+                outcome: "OUTCOME_NONE_CLARIFICATION",
+                message: "Instruction appears truncated or incomplete".into(),
+                stage: "classify",
+            });
+        }
 
         // ML intent classification
         let intent = {
@@ -486,6 +536,53 @@ mod tests {
         };
         let err = scanned.check_security().unwrap_err();
         assert_eq!(err.outcome, "OUTCOME_DENIED_SECURITY");
+    }
+
+    // ── truncation detection (tokenizer-based) ────────────────────────
+
+    #[test]
+    fn truncated_inbox_ent() {
+        let clf = make_clf();
+        assert!(looks_truncated("Process this inbox ent", &clf));  // "ent" → ['en', '##t']
+    }
+
+    #[test]
+    fn truncated_archive_upd() {
+        let clf = make_clf();
+        assert!(looks_truncated("Archive the thread and upd", &clf));  // "upd" → ['up', '##d']
+    }
+
+    #[test]
+    fn not_truncated_normal() {
+        let clf = make_clf();
+        assert!(!looks_truncated("Process the inbox", &clf));
+    }
+
+    #[test]
+    fn not_truncated_with_period() {
+        let clf = make_clf();
+        assert!(!looks_truncated("Delete the file.", &clf));
+    }
+
+    #[test]
+    fn not_truncated_long_last_word() {
+        let clf = make_clf();
+        assert!(!looks_truncated("Send the latest report", &clf));  // "report" > 5 chars
+    }
+
+    #[test]
+    fn classify_truncated_blocks() {
+        let clf = make_clf();
+        let trial = New { instruction: "Process this inbox ent".into() };
+        let err = trial.classify(&clf).unwrap_err();
+        assert_eq!(err.outcome, "OUTCOME_NONE_CLARIFICATION");
+    }
+
+    #[test]
+    fn classify_normal_passes() {
+        let clf = make_clf();
+        let trial = New { instruction: "Process the inbox".into() };
+        assert!(trial.classify(&clf).is_ok());
     }
 
     // ── assess_security ─────────────────────────────────────────────
