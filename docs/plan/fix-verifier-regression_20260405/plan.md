@@ -71,7 +71,7 @@ t01 ("remove all captured cards") hit 20 steps — was 3-5 steps before. This is
 
 ### Tasks
 
-- [ ] Task 3.1: Run `make full` on Nemotron (parallel 3). Record results.
+- [~] Task 3.1: Run `make full` on Nemotron (parallel 3). Record results. <!-- running in background, PID 51662 -->
 - [ ] Task 3.2: Compare scores:
   - Old tasks (t01-t30): target >= 24/30 (80% baseline)
   - New tasks (t31-t40): record baseline (first clean run)
@@ -87,11 +87,11 @@ t01 ("remove all captured cards") hit 20 steps — was 3-5 steps before. This is
 ## Phase 4: Docs & Cleanup
 
 ### Tasks
-- [ ] Task 4.1: Update CLAUDE.md:
+- [x] Task 4.1: Update CLAUDE.md: <!-- sha:1926dde -->
   - Add "Verifier in warn-only mode (v0.3.1)" note
   - Update benchmark numbers
   - Document agent-only regressions (t09, t12, t25 = classification, t19/t24/t27 = action precision)
-- [ ] Task 4.2: Update `docs/roadmap.md` with verifier status and next steps
+- [x] Task 4.2: Update `docs/roadmap.md` with verifier status and next steps <!-- sha:1926dde -->
 
 ### Verification
 - [ ] CLAUDE.md accurate
