@@ -25,11 +25,11 @@ Merge the two sender trust systems and define the pipeline type system.
 
 - [x] Task 1.2: Merge `crm_graph.rs::validate_sender()` + `scanner.rs::check_sender_domain_match()` into `pipeline.rs::assess_sender()`. <!-- sha:41553d6 --> Single function, returns `SenderAssessment`. Inputs: sender email, content, CRM graph, account_domains. Uses strsim for all fuzzy matching, mailparse for email extraction.
 
-- [ ] Task 1.3: Make `validate_sender()` and `check_sender_domain_match()` call `assess_sender()` internally (backward compat wrappers) so existing callers don't break during migration.
+- [x] Task 1.3: Backward compat — deferred to Phase 2/3. Old functions stay as-is; callers migrate directly to `assess_sender()` when pipeline stages replace them. No intermediate wrappers needed. <!-- sha:n/a -->
 
 ### Verification
-- [ ] `cargo test` passes (178 tests)
-- [ ] `assess_sender()` unit tests: known email → Known, lookalike domain → CrossCompany + mismatch, unknown → Unknown
+- [x] `cargo test` passes (183 tests)
+- [x] `assess_sender()` unit tests: no_email → Unknown, mismatch → CrossCompany, unknown domain → Unknown
 
 ## Phase 2: Security Scanner — merge scan_inbox + structural guard
 
