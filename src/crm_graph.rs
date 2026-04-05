@@ -305,6 +305,24 @@ impl CrmGraph {
         if domain_known {
             SenderTrust::Plausible
         } else {
+            // Lookalike detection: sender domain stem resembles a known account name
+            // but actual domain differs → CrossCompany (social engineering)
+            let sender_stem = crate::scanner::domain_stem(sender_domain);
+            if sender_stem.len() >= 3 {
+                for (name, &idx) in &self.name_index {
+                    if !matches!(self.graph[idx], Node::Account { .. }) {
+                        continue;
+                    }
+                    let sim = strsim::normalized_levenshtein(&sender_stem, name);
+                    if sim > 0.6 {
+                        // Sender domain looks like this account — but domain is not in our records
+                        eprintln!("    🔍 Lookalike domain: stem '{}' ≈ account '{}' ({:.2}), domain {} not in CRM",
+                            sender_stem, name, sim, sender_domain);
+                        return SenderTrust::CrossCompany;
+                    }
+                }
+            }
+
             // Fuzzy name match: if sender name closely matches a known contact, upgrade to Plausible
             let sender_name = email.split('@').next().unwrap_or("")
                 .replace('.', " ").replace('_', " ").replace('-', " ");
