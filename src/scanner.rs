@@ -221,7 +221,7 @@ pub(crate) fn analyze_inbox_content(inbox_content: &str) -> String {
 }
 
 /// Extract company reference from invoice/resend requests.
-fn extract_company_ref(text: &str) -> Option<String> {
+pub(crate) fn extract_company_ref(text: &str) -> Option<String> {
     let lower = text.to_lowercase();
     // Look for "invoice for X" or "resend ... for X"
     for pattern in &["invoice for ", "invoices for ", "resend invoice"] {
