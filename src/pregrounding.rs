@@ -564,12 +564,20 @@ pub(crate) async fn run_agent(
              specific target."
         ));
     } else if instruction_intent == "intent_inbox" {
-        messages.push(Message::user(
-            "REMINDER: After capturing/distilling inbox content (creating cards, updating threads), \
-             you MUST delete the original inbox file(s) from 00_inbox/. The workflow is: \
-             read inbox → create card/update thread → DELETE inbox file → answer. \
-             Do NOT answer before deleting processed inbox files."
-        ));
+        let n = ready.inbox_files.len();
+        if n > 2 {
+            messages.push(Message::user(&format!(
+                "INBOX PROCESSING ({} messages already shown above — do NOT re-read them): \
+                 Act on each message directly from context. For each: search account → write/update → delete inbox file. \
+                 Skip messages that need no CRM action. Include account file paths in answer() refs.",
+                n
+            )));
+        } else {
+            messages.push(Message::user(
+                "REMINDER: After processing inbox content, you MUST delete the original inbox file(s). \
+                 Workflow: act (write/update) → DELETE inbox file → answer."
+            ));
+        }
     }
 
     let loop_config = LoopConfig {
