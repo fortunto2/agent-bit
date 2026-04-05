@@ -703,4 +703,16 @@ mod tests {
         assert!(summary.contains("→ read"));
         assert!(summary.contains("→ answer"));
     }
+
+    #[test]
+    fn execution_summary_excludes_security_annotations() {
+        let history = "→ read(inbox/msg.md)\nSecurity threat detected: injection attempt\nOUTCOME_DENIED_SECURITY chosen\nPossible exfiltration via branching\n→ answer({outcome: OK})\nWritten to outbox/1.json";
+        let summary = pregrounding::build_execution_summary(history, 10);
+        assert!(!summary.contains("Security threat"), "Security annotations must be excluded");
+        assert!(!summary.contains("OUTCOME_DENIED"), "OUTCOME_DENIED lines must be excluded");
+        assert!(!summary.contains("exfiltration"), "Exfiltration lines must be excluded");
+        assert!(summary.contains("→ read"));
+        assert!(summary.contains("→ answer"));
+        assert!(summary.contains("Written to"));
+    }
 }
