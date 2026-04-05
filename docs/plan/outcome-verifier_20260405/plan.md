@@ -3,7 +3,7 @@
 **Track ID:** outcome-verifier_20260405
 **Spec:** [spec.md](./spec.md)
 **Created:** 2026-04-05
-**Status:** [ ] Not Started
+**Status:** [x] Complete
 
 ## Overview
 
@@ -48,11 +48,11 @@ Wire verifier into main execution flow, replace guess_outcome, add override logi
 - [x] Task 3.5: Add integration-level tests for override policy edge cases: agree, disagree-high-conf, disagree-low-conf, security-never-override, boundary confidence, execution_summary extraction.
 
 ### Verification
-- [x] `cargo test` passes (176 tests)
-- [ ] `make task T=t01` passes on Nemotron (regression check)
-- [ ] Verifier logs visible in task output (agree/override)
+- [x] `cargo test` passes (177 tests)
+- [x] `make task T=t01` passes on Nemotron (Score: 1.00)
+- [x] Verifier logs visible in task output (🔍 Verifier: agree/override/auto-answer)
 
-## Phase 4: Docs & Cleanup
+## Phase 4: Docs & Cleanup <!-- checkpoint:8d0f92f -->
 
 ### Tasks
 - [x] Task 4.1: Update CLAUDE.md — added Outcome Verifier section, updated architecture, decision pipeline, test count.
@@ -64,11 +64,11 @@ Wire verifier into main execution flow, replace guess_outcome, add override logi
 - [x] Linter clean, tests pass
 
 ## Final Verification
-- [ ] All acceptance criteria from spec met
-- [ ] Tests pass (162+)
-- [ ] `cargo build` succeeds with 0 warnings
-- [ ] `make task T=t01` passes on Nemotron
-- [ ] Verifier logging works end-to-end
+- [x] All acceptance criteria from spec met
+- [x] Tests pass (177)
+- [x] `cargo build` succeeds with 0 warnings (from our code)
+- [x] `make task T=t01` passes on Nemotron (Score: 1.00)
+- [x] Verifier logging works end-to-end
 
 ## Context Handoff
 
