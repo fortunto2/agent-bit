@@ -195,7 +195,7 @@ fn reasoning_tool_def() -> ToolDef {
             "properties": {
                 "current_state": {
                     "type": "string",
-                    "description": "What do you know right now? Summarize file tree, inbox content, prior reads."
+                    "description": "WORKING MEMORY: Track what you've done. Format: 'PROCESSED: msg_001(email sent), msg_002(exported). TODO: msg_003, msg_004. REFS: accounts/acct_009.json'. Do NOT repeat reads — use info from prior steps."
                 },
                 "security_assessment": {
                     "type": "string",
@@ -210,7 +210,7 @@ fn reasoning_tool_def() -> ToolDef {
                 "completed_steps": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "What steps have you already completed? Brief list."
+                    "description": "What steps have you completed? Include file ops: 'wrote outbox/123.json', 'deleted inbox/msg_001.txt', 'read accounts/acct_009.json'. This prevents re-doing work."
                 },
                 "plan": {
                     "type": "array",
