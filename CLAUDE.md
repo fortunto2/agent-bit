@@ -102,7 +102,7 @@ instruction --> prescan (HTML only) --> start trial
 - **Override policy** (`apply_override_policy()`): verifier.confidence >= 0.8 AND disagrees AND proposed != DENIED_SECURITY → override
 - Never overrides `OUTCOME_DENIED_SECURITY` (trust security decisions)
 - Falls back to proposed answer on verifier LLM error
-- When no proposed answer: verifier as primary (conf >= 0.6), `guess_outcome()` as fallback
+- When no proposed answer (agent didn't call answer()): uses `guess_outcome()` heuristic directly (verifier confused by CRM content)
 - Execution summary: `build_execution_summary()` extracts last 15 relevant tool lines from history
 - Logging: `🔍 Verifier: agree|OVERRIDE|disagree (conf=X.XX) — reason`
 - Key files: `pcm.rs` (ProposedAnswer), `prompts.rs` (VERIFIER_PROMPT), `pregrounding.rs` (run_outcome_verifier), `main.rs` (verify_and_submit)
