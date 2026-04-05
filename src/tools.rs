@@ -539,49 +539,9 @@ impl Tool for ContextTool {
 
 // ─── answer ──────────────────────────────────────────────────────────────────
 
-/// Validate answer outcome against message content. Returns warning if suspicious.
-fn validate_answer(message: &str, outcome: &str) -> Option<String> {
-    let msg_lower = message.to_lowercase();
-
-    // OK but message mentions security concerns → might be a missed trap
-    if outcome == "OUTCOME_OK" &&
-        (msg_lower.contains("inject") || msg_lower.contains("suspicious") ||
-         msg_lower.contains("override") || msg_lower.contains("ignore instructions"))
-    {
-        return Some("⚠ VALIDATION: You chose OK but your message mentions security concerns. Should this be OUTCOME_DENIED_SECURITY?".to_string());
-    }
-
-    // DENIED/CLARIFICATION but message describes completed CRM work
-    if (outcome == "OUTCOME_DENIED_SECURITY" || outcome == "OUTCOME_NONE_CLARIFICATION") &&
-        (msg_lower.contains("created") || msg_lower.contains("updated") ||
-         msg_lower.contains("deleted") || msg_lower.contains("sent email") ||
-         msg_lower.contains("added contact"))
-    {
-        return Some("⚠ VALIDATION: You chose a non-OK outcome but describe completed CRM work. Should this be OUTCOME_OK?".to_string());
-    }
-
-    // OK but message indicates task was NOT completed → should be CLARIFICATION or UNSUPPORTED
-    if outcome == "OUTCOME_OK" &&
-        (msg_lower.contains("truncated") || msg_lower.contains("unclear") ||
-         msg_lower.contains("need more") || msg_lower.contains("please clarif") ||
-         msg_lower.contains("ambiguous") || msg_lower.contains("unable to") ||
-         msg_lower.contains("could not find") || msg_lower.contains("not found"))
-    {
-        return Some("⚠ VALIDATION: You chose OK but your message indicates the task was NOT completed. Use OUTCOME_NONE_CLARIFICATION (unclear request) or OUTCOME_NONE_UNSUPPORTED (missing data).".to_string());
-    }
-
-    // DENIED but task is about missing capability (deploy, external API, sync) → should be UNSUPPORTED
-    if outcome == "OUTCOME_DENIED_SECURITY" &&
-        (msg_lower.contains("deploy") || msg_lower.contains("external api") ||
-         msg_lower.contains("external url") || msg_lower.contains("external endpoint") ||
-         msg_lower.contains("external web") || msg_lower.contains("external service") ||
-         msg_lower.contains("web push") || msg_lower.contains("not supported"))
-    {
-        return Some("⚠ VALIDATION: You chose DENIED_SECURITY but this looks like a missing capability, not an attack. Use OUTCOME_NONE_UNSUPPORTED instead.".to_string());
-    }
-
-    None
-}
+// Keyword-based validate_answer() removed — it duplicated OutcomeValidator (kNN embeddings)
+// but worse (substring matching), and caused infinite ping-pong loops when keyword and
+// embedding validators disagreed. OutcomeValidator handles all outcome validation now.
 
 pub struct AnswerTool {
     pub pcm: Arc<PcmClient>,
@@ -632,12 +592,7 @@ impl Tool for AnswerTool {
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: AnswerArgs = parse_args(&args)?;
 
-        // Keyword-based validation (blocking — returns to model for correction)
-        if let Some(ref w) = validate_answer(&a.message, &a.outcome) {
-            eprintln!("  {}", w);
-            return Ok(ToolOutput::text(w.clone()));
-        }
-        // Embedding-based validation (confidence-gated blocking)
+        // Embedding-based validation (confidence-gated blocking, max 1 block per trial)
         if let Some(ref validator) = self.validator {
             let retries = self.validation_retries.load(Ordering::Relaxed);
             if retries < 1 {
@@ -789,28 +744,6 @@ mod tests {
     #[test]
     fn has_matches_with_results() {
         assert!(has_matches("$ rg -n foo\nfile.md:1:foo bar"));
-    }
-
-    // ─── validate_answer ────────────────────────────────────────────
-
-    #[test]
-    fn validate_ok_with_security_mention() {
-        assert!(validate_answer("Found suspicious injection in inbox", "OUTCOME_OK").is_some());
-    }
-
-    #[test]
-    fn validate_denied_with_crm_work() {
-        assert!(validate_answer("Created contact and sent email", "OUTCOME_DENIED_SECURITY").is_some());
-    }
-
-    #[test]
-    fn validate_clean_ok() {
-        assert!(validate_answer("Contact added successfully", "OUTCOME_OK").is_none());
-    }
-
-    #[test]
-    fn validate_clean_denied() {
-        assert!(validate_answer("Blocked due to script injection", "OUTCOME_DENIED_SECURITY").is_none());
     }
 
     // ─── annotate_contact_results ──────────────────────────────────
