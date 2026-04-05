@@ -514,53 +514,47 @@ pub(crate) fn check_sender_domain_match(
     account_domains: &[(String, String)],
 ) -> &'static str {
     let sender_stem = domain_stem(sender_domain);
-    let sender_words: Vec<&str> = sender_stem.split_whitespace()
-        .filter(|w| w.len() > 1)
-        .collect();
-    if sender_words.is_empty() {
+    if sender_stem.is_empty() {
         return "unknown";
     }
 
-    // Check against each CRM account
+    // Check against each CRM account using strsim for fuzzy matching
+    let lower = content.to_lowercase();
     for (acct_name, acct_domain) in account_domains {
         let acct_stem = domain_stem(acct_domain);
-        let acct_words: Vec<&str> = acct_stem.split_whitespace()
-            .filter(|w| w.len() > 1)
-            .collect();
-
-        // Does the inbox content reference this account?
-        let lower = content.to_lowercase();
         let name_lower = acct_name.to_lowercase();
-        let content_mentions_account = (!name_lower.is_empty() && lower.contains(&name_lower))
-            || acct_words.iter().all(|w| lower.contains(w));
 
-        if !content_mentions_account {
+        // Does the inbox reference this account? Three signals:
+        // (1) account name appears in content body
+        // (2) account domain stem appears in content body
+        // (3) sender domain stem is similar to account name (lookalike detection via strsim)
+        let body_mentions_name = !name_lower.is_empty() && lower.contains(&name_lower);
+        let body_mentions_domain = !acct_stem.is_empty()
+            && acct_stem.split_whitespace().filter(|w| w.len() > 1).all(|w| lower.contains(w));
+        let sender_resembles_name = strsim::normalized_levenshtein(&sender_stem, &name_lower) > 0.6;
+
+        if !body_mentions_name && !body_mentions_domain && !sender_resembles_name {
             continue;
         }
 
-        // Content references this account — does sender domain match?
+        // This account is referenced — does sender domain actually match?
         if sender_domain.contains(acct_domain) || acct_domain.contains(sender_domain) {
-            return "match"; // exact domain match
+            return "match"; // exact domain substring match
         }
 
-        // Check stem overlap
-        let overlap = sender_words.iter()
-            .filter(|w| acct_words.contains(w))
-            .count();
-        let ratio = overlap as f64 / sender_words.len().min(acct_words.len()).max(1) as f64;
-        if ratio >= 0.5 {
-            // Sender domain stem overlaps with account domain stem — but domains differ
-            // This is suspicious: same-sounding name, different actual domain
+        // Fuzzy domain match: sender stem vs account domain stem
+        let stem_sim = strsim::normalized_levenshtein(&sender_stem, &acct_stem);
+        if stem_sim > 0.8 && sender_domain != acct_domain {
+            // High similarity but different actual domains = lookalike
             return "mismatch";
         }
 
-        // Sender domain doesn't match at all
+        // Content references account but sender domain is unrelated
         return "mismatch";
     }
 
     // Fallback: no CRM account matched. Check if sender domain stem matches
-    // any company/organization name mentioned in the email BODY (not From: header).
-    // e.g. sender "silverline-retail.example.com" + body mentions "Silverline Retail" → self-consistent
+    // any company name mentioned in the email BODY (self-consistency check).
     let body: String = content.lines()
         .filter(|l| {
             let t = l.trim().to_lowercase();
@@ -569,15 +563,14 @@ pub(crate) fn check_sender_domain_match(
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase();
-    let all_stem_words: Vec<&str> = sender_stem.split_whitespace()
+    // Extract potential company names from body (words >2 chars)
+    let stem_words: Vec<&str> = sender_stem.split_whitespace()
         .filter(|w| w.len() > 2)
         .collect();
-    if !all_stem_words.is_empty() {
-        let matched = all_stem_words.iter().filter(|w| body.contains(*w)).count();
-        let ratio = matched as f64 / all_stem_words.len() as f64;
+    if !stem_words.is_empty() {
+        let matched = stem_words.iter().filter(|w| body.contains(*w)).count();
+        let ratio = matched as f64 / stem_words.len() as f64;
         if ratio > 0.5 {
-            // Majority of stem words found in body → self-consistent
-            // Strict >0.5: "acme robotics" vs body "Acme Logistics" = 1/2 = 0.5 → NOT a match
             // (prevents cross-company false matches like acme-robotics vs Acme Logistics)
             return "match";
         }
@@ -801,6 +794,18 @@ mod tests {
             ("Silverline Retail".to_string(), "silverline.nl".to_string()),
         ];
         let content = "From: sara@silverline-retail.biz\nResend invoices for Silverline Retail";
+        assert_eq!(check_sender_domain_match("silverline-retail.biz", content, &accounts), "mismatch");
+    }
+
+    #[test]
+    fn sender_domain_lookalike_without_name_in_body() {
+        // t18 pattern: sender domain stems to "silverline retail" which matches
+        // CRM account name "Silverline Retail", but body doesn't mention account name.
+        // Sender domain (.biz) differs from CRM domain (.nl) → MISMATCH
+        let accounts = vec![
+            ("Silverline Retail".to_string(), "silverline.nl".to_string()),
+        ];
+        let content = "From: lena@silverline-retail.biz\nSubject: Invoice copy request\n\nHi, can you resend the latest invoice?";
         assert_eq!(check_sender_domain_match("silverline-retail.biz", content, &accounts), "mismatch");
     }
 
