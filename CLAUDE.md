@@ -33,6 +33,20 @@ src/crm_graph.rs     -- petgraph CRM knowledge graph (contacts, accounts, sender
 
 Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep).
 
+## Key Crates — USE THESE, don't reinvent
+
+| Crate | What | Where used | Use for |
+|-------|------|-----------|---------|
+| `strsim` | Levenshtein, Jaro-Winkler, normalized similarity | crm_graph (contact fuzzy match), scanner (domain lookalike) | **Any name/string comparison** — never use manual word overlap or `contains()` for fuzzy matching |
+| `mailparse` | RFC 5322 email parsing (From/To headers, display names) | scanner (extract_sender_domain), pregrounding (contact names) | **Any email header parsing** — never regex From: headers manually |
+| `ort` + `tokenizers` | ONNX inference + HuggingFace tokenizer | classifier.rs (bi-encoder, kNN) | ML classification, embeddings |
+| `petgraph` | Directed graph | crm_graph.rs (contacts↔accounts knowledge graph) | CRM relationship queries |
+| `ammonia` | HTML sanitization | scanner.rs (prescan) | Safe HTML handling |
+| `regex` | Pattern matching | tools.rs (fuzzy search), scanner.rs | Structured pattern extraction |
+| `schemars` | JSON Schema from Rust structs | tools.rs (tool parameter schemas) | Tool argument validation |
+
+**Anti-pattern: do NOT use `contains()` / `split_whitespace()` / manual word overlap for string similarity. Use `strsim::normalized_levenshtein()` instead.**
+
 ## Decision Pipeline
 
 ```
