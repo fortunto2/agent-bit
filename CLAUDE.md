@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 177 unit tests
+cargo test                                        # 178 unit tests
 cargo run -- --audit-store                        # audit adaptive store
 ```
 
@@ -99,12 +99,11 @@ instruction --> prescan (HTML only) --> start trial
 - After execution loop, `verify_and_submit()` calls `run_outcome_verifier()` — single LLM call with focused 4-way classification
 - Verifier prompt (`VERIFIER_PROMPT` in prompts.rs) is much simpler than SYSTEM_PROMPT_EXPLICIT — just validates the outcome code
 - Uses function calling schema (`verify_outcome`) returning `{outcome, reason, confidence}`
-- **Override policy** (`apply_override_policy()`): verifier.confidence >= 0.8 AND disagrees AND proposed != DENIED_SECURITY → override
-- Never overrides `OUTCOME_DENIED_SECURITY` (trust security decisions)
+- **Override policy** (`apply_override_policy()`): **warn-only mode (v0.3.1)** — verifier logs disagreements but never overrides. 6:1 wrong:correct ratio in v0.3.0 benchmark. Re-enable when accuracy > 80%.
 - Falls back to proposed answer on verifier LLM error
 - When no proposed answer (agent didn't call answer()): uses `guess_outcome()` heuristic directly (verifier confused by CRM content)
-- Execution summary: `build_execution_summary()` extracts last 15 relevant tool lines from history
-- Logging: `🔍 Verifier: agree|OVERRIDE|disagree (conf=X.XX) — reason`
+- Execution summary: `build_execution_summary()` extracts last 15 relevant tool lines from history, **filters out** security annotations (Security threat, OUTCOME_DENIED, injection, exfiltration) to prevent verifier meta-injection
+- Logging: `🔍 Verifier: agree|disagree (conf=X.XX) — reason`
 - Key files: `pcm.rs` (ProposedAnswer), `prompts.rs` (VERIFIER_PROMPT), `pregrounding.rs` (run_outcome_verifier), `main.rs` (verify_and_submit)
 
 ### Single Prompt Mode
@@ -139,7 +138,7 @@ instruction --> prescan (HTML only) --> start trial
 - Prevents capture-instead-of-delete failure mode on delete-only tasks (t08)
 - task_type description: "delete=remove a specific file ONLY, use 'edit' if task also needs writing"
 - Delete-intent pre-grounding hint injected for instructions containing "delete"/"remove" (but not "capture"/"distill"/"write"/"create")
-- **Structural task_type forcing**: `detect_forced_task_type()` overrides LLM task_type when instruction is unambiguously delete-only (contains delete/remove, NOT captur/distill/write/creat/updat/process). Logged as `🔒 Task-type override`. Makes delete routing deterministic regardless of LLM classification.
+- **Structural task_type forcing**: `detect_forced_task_type()` overrides LLM task_type when instruction is unambiguously delete-only (contains delete/remove, NOT capturing/capture-verb/distill/write/creat/updat/process). "captured" (adjective) does NOT trigger write-intent exclusion — only active verb forms "capturing"/"capture" do. Logged as `🔒 Task-type override`. Makes delete routing deterministic regardless of LLM classification.
 
 ### Capture/Distill Workflow (file ops safety net)
 - Router "search" task_type: step 0 read-only, step 1+ full toolkit (mirrors "analyze")

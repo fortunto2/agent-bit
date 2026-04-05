@@ -61,6 +61,7 @@ All 6 remaining fails pass on some runs but not consistently.
 - [x] Blocking OutcomeValidator (calibrated: 50 seeds, threshold 0.80 validated, store audited)
 - [x] Prompt diet experiment: SYSTEM_PROMPT_EXPLICIT is NOT bloat — all 44 lines load-bearing for Nemotron. PLANNING_PROMPT safely slimmed by 2 patterns.
 - [x] Outcome Verifier: post-execution LLM call to verify outcome classification before submission
+- [x] Verifier regression fix (2026-04-05): warn-only mode, meta-injection fix, captured-adjective fix
 - [ ] NLI model for zero-shot classification (rust-bert)
 - [ ] Gemma 4 26B testing (CF access pending)
 
@@ -77,3 +78,4 @@ All 6 remaining fails pass on some runs but not consistently.
 - [x] Write-nudge counter fix + structural task_type forcing (harden-t03-t08 track)
 - [x] Prompt diet (2026-04-05): PLANNING_PROMPT slimmed, SYSTEM_PROMPT_EXPLICIT reverted (all content load-bearing)
 - [x] Outcome Verifier (2026-04-05): deferred answer, post-execution verifier LLM call, override policy (conf>=0.8, never override DENIED_SECURITY)
+- [x] Verifier regression fix (2026-04-05): warn-only override (6:1 wrong ratio), meta-injection prompt fix, execution summary security filtering, captured-adjective task_type fix (t01: 15→4 steps)
