@@ -28,6 +28,7 @@ mod config;
 #[allow(dead_code)]
 mod crm_graph;
 mod pcm;
+mod pipeline;
 mod pregrounding;
 mod prompts;
 mod scanner;
