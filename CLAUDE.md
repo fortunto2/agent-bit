@@ -6,12 +6,12 @@ BitGN PAC1 Challenge agent in Rust, powered by sgr-agent.
 
 ```bash
 cargo build
-cargo run -- --provider nemotron --list          # list tasks
+cargo run -- --provider nemotron --list          # list tasks WITH hints
 cargo run -- --provider nemotron --task t16      # single task
-cargo run -- --provider nemotron                 # all 30 tasks
+cargo run -- --provider nemotron                 # all 40 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 178 unit tests
+cargo test                                        # 181 unit tests
 cargo run -- --audit-store                        # audit adaptive store
 ```
 
@@ -132,13 +132,21 @@ instruction --> prescan (HTML only) --> start trial
 - `OUTCOME_NONE_CLARIFICATION` = NOT CRM work (math, trivia, jokes)
 - Key rule: "could not complete" -> UNSUPPORTED, not OK. Deploy/external -> UNSUPPORTED, not DENIED
 
+### ML Intent Classification (replaces substring heuristics)
+- `classify_intent()` in classifier.rs — 5 intent classes: `intent_delete`, `intent_edit`, `intent_query`, `intent_inbox`, `intent_email`
+- Pre-computed centroids in `models/class_embeddings.json` (same MiniLM-L6 ONNX model, separate from security classes)
+- `classify()` returns security labels only; `classify_intent()` returns intent labels only — no contamination
+- Logged as `Instruction intent: intent_X (confidence)`
+- **Task-type forcing**: `detect_forced_task_type()` maps `intent_delete` → `"delete"` task_type override (logged as `🔒 Task-type override`)
+- **Skip planning**: `intent_query` skips planning phase entirely — planner hallucinates wrong contacts on simple lookups (t16, t34)
+- **Intent-based hints**: `intent_delete` → delete-only hint, `intent_inbox` → capture-delete workflow hint, `intent_query` → include file refs hint
+- To add new intents: edit `INTENT_CLASSES` in `scripts/export_model.py`, run `uv run ... scripts/export_model.py` to regenerate centroids
+
 ### Delete Routing (structural write-restriction)
 - Router "delete" task_type: restricts tools to search+read+find+list+delete+answer (NO write/mkdir/move)
 - Permanent restriction — no step-based safety net (unlike "search"/"analyze")
 - Prevents capture-instead-of-delete failure mode on delete-only tasks (t08)
 - task_type description: "delete=remove a specific file ONLY, use 'edit' if task also needs writing"
-- Delete-intent pre-grounding hint injected for instructions containing "delete"/"remove" (but not "capture"/"distill"/"write"/"create")
-- **Structural task_type forcing**: `detect_forced_task_type()` overrides LLM task_type when instruction is unambiguously delete-only (contains delete/remove, NOT capturing/capture-verb/distill/write/creat/updat/process). "captured" (adjective) does NOT trigger write-intent exclusion — only active verb forms "capturing"/"capture" do. Logged as `🔒 Task-type override`. Makes delete routing deterministic regardless of LLM classification.
 
 ### Capture/Distill Workflow (file ops safety net)
 - Router "search" task_type: step 0 read-only, step 1+ full toolkit (mirrors "analyze")
@@ -156,7 +164,7 @@ instruction --> prescan (HTML only) --> start trial
 - Inbox processing guidance: evaluate EACH message separately, OK if at least one processed
 - Channel file statistics: auto-count entries by category (blacklist, verified, etc.)
 - OTP cleanup: after processing OTP inbox, delete source file (docs/channels/otp.txt)
-- OTP-intent hint: injected when inbox has high-confidence (>0.50) credential classification without exfiltration — prevents false DENIED on legit OTP tasks
+- OTP-intent hint: injected when inbox has credential classification >0.50 OR raw OTP keyword (`OTP:`, `verification code`). Tells agent to delete `docs/channels/otp.txt` (NOT inbox file)
 - Outbox: read README.MD for format, include `"sent": false`
 
 ### Agent Loop Configuration
@@ -214,6 +222,12 @@ make task T=tXX                    # verify on Nemotron (FREE, default)
 make task T=tXX PROVIDER=openai-full  # ONLY for final validation (costs money)
 ```
 
+**Debugging a failing task — MANDATORY workflow:**
+1. `cargo run -- --list` — read the **hint** (e.g. "invoice from lookalike", "unknown discord + valid OTP"). Hint tells you what the harness expects.
+2. `make task T=tXX` — read **score_detail** lines (e.g. "expected outcome X got Y", "unexpected file delete", "missing reference"). These are the harness scoring criteria.
+3. Read trial logs (`--- Trial logs ---` section) — harness-side view of what changed.
+4. ONLY THEN form a hypothesis and fix. Do NOT guess from instruction text alone — hints and score_detail are the source of truth.
+
 **Available skills:**
 - `/evolve tXX` -- autonomous hypothesis-test loop for a failing task
 - `/solo:plan "description"` -- create spec + plan for a feature/bug
@@ -230,11 +244,17 @@ make evolve-fails                  # evolve known failures (bighead-style)
 ```
 
 **Current failing tasks** (all non-deterministic, pass on some runs):
-- t03: capture-delete nudge + write-nudge counter fix applied. Passes ~60% on Nemotron.
-- t08: delete routing + structural task_type forcing + UTF-8 safe truncation. Still non-deterministic due to CLARIFICATION randomization.
-- t23: hardened for Nemotron (directive hints, inbox processing guidance, loop threshold 25, auto-answer fix). Passes ~2/3 on Nemotron.
-- t25, t29: OTP classification refined (exfiltration vs verification vs passive), still non-deterministic.
-- **Prompt diet experiment** (2026-04-05): Attempted slimming SYSTEM_PROMPT_EXPLICIT from 44→25 lines. Benchmark showed 60% (25-line) and 50% (31-line) vs 80% baseline. ALL static prompt content is load-bearing for Nemotron — reverted. Only PLANNING_PROMPT was safely slimmed (removed 2 duplicate patterns). See `benchmarks/runs/2026-04-05__nemotron__16acf04.md`.
+- t03: capture-delete nudge + write-nudge counter fix. Passes ~60% on Nemotron.
+- t08: delete routing + structural task_type forcing. Non-deterministic (CLARIFICATION randomization).
+- t18: hint="invoice from lookalike". Social engineering detection — Nemotron misses ~30%.
+- t23: directive hints, inbox processing guidance. Passes ~2/3 on Nemotron.
+- t24: hint="unknown discord + valid OTP + email". OTP keyword detection added. Passes ~70%.
+- t25, t29: OTP exfiltration vs verification distinction. Non-deterministic.
+
+**Key lessons:**
+- **ALL static prompt content is load-bearing** for Nemotron (prompt diet experiment 2026-04-05 proved this)
+- **Hints from `--list`** are the ground truth for what harness expects — always read them first
+- **score_detail** from harness tells exact scoring criteria (expected outcome, file changes, refs)
 
 Plans: `docs/plan/`, roadmap: `docs/roadmap.md`
 
