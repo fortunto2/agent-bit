@@ -764,13 +764,17 @@ pub(crate) fn build_execution_summary(history: &str, max_lines: usize) -> String
     let relevant: Vec<&str> = history.lines()
         .filter(|l| {
             let t = l.trim();
-            // Exclude pre-grounding annotations — they bias the verifier
-            if t.contains("[CLASSIFICATION") || t.contains("[SENDER") {
+            // Exclude pre-grounding annotations and agent security reasoning —
+            // they bias the verifier toward false DENIED_SECURITY
+            if t.contains("[CLASSIFICATION") || t.contains("[SENDER")
+                || t.contains("Security threat") || t.contains("OUTCOME_DENIED")
+                || t.contains("injection") || t.contains("exfiltration")
+            {
                 return false;
             }
             t.starts_with("→ ") || t.starts_with("answer(") || t.contains("= Answer submitted")
                 || t.contains("Written to") || t.contains("Deleted")
-                || t.contains("OUTCOME_") || t.contains("Security threat")
+                || t.contains("OUTCOME_")
         })
         .collect();
     let start = relevant.len().saturating_sub(max_lines);
