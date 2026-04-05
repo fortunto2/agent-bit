@@ -78,27 +78,14 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
     }
 }
 
-/// Structural task-type forcing: detect delete-only instructions regardless of LLM classification.
-/// Returns `Some("delete")` when instruction clearly indicates delete-only intent.
-fn detect_forced_task_type(instruction: &str) -> Option<&'static str> {
-    let lower = instruction.to_lowercase();
-    let has_delete = lower.contains("delete") || lower.contains("remove");
-    if !has_delete {
-        return None;
+/// Structural task-type forcing from ML intent classification.
+/// Maps intent_* labels to task_type when classification is unambiguous.
+/// Called with the result of `classify_intent()` from pregrounding.
+pub fn detect_forced_task_type(intent_label: &str) -> Option<&'static str> {
+    match intent_label {
+        "intent_delete" => Some("delete"),
+        _ => None,
     }
-    // Exclusion: if instruction also implies file creation/editing, it's not delete-only
-    // "captured" is adjective (describes target), not write intent; "capturing"/"capture" are verbs
-    let has_write_intent = lower.contains("capturing")
-        || (lower.contains("capture") && !lower.contains("captured"))
-        || lower.contains("distill")
-        || lower.contains("write")
-        || lower.contains("creat")  // create, creating, created
-        || lower.contains("updat")  // update, updating, updated
-        || lower.contains("process");
-    if has_write_intent {
-        return None;
-    }
-    Some("delete")
 }
 
 /// Format a ledger entry with UTF-8 safe truncation to 80 bytes.
@@ -141,6 +128,8 @@ pub struct Pac1Agent<C: LlmClient> {
     confidence_reflections: AtomicU32,
     /// Whether the capture-delete nudge has been injected (one-time)
     capture_delete_nudge_sent: AtomicU32,
+    /// ML-classified instruction intent (e.g. "intent_delete"), used for task-type forcing
+    forced_intent: Mutex<String>,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -158,7 +147,13 @@ impl<C: LlmClient> Pac1Agent<C> {
             write_nudge_sent: AtomicU32::new(0),
             confidence_reflections: AtomicU32::new(0),
             capture_delete_nudge_sent: AtomicU32::new(0),
+            forced_intent: Mutex::new(String::new()),
         }
+    }
+
+    /// Set the ML-classified instruction intent for task-type forcing.
+    pub fn set_intent(&self, intent: &str) {
+        *self.forced_intent.lock().unwrap() = intent.to_string();
     }
 
     /// Record a tool call in the action ledger.
@@ -489,16 +484,12 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
                 (task_type, security, situation, plan, done)
             };
 
-        // ── Structural task_type override ────────────────────────────────
-        // Extract instruction from original messages and force task_type if pattern is unambiguous
+        // ── Structural task_type override (ML intent classification) ────
         let task_type = {
-            let instruction = messages.iter()
-                .find(|m| m.role == Role::User)
-                .map(|m| m.content.as_str())
-                .unwrap_or("");
-            if let Some(forced) = detect_forced_task_type(instruction) {
+            let intent = self.forced_intent.lock().unwrap();
+            if let Some(forced) = detect_forced_task_type(&intent) {
                 if task_type != forced {
-                    eprintln!("  🔒 Task-type override: {} → {} (structural)", task_type, forced);
+                    eprintln!("  🔒 Task-type override: {} → {} (intent: {})", task_type, forced, intent);
                     forced.to_string()
                 } else {
                     task_type
@@ -932,55 +923,31 @@ mod tests {
         assert!(!should_reflect, "blocked + high confidence: security guard skips reflection");
     }
 
-    // ── detect_forced_task_type tests ────────────────────────────────
+    // ── detect_forced_task_type tests (ML intent label → task_type) ───
 
     #[test]
-    fn forced_task_type_delete_card() {
-        assert_eq!(detect_forced_task_type("delete the card about quarterly review"), Some("delete"));
+    fn forced_task_type_intent_delete() {
+        assert_eq!(detect_forced_task_type("intent_delete"), Some("delete"));
     }
 
     #[test]
-    fn forced_task_type_remove_contact() {
-        assert_eq!(detect_forced_task_type("remove that contact file"), Some("delete"));
+    fn forced_task_type_intent_edit_not_forced() {
+        assert_eq!(detect_forced_task_type("intent_edit"), None);
     }
 
     #[test]
-    fn forced_task_type_delete_with_capture_excluded() {
-        // Contains "capturing" → not delete-only
-        assert_eq!(detect_forced_task_type("delete the inbox message after capturing its content"), None);
+    fn forced_task_type_intent_query_not_forced() {
+        assert_eq!(detect_forced_task_type("intent_query"), None);
     }
 
     #[test]
-    fn forced_task_type_write_instruction() {
-        assert_eq!(detect_forced_task_type("write a new email"), None);
+    fn forced_task_type_intent_inbox_not_forced() {
+        assert_eq!(detect_forced_task_type("intent_inbox"), None);
     }
 
     #[test]
-    fn forced_task_type_process_and_remove() {
-        // "process" implies file ops beyond delete
-        assert_eq!(detect_forced_task_type("process inbox and remove spam"), None);
-    }
-
-    #[test]
-    fn forced_task_type_no_delete_keyword() {
-        assert_eq!(detect_forced_task_type("read all contacts and summarize"), None);
-    }
-
-    #[test]
-    fn forced_task_type_delete_with_update_excluded() {
-        assert_eq!(detect_forced_task_type("delete old data and update the log"), None);
-    }
-
-    #[test]
-    fn forced_task_type_remove_captured_cards() {
-        // "captured" is adjective (describes target), not active write intent
-        assert_eq!(detect_forced_task_type("remove all captured cards"), Some("delete"));
-    }
-
-    #[test]
-    fn forced_task_type_capture_verb_excluded() {
-        // "capture" as imperative verb implies write intent
-        assert_eq!(detect_forced_task_type("capture the data and delete old files"), None);
+    fn forced_task_type_empty_not_forced() {
+        assert_eq!(detect_forced_task_type(""), None);
     }
 
     #[test]

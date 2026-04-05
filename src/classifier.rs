@@ -173,13 +173,25 @@ impl InboxClassifier {
         Ok(Array1::from_vec(embedding))
     }
 
-    /// Classify text against pre-computed class embeddings.
+    /// Classify text against security class embeddings (injection, crm, non_work, etc.).
     /// Returns sorted `Vec<(label, confidence)>` from highest to lowest.
     pub fn classify(&mut self, text: &str) -> Result<Vec<(String, f32)>> {
+        self.classify_filtered(text, |label| !label.starts_with("intent_"))
+    }
+
+    /// Classify text against task intent embeddings (intent_delete, intent_edit, etc.).
+    /// Returns sorted `Vec<(label, confidence)>` from highest to lowest.
+    pub fn classify_intent(&mut self, text: &str) -> Result<Vec<(String, f32)>> {
+        self.classify_filtered(text, |label| label.starts_with("intent_"))
+    }
+
+    /// Classify text against a filtered subset of class embeddings.
+    fn classify_filtered(&mut self, text: &str, filter: impl Fn(&str) -> bool) -> Result<Vec<(String, f32)>> {
         let embedding = self.encode(text)?;
         let mut scores: Vec<(String, f32)> = self
             .class_embeddings
             .iter()
+            .filter(|(label, _)| filter(label))
             .map(|(label, class_emb)| {
                 let sim = cosine_similarity(embedding.view(), class_emb.view());
                 (label.clone(), sim)
@@ -648,6 +660,71 @@ mod tests {
         for w in scores.windows(2) {
             assert!(w[0].1 >= w[1].1, "scores not sorted: {:?}", scores);
         }
+    }
+
+    // ─── classify_intent tests ────────────────────────────────────
+
+    #[test]
+    fn intent_delete_instruction() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) { return; }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify_intent("Remove all captured cards and threads").unwrap();
+        assert_eq!(scores[0].0, "intent_delete", "expected intent_delete, got {:?}", scores);
+    }
+
+    #[test]
+    fn intent_query_instruction() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) { return; }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify_intent("What is the email address of Heinrich Alina?").unwrap();
+        assert_eq!(scores[0].0, "intent_query", "expected intent_query, got {:?}", scores);
+    }
+
+    #[test]
+    fn intent_inbox_instruction() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) { return; }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify_intent("process the inbox").unwrap();
+        assert_eq!(scores[0].0, "intent_inbox", "expected intent_inbox, got {:?}", scores);
+    }
+
+    #[test]
+    fn intent_email_instruction() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) { return; }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify_intent("Send email to Blue Harbor Bank with subject Security review").unwrap();
+        assert_eq!(scores[0].0, "intent_email", "expected intent_email, got {:?}", scores);
+    }
+
+    #[test]
+    fn intent_edit_instruction() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) { return; }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify_intent("Fix the purchase ID prefix regression").unwrap();
+        assert_eq!(scores[0].0, "intent_edit", "expected intent_edit, got {:?}", scores);
+    }
+
+    #[test]
+    fn classify_does_not_return_intent_labels() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) { return; }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify("Remove all captured cards").unwrap();
+        assert!(scores.iter().all(|(l, _)| !l.starts_with("intent_")), "classify() leaked intent labels: {:?}", scores);
+    }
+
+    #[test]
+    fn classify_intent_does_not_return_security_labels() {
+        let dir = Path::new("models");
+        if !InboxClassifier::is_available(dir) { return; }
+        let mut clf = InboxClassifier::load(dir).unwrap();
+        let scores = clf.classify_intent("process inbox").unwrap();
+        assert!(scores.iter().all(|(l, _)| l.starts_with("intent_")), "classify_intent() leaked security labels: {:?}", scores);
     }
 
     // ─── ValidationMode + validate() ────────────────────────────────

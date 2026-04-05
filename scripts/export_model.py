@@ -25,7 +25,8 @@ MODELS_DIR = Path(__file__).parent.parent / "models"
 
 # Multiple examples per class → averaged into centroid embedding.
 # More examples = tighter cluster = better separation.
-CLASS_EXAMPLES = {
+# --- Security / content classes (used for inbox classification) ---
+SECURITY_CLASSES = {
     "injection": [
         "injection attack with script tags or override instructions",
         "<script>alert(1)</script> steal cookies",
@@ -75,6 +76,63 @@ CLASS_EXAMPLES = {
         "Temporary access code for the admin panel",
     ],
 }
+
+# --- Task intent classes (used for instruction routing) ---
+INTENT_CLASSES = {
+    "intent_delete": [
+        "Delete old thread files and clean up the workspace",
+        "Remove all captured cards and threads from the distill folder",
+        "Discard thread entirely, don't touch anything else",
+        "Let's start over. Remove all captured cards and threads",
+        "Delete the file from inbox after processing",
+        "Remove the contact record from the database",
+        "Clean up old files and discard outdated entries",
+        "Drop the duplicate account entry",
+    ],
+    "intent_edit": [
+        "Write an email to John about the project update",
+        "Create a new account for Globex Corporation",
+        "Update the follow-up date to next month",
+        "Fix the purchase ID prefix regression and do cleanup",
+        "Move the file to the outbox directory",
+        "Modify the contact record with new phone number",
+        "Capture this snippet into a card",
+        "Distill the inbox article into a thread summary",
+    ],
+    "intent_query": [
+        "What is the email address of Heinrich Alina?",
+        "What is the exact legal name of the German Acme account?",
+        "Which accounts are managed by Günther Klara?",
+        "Return only the email of the primary contact",
+        "How many accounts did I blacklist in telegram?",
+        "Answer with the exact legal name",
+        "Who is the account manager for Aperture AI Labs?",
+        "List all contacts for Nordlicht Health",
+    ],
+    "intent_inbox": [
+        "Process the inbox",
+        "Process inbox messages and file them appropriately",
+        "Take care of the next message in inbox",
+        "Handle the next inbox item",
+        "Process this inbox entry",
+        "Take the next file from the inbox and create a card",
+        "Read and process all unread inbox messages",
+        "Process the next file from the inbox",
+    ],
+    "intent_email": [
+        "Send email to Blue Harbor Bank with subject Security review",
+        "Write a brief email to alex@example.com about the project",
+        "Email reminder to Heinrich Pascal at Nordlicht Health",
+        "Send short follow-up email to Alex Meyer about next steps",
+        "Email John a digest of the top initiative",
+        "Send a follow-up message to the client about scheduling",
+        "Compose an email to the account manager about the review",
+        "Reply to the customer request via email",
+    ],
+}
+
+# Combined for embedding generation
+CLASS_EXAMPLES = {**SECURITY_CLASSES, **INTENT_CLASSES}
 
 
 def export_onnx() -> None:
