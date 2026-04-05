@@ -114,7 +114,11 @@ async fn main() -> Result<()> {
 
     if cli.list {
         for t in &bm.tasks {
-            println!("{}: {}", t.task_id, t.preview);
+            if t.hint.is_empty() {
+                println!("{}: {}", t.task_id, t.preview);
+            } else {
+                println!("{}: {} | hint: {}", t.task_id, t.preview, t.hint);
+            }
         }
         return Ok(());
     }
@@ -238,7 +242,7 @@ async fn main() -> Result<()> {
                             if !trial_detail.logs.is_empty() {
                                 eprintln!("  --- Trial logs ---");
                                 for log in &trial_detail.logs {
-                                    eprintln!("  [{}] {}: {}", log.time, log.kind, &log.text[..log.text.len().min(200)]);
+                                    eprintln!("  [{}] {}: {}", log.time, log.kind, &log.text[..log.text.len().min(500)]);
                                 }
                             }
                         }
