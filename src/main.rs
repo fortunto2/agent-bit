@@ -17,7 +17,6 @@
 )]
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use anyhow::Result;
 use clap::Parser;
@@ -215,7 +214,10 @@ async fn main() -> Result<()> {
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature,
                 &clf, ov.clone(),
             ).await;
-            auto_submit_if_needed(&pcm, &last_msg, &history).await;
+            verify_and_submit(
+                &pcm, &trial.instruction, &last_msg, &history,
+                &model, base_url.as_deref(), &llm_api_key, &extra_headers, temperature,
+            ).await;
 
             let score = match h.end_trial(&trial.trial_id).await {
                 Ok(result) => {
@@ -306,7 +308,10 @@ async fn run_leaderboard(
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
         let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, outcome_validator.clone()).await;
-        auto_submit_if_needed(&pcm, &last_msg, &history).await;
+        verify_and_submit(
+            &pcm, &trial.instruction, &last_msg, &history,
+            model, base_url, llm_api_key, extra_headers, temperature,
+        ).await;
 
         let result = harness.end_trial(&trial.trial_id).await?;
         if let Some(score) = result.score {
@@ -356,13 +361,103 @@ async fn run_trial(
     }
 }
 
-async fn auto_submit_if_needed(pcm: &Arc<pcm::PcmClient>, last_msg: &str, history: &str) {
-    if !pcm.answer_submitted.load(Ordering::SeqCst) {
-        let text = if last_msg.is_empty() { "Unable to determine answer" } else { last_msg };
-        let outcome = guess_outcome(text, history);
-        eprintln!("  ⚠ Auto-answer [{}]: {}", outcome, &text[..text.len().min(100)]);
-        let _ = pcm.answer(text, outcome, &[]).await;
+/// Post-execution verification and submission.
+/// 1. If agent proposed an answer → verify with LLM → apply override policy → submit
+/// 2. If no proposed answer → use verifier as primary, guess_outcome as fallback → submit
+#[allow(clippy::too_many_arguments)]
+async fn verify_and_submit(
+    pcm: &Arc<pcm::PcmClient>,
+    instruction: &str,
+    last_msg: &str,
+    history: &str,
+    model: &str,
+    base_url: Option<&str>,
+    api_key: &str,
+    extra_headers: &[(String, String)],
+    temperature: f32,
+) {
+    let execution_summary = pregrounding::build_execution_summary(history, 15);
+    let proposed = pcm.get_proposed_answer();
+
+    match proposed {
+        Some(ref p) => {
+            // Agent proposed an answer — verify it
+            let verified = pregrounding::run_outcome_verifier(
+                model, base_url, api_key, extra_headers, temperature,
+                instruction, &execution_summary, &p.outcome, &p.message,
+            ).await;
+
+            match verified {
+                Some(ref v) => {
+                    match apply_override_policy(&p.outcome, &v.outcome, v.confidence) {
+                        Some(ref override_outcome) => {
+                            eprintln!("  🔍 Verifier: OVERRIDE {} → {} (conf={:.2}) — {}",
+                                p.outcome, override_outcome, v.confidence, v.reason);
+                            let _ = pcm.submit_proposed(Some(override_outcome)).await;
+                        }
+                        None if v.outcome == p.outcome => {
+                            eprintln!("  🔍 Verifier: agree (conf={:.2}) — {}", v.confidence, v.reason);
+                            let _ = pcm.submit_proposed(None).await;
+                        }
+                        None => {
+                            let reason = if p.outcome == "OUTCOME_DENIED_SECURITY" {
+                                "security never overridden"
+                            } else {
+                                "low confidence"
+                            };
+                            eprintln!("  🔍 Verifier: disagree but keep proposed ({}) — {} (conf={:.2})",
+                                reason, v.reason, v.confidence);
+                            let _ = pcm.submit_proposed(None).await;
+                        }
+                    }
+                }
+                None => {
+                    eprintln!("  🔍 Verifier: fallback to proposed (LLM error)");
+                    let _ = pcm.submit_proposed(None).await;
+                }
+            }
+        }
+        None => {
+            // No proposed answer — use verifier as primary, guess_outcome as fallback
+            let text = if last_msg.is_empty() { "Unable to determine answer" } else { last_msg };
+            let verified = pregrounding::run_outcome_verifier(
+                model, base_url, api_key, extra_headers, temperature,
+                instruction, &execution_summary, "UNKNOWN", text,
+            ).await;
+
+            let outcome = match verified {
+                Some(ref v) if v.confidence >= 0.6 => {
+                    eprintln!("  🔍 Verifier: auto-answer {} (conf={:.2}) — {}", v.outcome, v.confidence, v.reason);
+                    v.outcome.as_str()
+                }
+                _ => {
+                    let guessed = guess_outcome(text, history);
+                    eprintln!("  ⚠ Auto-answer [{}] (verifier unavailable): {}", guessed, &text[..text.len().min(100)]);
+                    guessed
+                }
+            };
+            let _ = pcm.answer(text, outcome, &[]).await;
+        }
     }
+}
+
+/// Override policy: decides whether to use verifier outcome or keep proposed.
+/// Returns Some(override_outcome) if verifier should override, None to keep proposed.
+fn apply_override_policy(
+    proposed_outcome: &str,
+    verifier_outcome: &str,
+    verifier_confidence: f64,
+) -> Option<String> {
+    if proposed_outcome == verifier_outcome {
+        return None; // agree
+    }
+    if proposed_outcome == "OUTCOME_DENIED_SECURITY" {
+        return None; // never override security
+    }
+    if verifier_confidence >= 0.8 {
+        return Some(verifier_outcome.to_string()); // override
+    }
+    None // low confidence, keep proposed
 }
 
 /// Guess outcome from last message + full message history.
@@ -561,4 +656,70 @@ mod tests {
         assert_eq!(outcome, "OUTCOME_OK");
     }
 
+    // ─── override policy ────────────────────────────────────────────────
+
+    #[test]
+    fn override_agree() {
+        let result = apply_override_policy("OUTCOME_OK", "OUTCOME_OK", 0.95);
+        assert!(result.is_none(), "Same outcome = no override");
+    }
+
+    #[test]
+    fn override_disagree_high_confidence() {
+        let result = apply_override_policy(
+            "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.9,
+        );
+        assert_eq!(result.unwrap(), "OUTCOME_NONE_UNSUPPORTED");
+    }
+
+    #[test]
+    fn override_disagree_low_confidence() {
+        let result = apply_override_policy(
+            "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.6,
+        );
+        assert!(result.is_none(), "Low confidence = no override");
+    }
+
+    #[test]
+    fn override_never_overrides_security() {
+        let result = apply_override_policy(
+            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99,
+        );
+        assert!(result.is_none(), "DENIED_SECURITY is never overridden");
+    }
+
+    #[test]
+    fn override_boundary_confidence() {
+        // Exactly 0.8 should override
+        let result = apply_override_policy(
+            "OUTCOME_NONE_CLARIFICATION", "OUTCOME_OK", 0.8,
+        );
+        assert_eq!(result.unwrap(), "OUTCOME_OK");
+
+        // Just below 0.8 should not override
+        let result = apply_override_policy(
+            "OUTCOME_NONE_CLARIFICATION", "OUTCOME_OK", 0.79,
+        );
+        assert!(result.is_none());
+    }
+
+    // ─── build_execution_summary ────────────────────────────────────────
+
+    #[test]
+    fn execution_summary_extracts_tool_lines() {
+        let history = "some random line\n→ read(contacts/john.md)\nother stuff\n→ answer({outcome: OK})\nWritten to outbox/1.json";
+        let summary = pregrounding::build_execution_summary(history, 10);
+        assert!(summary.contains("→ read"));
+        assert!(summary.contains("→ answer"));
+        assert!(summary.contains("Written to"));
+        assert!(!summary.contains("some random line"));
+    }
+
+    #[test]
+    fn execution_summary_limits_lines() {
+        let history = (0..20).map(|i| format!("→ step_{}", i)).collect::<Vec<_>>().join("\n");
+        let summary = pregrounding::build_execution_summary(&history, 5);
+        assert_eq!(summary.lines().count(), 5);
+        assert!(summary.contains("→ step_19")); // most recent
+    }
 }
