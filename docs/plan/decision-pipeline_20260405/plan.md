@@ -15,7 +15,7 @@ Merge the two sender trust systems and define the pipeline type system.
 
 ### Tasks
 
-- [ ] Task 1.1: Create `src/pipeline.rs` with core types:
+- [x] Task 1.1: Create `src/pipeline.rs` with core types: <!-- sha:3140e78 -->
   ```rust
   pub enum StageResult<T> { Continue(T), Block { outcome: &'static str, message: String } }
   pub struct SenderAssessment { pub trust: SenderTrust, pub domain_match: &'static str, pub reasons: Vec<String> }
@@ -23,7 +23,7 @@ Merge the two sender trust systems and define the pipeline type system.
   pub struct PipelineContext { pub instruction: String, pub intent: String, pub inbox_content: String, pub security: Option<SecurityAssessment>, pub crm_graph: CrmGraph }
   ```
 
-- [ ] Task 1.2: Merge `crm_graph.rs::validate_sender()` + `scanner.rs::check_sender_domain_match()` into `pipeline.rs::assess_sender()`. Single function, returns `SenderAssessment`. Inputs: sender email, content, CRM graph, account_domains. Uses strsim for all fuzzy matching, mailparse for email extraction.
+- [x] Task 1.2: Merge `crm_graph.rs::validate_sender()` + `scanner.rs::check_sender_domain_match()` into `pipeline.rs::assess_sender()`. <!-- sha:41553d6 --> Single function, returns `SenderAssessment`. Inputs: sender email, content, CRM graph, account_domains. Uses strsim for all fuzzy matching, mailparse for email extraction.
 
 - [ ] Task 1.3: Make `validate_sender()` and `check_sender_domain_match()` call `assess_sender()` internally (backward compat wrappers) so existing callers don't break during migration.
 
