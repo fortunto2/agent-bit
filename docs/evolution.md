@@ -267,3 +267,26 @@ Full cumulative analysis of 2026-04-03 16:06 to 2026-04-05 00:26 marathon sessio
 - Last calibrate-outcome-validator track: clean 3-iter finish (pipeline ended strong)
 - CLAUDE.md kept lean despite enormous feature additions (14KB)
 - Technical axis: 9/10 across all domains (security, ML, CRM, agent architecture)
+
+## 2026-04-05 (prompt-diet) | agent-bit | Factory Score: 8/10
+
+Pipeline: build→deploy→review | Tracks: 1 (prompt-diet) | Iters: 3 | Waste: 0%
+
+### Defects
+- None in this track. Clean 3-iteration run.
+
+### Harness Gaps
+- **Context:** CLAUDE.md at 14.6KB — healthy. Prompt diet experiment proved all static prompt content load-bearing for Nemotron.
+- **Constraints:** Acceptance criteria left partially unverified after revert (t04, full benchmark). Should auto-verify post-revert.
+- **Precedents:** **Weak-model redundancy principle discovered:** Nemotron needs verbose static prompt + dynamic injection (belt + suspenders). Slimming from 44→25 lines caused 7 regressions (60% vs 80%). Only PLANNING_PROMPT can be safely slimmed.
+
+### Missing
+- Same 4 factory defects from previous 10 retros (auth, stall, deploy-skip, spec-checkbox) — not triggered this track but still unfixed
+- Post-revert auto-verification step in /build skill
+
+### What worked well
+- Scientific method applied correctly: hypothesis → experiment → benchmark → revert
+- Zero pipeline waste — perfect 3/3 iterations
+- PLANNING_PROMPT safely slimmed (2 patterns removed, no regression)
+- Counter-intuitive finding documented: weak models need redundancy, not minimalism
+- Build skill handled complex workflow (code change → benchmark → analyze → revert → re-benchmark → document) in single iteration
