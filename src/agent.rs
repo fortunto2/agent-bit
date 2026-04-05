@@ -315,9 +315,10 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             msgs.push(Message::user(&nudge));
         }
 
-        // Capture-delete nudge: at 50%+ of steps, if task involves inbox capture
+        // Capture-delete nudge: at 30%+ of steps, if task involves inbox capture
         // and inbox files were read but not deleted, strongly remind to delete
-        if step >= (self.max_steps / 2)
+        // (lowered from 50% — agent often finishes writes by step 6-8, needs delete reminder earlier)
+        if step >= (self.max_steps * 3 / 10)
             && self.capture_delete_nudge_sent.load(Ordering::SeqCst) == 0
         {
             // Check if messages mention inbox/capture (instruction or pre-grounding hints)
