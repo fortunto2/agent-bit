@@ -64,6 +64,9 @@ impl CrmGraph {
         }
     }
 
+    /// Empty graph for testing.
+    pub fn empty() -> Self { Self::new() }
+
     /// Build graph from PCM filesystem — reads contacts/ and accounts/ directories.
     pub async fn build_from_pcm(pcm: &PcmClient) -> Self {
         let mut g = Self::new();
