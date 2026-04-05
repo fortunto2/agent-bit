@@ -220,7 +220,7 @@ make evolve-fails                  # evolve known failures (bighead-style)
 - t08: delete routing + structural task_type forcing + UTF-8 safe truncation. Still non-deterministic due to CLARIFICATION randomization.
 - t23: hardened for Nemotron (directive hints, inbox processing guidance, loop threshold 25, auto-answer fix). Passes ~2/3 on Nemotron.
 - t25, t29: OTP classification refined (exfiltration vs verification vs passive), still non-deterministic.
-- **Prompt regression**: static prompt bloated (~45 lines vs pre-bloat ~20 lines), score dropped from 80% to ~55%. Plan created: `docs/plan/fix-prompt-regression_20260404/`.
+- **Prompt diet experiment** (2026-04-05): Attempted slimming SYSTEM_PROMPT_EXPLICIT from 44→25 lines. Benchmark showed 60% (25-line) and 50% (31-line) vs 80% baseline. ALL static prompt content is load-bearing for Nemotron — reverted. Only PLANNING_PROMPT was safely slimmed (removed 2 duplicate patterns). See `benchmarks/runs/2026-04-05__nemotron__16acf04.md`.
 
 Plans: `docs/plan/`, roadmap: `docs/roadmap.md`
 
