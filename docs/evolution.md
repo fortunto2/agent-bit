@@ -230,3 +230,40 @@ Pipeline: build→deploy→review | Tracks: 13 (12 completed + 1 aborted) | Iter
 - Last 7 tracks: 21 iters, 0 waste — pipeline is excellent when infrastructure works
 - Technical output: 9/10 axis. CRM graph, confidence reflection, temperature annealing, outcome validator, delete routing, UTF-8 safe truncation, structural task-type forcing
 - Prompt regression correctly diagnosed (spec created, plan ready, not started yet)
+
+## 2026-04-05 | agent-bit | Factory Score: 3/10
+
+Pipeline: build→deploy→review | Tracks: 13 completed, 1 failed (split-main-rs) | Iters: 80 | Waste: 45%
+
+Full cumulative analysis of 2026-04-03 16:06 to 2026-04-05 00:26 marathon session (~20h).
+
+### Defects
+- **CRITICAL** | solo-dev.sh: No stall detection — 14-iter deploy spin (split-main-rs) + 8-iter build spin (stabilize-decisions). 22 iters from 2 known patterns. 10th retro flagging this.
+  - Fix: `solo-dev.sh` — track last_sha, abort after 3 consecutive same-SHA + no-signal iterations
+- **CRITICAL** | solo-dev.sh: Auth error not detected — 3 review iters burned on expired OAuth (calibrate-outcome-validator). Content-based detection still absent. 10th retro flagging this.
+  - Fix: `solo-dev.sh` — grep for `authentication_error|401` in iter output, AUTHFAIL halt
+- **HIGH** | solo:deploy: No local-only detection (10th retro). agent-bit is a CLI, deploy is meaningless.
+  - Fix: `/deploy` SKILL.md — detect CLI/local project, auto-`<solo:done/>`
+- **MEDIUM** | solo:build: Spec checkboxes not auto-updated. fix-t23 shows 29% criteria despite archived completion.
+  - Fix: `/build` SKILL.md — post-phase spec.md checkbox pass
+
+### Harness Gaps
+- **Context:** CLAUDE.md at 14.4KB — well under 40k. 6 modules clean. Calibrate-outcome-validator track added 65 seed examples.
+- **Constraints:** **Retro→fix feedback loop remains broken after 10 retros.** Same 3 factory defects documented 10 times, zero patches applied. This is the meta-problem.
+- **Precedents:** Pipeline fundamentals are solid — when not fighting auth/stalls, tracks run 3 iters, 0 waste, ~30-50 min each.
+
+### Missing
+- **META-CRITICAL:** Retro→fix feedback loop. 10 retros = process theater until patches land.
+- Auth error content detection (10 retros)
+- Stall detection / circuit breaker (10 retros)
+- Local-only deploy skip (10 retros)
+- Per-iteration timeout (60m build cap)
+
+### What worked well
+- 13 tracks completed autonomously in ~20h — massive throughput
+- Test suite: 105→162 (+57 tests), zero regressions
+- 93.7% conventional commits (252/269)
+- OutcomeValidator calibrated: 65 seeds, adaptive kNN, k=5 blocking
+- Last calibrate-outcome-validator track: clean 3-iter finish (pipeline ended strong)
+- CLAUDE.md kept lean despite enormous feature additions (14KB)
+- Technical axis: 9/10 across all domains (security, ML, CRM, agent architecture)
