@@ -11,20 +11,20 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 30 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 162 unit tests
+cargo test                                        # 176 unit tests
 cargo run -- --audit-store                        # audit adaptive store
 ```
 
 ## Architecture
 
 ```
-src/main.rs          -- CLI, orchestration, guess_outcome (~459 lines)
+src/main.rs          -- CLI, orchestration, verify_and_submit, guess_outcome
 src/prompts.rs       -- system prompts, planning prompt, dynamic examples
 src/scanner.rs       -- security scanning, inbox classification, domain matching
 src/pregrounding.rs  -- contact pre-grounding, inbox reading, planning, agent execution
 src/agent.rs         -- Pac1Agent (Router + Structured CoT reasoning)
 src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
-src/pcm.rs           -- PcmRuntime client (11 file-system RPCs)
+src/pcm.rs           -- PcmRuntime client (11 file-system RPCs + ProposedAnswer)
 src/tools.rs         -- 11 Tool implementations + security guard + OutcomeValidator
 src/config.rs        -- Provider config with prompt_mode, temperature, planning_temperature
 src/classifier.rs    -- ONNX classifier + OutcomeValidator (adaptive kNN)
@@ -45,7 +45,9 @@ instruction --> prescan (HTML only) --> start trial
   --> OutcomeValidator (seed + adaptive prototypes)
   --> planning phase (read-only, 5 steps, planning_temperature=0.4)
   --> execution loop (Pac1Agent, max 20 steps, SearchTool w/ CRM annotation, confidence-gated reflection)
-  --> answer() with outcome validation
+  --> propose_answer() (deferred, no RPC yet)
+  --> outcome verifier (single LLM call, 4-way classification, override policy)
+  --> submit_proposed() (final RPC submission)
 ```
 
 ## Key Design Decisions
@@ -91,6 +93,19 @@ instruction --> prescan (HTML only) --> start trial
 - **Score-gated learning**: `store_answer()` in AnswerTool, `learn_last()` in main.rs after trial scores ≥ 1.0
 - **Created in main.rs**: shared across all trials, accessible for post-trial learning (not in pregrounding.rs)
 - Dedup: cosine >0.95 suppressed, cap 200, FIFO eviction
+
+### Outcome Verifier (post-execution)
+- **Deferred answer pattern**: AnswerTool stores `ProposedAnswer` via `pcm.propose_answer()` instead of submitting RPC immediately
+- After execution loop, `verify_and_submit()` calls `run_outcome_verifier()` — single LLM call with focused 4-way classification
+- Verifier prompt (`VERIFIER_PROMPT` in prompts.rs) is much simpler than SYSTEM_PROMPT_EXPLICIT — just validates the outcome code
+- Uses function calling schema (`verify_outcome`) returning `{outcome, reason, confidence}`
+- **Override policy** (`apply_override_policy()`): verifier.confidence >= 0.8 AND disagrees AND proposed != DENIED_SECURITY → override
+- Never overrides `OUTCOME_DENIED_SECURITY` (trust security decisions)
+- Falls back to proposed answer on verifier LLM error
+- When no proposed answer: verifier as primary (conf >= 0.6), `guess_outcome()` as fallback
+- Execution summary: `build_execution_summary()` extracts last 15 relevant tool lines from history
+- Logging: `🔍 Verifier: agree|OVERRIDE|disagree (conf=X.XX) — reason`
+- Key files: `pcm.rs` (ProposedAnswer), `prompts.rs` (VERIFIER_PROMPT), `pregrounding.rs` (run_outcome_verifier), `main.rs` (verify_and_submit)
 
 ### Single Prompt Mode
 - Single explicit decision tree for all models (removed standard/explicit split)
