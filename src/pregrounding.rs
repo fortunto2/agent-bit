@@ -321,6 +321,70 @@ pub(crate) fn make_llm_config(
     }
 }
 
+/// Result of the post-execution outcome verifier.
+#[derive(Debug, Clone)]
+pub(crate) struct VerifiedOutcome {
+    pub outcome: String,
+    pub reason: String,
+    pub confidence: f64,
+}
+
+/// Post-execution verifier: single LLM call to validate the agent's outcome classification.
+/// Falls back to proposed answer on any LLM error.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_outcome_verifier(
+    model: &str,
+    base_url: Option<&str>,
+    api_key: &str,
+    extra_headers: &[(String, String)],
+    temperature: f32,
+    instruction: &str,
+    execution_summary: &str,
+    proposed_outcome: &str,
+    proposed_message: &str,
+) -> Option<VerifiedOutcome> {
+    use sgr_agent::tool::ToolDef;
+
+    let config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
+    let llm = Llm::new(&config);
+
+    let user_content = format!(
+        "ORIGINAL INSTRUCTION:\n{}\n\nEXECUTION SUMMARY:\n{}\n\nPROPOSED ANSWER:\n- outcome: {}\n- message: {}",
+        instruction, execution_summary, proposed_outcome, proposed_message,
+    );
+
+    let messages = vec![
+        Message::system(prompts::VERIFIER_PROMPT),
+        Message::user(&user_content),
+    ];
+
+    let tool_schema = prompts::verify_outcome_tool_def();
+    let func = &tool_schema["function"];
+    let tool_def = ToolDef {
+        name: func["name"].as_str().unwrap_or("verify_outcome").to_string(),
+        description: func["description"].as_str().unwrap_or("").to_string(),
+        parameters: func["parameters"].clone(),
+    };
+
+    match llm.tools_call_stateful(&messages, &[tool_def], None).await {
+        Ok((calls, _response_id)) => {
+            if let Some(call) = calls.into_iter().find(|c| c.name == "verify_outcome") {
+                let outcome = call.arguments["outcome"].as_str().unwrap_or(proposed_outcome).to_string();
+                let reason = call.arguments["reason"].as_str().unwrap_or("").to_string();
+                let confidence = call.arguments["confidence"].as_f64().unwrap_or(0.5);
+                Some(VerifiedOutcome { outcome, reason, confidence })
+            } else {
+                eprintln!("  ⚠ Verifier: no verify_outcome call returned");
+                None
+            }
+        }
+        Err(e) => {
+            eprintln!("  ⚠ Verifier LLM error: {:#}", e);
+            None
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_agent(
     pcm: &Arc<pcm::PcmClient>,
@@ -764,5 +828,48 @@ mod tests {
         let names = vec![("Totally Unknown".to_string(), "inbox/msg.md".to_string())];
         let hints = resolve_contact_hints(&names, &crm, None);
         assert!(hints.is_empty(), "No matches = no hint");
+    }
+
+    // ─── Verifier schema tests ──────────────────────────────────────────
+
+    #[test]
+    fn verify_outcome_schema_has_required_fields() {
+        let schema = prompts::verify_outcome_tool_def();
+        let func = &schema["function"];
+        assert_eq!(func["name"].as_str().unwrap(), "verify_outcome");
+        let props = &func["parameters"]["properties"];
+        assert!(props["outcome"].is_object());
+        assert!(props["reason"].is_object());
+        assert!(props["confidence"].is_object());
+        let required: Vec<&str> = func["parameters"]["required"]
+            .as_array().unwrap().iter()
+            .map(|v| v.as_str().unwrap()).collect();
+        assert!(required.contains(&"outcome"));
+        assert!(required.contains(&"reason"));
+        assert!(required.contains(&"confidence"));
+    }
+
+    #[test]
+    fn verify_outcome_schema_has_enum() {
+        let schema = prompts::verify_outcome_tool_def();
+        let outcomes: Vec<&str> = schema["function"]["parameters"]["properties"]["outcome"]["enum"]
+            .as_array().unwrap().iter()
+            .map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(outcomes, vec![
+            "OUTCOME_OK", "OUTCOME_DENIED_SECURITY",
+            "OUTCOME_NONE_UNSUPPORTED", "OUTCOME_NONE_CLARIFICATION",
+        ]);
+    }
+
+    #[test]
+    fn verified_outcome_struct_clone() {
+        let v = VerifiedOutcome {
+            outcome: "OUTCOME_OK".to_string(),
+            reason: "Task completed".to_string(),
+            confidence: 0.95,
+        };
+        let v2 = v.clone();
+        assert_eq!(v2.outcome, "OUTCOME_OK");
+        assert_eq!(v2.confidence, 0.95);
     }
 }
