@@ -434,18 +434,18 @@ async fn verify_and_submit(
 fn apply_override_policy(
     proposed_outcome: &str,
     verifier_outcome: &str,
-    verifier_confidence: f64,
+    _verifier_confidence: f64,
 ) -> Option<String> {
-    if proposed_outcome == verifier_outcome {
-        return None; // agree
+    // v0.3.1: warn-only mode — verifier logs but never overrides.
+    // 6:1 wrong:correct override ratio in v0.3.0 benchmark.
+    // Re-enable when verifier accuracy > 80% on 40+ task benchmark.
+    if proposed_outcome != verifier_outcome {
+        eprintln!(
+            "  ℹ Verifier disagrees: proposed={} verifier={} (warn-only, no override)",
+            proposed_outcome, verifier_outcome
+        );
     }
-    if proposed_outcome == "OUTCOME_DENIED_SECURITY" {
-        return None; // never override security
-    }
-    if verifier_confidence >= 0.8 {
-        return Some(verifier_outcome.to_string()); // override
-    }
-    None // low confidence, keep proposed
+    None
 }
 
 /// Fallback heuristic: guess outcome from last message + history.
@@ -653,19 +653,17 @@ mod tests {
     }
 
     #[test]
-    fn override_disagree_high_confidence() {
+    fn override_warn_only_never_overrides() {
+        // v0.3.1: warn-only mode — verifier never overrides regardless of confidence
         let result = apply_override_policy(
             "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.9,
         );
-        assert_eq!(result.unwrap(), "OUTCOME_NONE_UNSUPPORTED");
-    }
+        assert!(result.is_none(), "Warn-only: high confidence disagree = no override");
 
-    #[test]
-    fn override_disagree_low_confidence() {
         let result = apply_override_policy(
             "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.6,
         );
-        assert!(result.is_none(), "Low confidence = no override");
+        assert!(result.is_none(), "Warn-only: low confidence disagree = no override");
     }
 
     #[test]
@@ -674,21 +672,6 @@ mod tests {
             "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99,
         );
         assert!(result.is_none(), "DENIED_SECURITY is never overridden");
-    }
-
-    #[test]
-    fn override_boundary_confidence() {
-        // Exactly 0.8 should override
-        let result = apply_override_policy(
-            "OUTCOME_NONE_CLARIFICATION", "OUTCOME_OK", 0.8,
-        );
-        assert_eq!(result.unwrap(), "OUTCOME_OK");
-
-        // Just below 0.8 should not override
-        let result = apply_override_policy(
-            "OUTCOME_NONE_CLARIFICATION", "OUTCOME_OK", 0.79,
-        );
-        assert!(result.is_none());
     }
 
     // ─── build_execution_summary ────────────────────────────────────────
