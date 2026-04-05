@@ -2,12 +2,22 @@
 
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use bitgn_sdk::vm::pcm::{self as proto, PcmRuntimeClient};
 use connectrpc::client::HttpClient;
+
+/// Deferred answer: stored by AnswerTool, submitted after verifier review.
+#[derive(Debug, Clone)]
+pub struct ProposedAnswer {
+    pub message: String,
+    pub outcome: String,
+    pub refs: Vec<String>,
+}
 
 pub struct PcmClient {
     inner: PcmRuntimeClient<HttpClient>,
     pub answer_submitted: AtomicBool,
+    proposed_answer: Mutex<Option<ProposedAnswer>>,
 }
 
 impl PcmClient {
@@ -17,6 +27,7 @@ impl PcmClient {
         Self {
             inner: PcmRuntimeClient::new(http, config),
             answer_submitted: AtomicBool::new(false),
+            proposed_answer: Mutex::new(None),
         }
     }
 
@@ -131,6 +142,38 @@ impl PcmClient {
         self.answer_submitted.store(true, Ordering::SeqCst);
         Ok(())
     }
+
+    /// Store a proposed answer without submitting via RPC.
+    /// Overwrites any previously proposed answer.
+    pub fn propose_answer(&self, message: &str, outcome: &str, refs: &[String]) {
+        let mut guard = self.proposed_answer.lock().unwrap();
+        *guard = Some(ProposedAnswer {
+            message: message.to_string(),
+            outcome: outcome.to_string(),
+            refs: refs.to_vec(),
+        });
+        // Mark as submitted so auto_submit doesn't fire
+        self.answer_submitted.store(true, Ordering::SeqCst);
+    }
+
+    /// Read the proposed answer (if any) without consuming it.
+    pub fn get_proposed_answer(&self) -> Option<ProposedAnswer> {
+        self.proposed_answer.lock().unwrap().clone()
+    }
+
+    /// Submit the proposed answer via RPC, or a given override.
+    /// Falls back to error if nothing proposed and no override given.
+    pub async fn submit_proposed(&self, override_outcome: Option<&str>) -> Result<()> {
+        let proposed = self.proposed_answer.lock().unwrap().take();
+        match proposed {
+            Some(p) => {
+                let outcome = override_outcome.unwrap_or(&p.outcome);
+                self.answer_submitted.store(false, Ordering::SeqCst); // reset so answer() can set it
+                self.answer(&p.message, outcome, &p.refs).await
+            }
+            None => anyhow::bail!("No proposed answer to submit"),
+        }
+    }
 }
 
 fn format_tree_entry(entry: &proto::tree_response::EntryView<'_>, prefix: &str, is_last: bool) -> String {
@@ -144,4 +187,50 @@ fn format_tree_entry(entry: &proto::tree_response::EntryView<'_>, prefix: &str, 
         result.push_str(&format_tree_entry(&child, &child_prefix, i == entry.children.len() - 1));
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Create a PcmClient pointing at a dummy URL (RPC calls will fail, but propose/get work).
+    fn dummy_pcm() -> PcmClient {
+        PcmClient::new("http://localhost:0")
+    }
+
+    #[test]
+    fn propose_stores_answer() {
+        let pcm = dummy_pcm();
+        assert!(pcm.get_proposed_answer().is_none());
+        pcm.propose_answer("hello", "OUTCOME_OK", &[]);
+        let p = pcm.get_proposed_answer().unwrap();
+        assert_eq!(p.message, "hello");
+        assert_eq!(p.outcome, "OUTCOME_OK");
+        assert!(p.refs.is_empty());
+    }
+
+    #[test]
+    fn propose_sets_answer_submitted() {
+        let pcm = dummy_pcm();
+        assert!(!pcm.answer_submitted.load(Ordering::SeqCst));
+        pcm.propose_answer("msg", "OUTCOME_OK", &[]);
+        assert!(pcm.answer_submitted.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn double_propose_overwrites() {
+        let pcm = dummy_pcm();
+        pcm.propose_answer("first", "OUTCOME_OK", &[]);
+        pcm.propose_answer("second", "OUTCOME_DENIED_SECURITY", &["ref.md".into()]);
+        let p = pcm.get_proposed_answer().unwrap();
+        assert_eq!(p.message, "second");
+        assert_eq!(p.outcome, "OUTCOME_DENIED_SECURITY");
+        assert_eq!(p.refs, vec!["ref.md"]);
+    }
+
+    #[tokio::test]
+    async fn submit_proposed_without_proposal_fails() {
+        let pcm = dummy_pcm();
+        assert!(pcm.submit_proposed(None).await.is_err());
+    }
 }
