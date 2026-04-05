@@ -429,6 +429,23 @@ pub(crate) async fn run_agent(
         fc.label
     };
 
+    // === Level 1c: Classify task intent (delete/edit/query/inbox/email) ===
+    let instruction_intent = {
+        let mut guard = shared_clf.lock().unwrap();
+        if let Some(clf) = guard.as_mut() {
+            match clf.classify_intent(instruction) {
+                Ok(scores) if !scores.is_empty() => {
+                    let (label, conf) = &scores[0];
+                    eprintln!("  Instruction intent: {} ({:.2})", label, conf);
+                    label.clone()
+                }
+                _ => String::new(),
+            }
+        } else {
+            String::new()
+        }
+    };
+
     let tree_out = pcm.tree("/", 2).await.unwrap_or_else(|e| format!("(error: {})", e));
     let agents_md = pcm.read("AGENTS.md", false, 0, 0).await.unwrap_or_default();
     let ctx_time = pcm.context().await.unwrap_or_default();
@@ -614,6 +631,7 @@ pub(crate) async fn run_agent(
         .register(tools::ContextTool(pcm.clone()));
 
     let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode);
+    agent.set_intent(&instruction_intent);
     let mut ctx = AgentContext::new();
 
     // ── Planning phase: decompose task into steps ─────────────────────
@@ -629,35 +647,20 @@ pub(crate) async fn run_agent(
 
     messages.push(Message::user(instruction));
 
-    // Delete-intent pre-grounding: inject hint for delete-only tasks
-    {
-        let lower = instruction.to_lowercase();
-        let is_delete = lower.contains("delete") || lower.contains("remove");
-        let is_combined = lower.contains("capture") || lower.contains("distill")
-            || lower.contains("write") || lower.contains("create");
-        if is_delete && !is_combined {
-            messages.push(Message::user(
-                "IMPORTANT: This task involves deletion. Identify the EXACT target file first \
-                 (search + read to verify). Do NOT create or modify any files — only delete the \
-                 specific target."
-            ));
-        }
-    }
-
-    // Capture-delete reminder: when task involves capture/distill/process with inbox,
-    // remind agent to delete inbox files after processing (prevents t03-style failures)
-    {
-        let lower = instruction.to_lowercase();
-        let is_capture = lower.contains("capture") || lower.contains("distill")
-            || lower.contains("process") || lower.contains("inbox");
-        if is_capture {
-            messages.push(Message::user(
-                "REMINDER: After capturing/distilling inbox content (creating cards, updating threads), \
-                 you MUST delete the original inbox file(s) from 00_inbox/. The workflow is: \
-                 read inbox → create card/update thread → DELETE inbox file → answer. \
-                 Do NOT answer before deleting processed inbox files."
-            ));
-        }
+    // Intent-based pre-grounding hints (ML classifier replaces substring heuristics)
+    if instruction_intent == "intent_delete" {
+        messages.push(Message::user(
+            "IMPORTANT: This task involves deletion. Identify the EXACT target file first \
+             (search + read to verify). Do NOT create or modify any files — only delete the \
+             specific target."
+        ));
+    } else if instruction_intent == "intent_inbox" {
+        messages.push(Message::user(
+            "REMINDER: After capturing/distilling inbox content (creating cards, updating threads), \
+             you MUST delete the original inbox file(s) from 00_inbox/. The workflow is: \
+             read inbox → create card/update thread → DELETE inbox file → answer. \
+             Do NOT answer before deleting processed inbox files."
+        ));
     }
 
     let loop_config = LoopConfig {
