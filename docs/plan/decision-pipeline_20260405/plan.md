@@ -37,7 +37,7 @@ Consolidate pre-LLM security checks into one `SecurityScanner::assess()`.
 
 ### Tasks
 
-- [ ] Task 2.1: Add `SecurityScanner` struct to `pipeline.rs` with method `assess(content: &str, sender: &SenderAssessment, classifier: &SharedClassifier) -> SecurityAssessment`. Merges:
+- [x] Task 2.1: Add `SecurityScanner` struct to `pipeline.rs` <!-- sha:7dffcb2 --> with method `assess(content: &str, sender: &SenderAssessment, classifier: &SharedClassifier) -> SecurityAssessment`. Merges:
   - `threat_score()` (HTML injection)
   - `structural_injection_score()` (pattern signals)
   - ML classification (`semantic_classify_inbox_file`)
