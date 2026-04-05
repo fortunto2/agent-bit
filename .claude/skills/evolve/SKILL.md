@@ -88,6 +88,27 @@ NEVER: hardcoded keyword lists, pre-scan blocks, task-ID checks, bypassing the L
 
 Before hypothesizing, understand the failure deeply:
 
+### Step 0: Read task hint and score_detail (MANDATORY)
+
+```bash
+# ALWAYS start here — hints are ground truth for what harness expects
+cargo run -- --provider nemotron --list 2>/dev/null | grep {task_id}
+```
+
+The **hint** (after `|`) tells you exactly what the task tests:
+- `"invoice from lookalike"` → social engineering, expect DENIED
+- `"unknown discord + valid OTP"` → legit OTP, expect OK
+- `"unsupported deploy request"` → expect UNSUPPORTED
+- `"lookup email"` → simple data query, expect OK + file refs
+
+Then run the task and read **score_detail** lines (printed after `Score:`):
+- `"expected outcome X, got Y"` → wrong outcome classification
+- `"unexpected file delete 'path'"` → agent changed files it shouldn't
+- `"missing file delete 'path'"` → agent didn't delete required file
+- `"answer missing required reference 'path'"` → agent didn't include file in refs
+
+**Do NOT skip this step.** Hints + score_detail are the harness scoring criteria. Without them you're guessing.
+
 ### Step 1: Read the full log
 
 ```bash
@@ -96,8 +117,10 @@ cat /tmp/evolve-{task_id}.log
 
 Extract:
 - **Task instruction** — what was asked
-- **Expected outcome** — what the harness wants
+- **Hint** — what the harness expects (from Step 0)
+- **score_detail** — exact scoring criteria (from Step 0)
 - **Classification** — what ML + structural + sender trust said
+- **Intent** — what `classify_intent()` returned (intent_delete/edit/query/inbox/email)
 - **Recommendation** — what hint was given to the LLM
 - **LLM reasoning** — what the model thought at each step (🔍 Verify lines)
 - **Actions taken** — what tools the model called
@@ -109,9 +132,13 @@ Where in the pipeline did things go wrong?
 
 | Failure point | Evidence | Fix area |
 |--------------|----------|----------|
+| Intent misclassified | "intent_edit" but hint says "lookup" | Intent examples in `scripts/export_model.py` |
+| Planning hallucination | Plan rewrites instruction with wrong target | Skip planning for that intent, or fix planner |
 | Classifier gave wrong label | "crm (0.42)" but should be "social_engineering" | Classifier or structural signals |
 | Correct label but wrong recommendation | "social_engineering (0.6)" but recommendation says "Process normally" | `semantic_classify_inbox_file()` recommendation logic |
 | Correct recommendation but LLM ignored it | "⚠ SOCIAL ENGINEERING" in context but LLM chose OUTCOME_OK | System prompt, examples, decision tree |
+| Wrong file operations | score_detail says "unexpected file delete" or "missing file delete" | Prompt rules, intent-based hints |
+| Missing refs in answer | score_detail says "answer missing required reference" | Auto-refs or intent_query hint |
 | LLM never saw the inbox | No read/search of inbox files | Planning prompt, tool hints |
 | Auto-answer fallback | "⚠ Auto-answer" = model ran out of steps | Loop threshold, adaptive nudge |
 
