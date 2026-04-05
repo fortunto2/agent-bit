@@ -22,7 +22,7 @@ Add ProposedAnswer storage to PcmClient so AnswerTool can defer RPC submission.
 - [x] `cargo test` passes (166 tests)
 - [x] AnswerTool no longer calls pcm.answer() directly (only propose_answer)
 
-## Phase 2: Verifier LLM Call
+## Phase 2: Verifier LLM Call <!-- checkpoint:f43e388 -->
 
 Add the verification prompt and `run_outcome_verifier()` function.
 
@@ -41,14 +41,14 @@ Add the verification prompt and `run_outcome_verifier()` function.
 Wire verifier into main execution flow, replace guess_outcome, add override logic.
 
 ### Tasks
-- [ ] Task 3.1: Modify `run_agent()` in `src/pregrounding.rs` — after execution loop, build execution summary from action ledger + last_msg. Return `(last_msg, history, proposed_answer)` by reading `pcm.proposed_answer`.
-- [ ] Task 3.2: Update `run_trial()` and main loop in `src/main.rs` — after run_trial, call `run_outcome_verifier()`. Override policy: if verifier.confidence >= 0.8 AND verifier.outcome != proposed.outcome AND proposed.outcome != "OUTCOME_DENIED_SECURITY" → use verifier outcome. Otherwise keep proposed. Log decision as `🔍 Verifier: {agree|override} (conf={})`.
-- [ ] Task 3.3: Replace `auto_submit_if_needed()` — when no proposed answer, use verifier result instead of `guess_outcome()`. Keep `guess_outcome()` as ultimate fallback if verifier LLM call fails.
-- [ ] Task 3.4: Wire into `run_leaderboard()` — same verifier logic for competition runs.
-- [ ] Task 3.5: Add integration-level tests for override policy edge cases: agree, disagree-high-conf, disagree-low-conf, security-never-override, no-proposed-answer.
+- [x] Task 3.1: Modify `run_agent()` in `src/pregrounding.rs` — added `build_execution_summary()` helper. Return type unchanged; proposed answer read via `pcm.get_proposed_answer()`.
+- [x] Task 3.2: Update `run_trial()` and main loop in `src/main.rs` — after run_trial, call `verify_and_submit()` with verifier + override policy. Log decision as `🔍 Verifier: {agree|override} (conf={})`.
+- [x] Task 3.3: Replace `auto_submit_if_needed()` with `verify_and_submit()` — verifier as primary, `guess_outcome()` as fallback when verifier fails or no proposed answer with low confidence.
+- [x] Task 3.4: Wire into `run_leaderboard()` — same `verify_and_submit()` call.
+- [x] Task 3.5: Add integration-level tests for override policy edge cases: agree, disagree-high-conf, disagree-low-conf, security-never-override, boundary confidence, execution_summary extraction.
 
 ### Verification
-- [ ] `cargo test` passes (162+ tests)
+- [x] `cargo test` passes (176 tests)
 - [ ] `make task T=t01` passes on Nemotron (regression check)
 - [ ] Verifier logs visible in task output (agree/override)
 

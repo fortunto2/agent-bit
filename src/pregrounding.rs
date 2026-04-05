@@ -755,6 +755,23 @@ pub(crate) async fn run_agent(
     Ok((last_assistant, history))
 }
 
+/// Build a compact execution summary for the verifier from message history.
+/// Extracts the last N tool-related lines (tool calls + results) — enough
+/// context for 4-way classification without overwhelming the verifier.
+pub(crate) fn build_execution_summary(history: &str, max_lines: usize) -> String {
+    let relevant: Vec<&str> = history.lines()
+        .filter(|l| {
+            let t = l.trim();
+            t.starts_with("→ ") || t.starts_with("answer(") || t.contains("= Answer submitted")
+                || t.contains("Written to") || t.contains("Deleted") || t.contains("DENIED")
+                || t.contains("OUTCOME_") || t.contains("[CLASSIFICATION")
+                || t.contains("[SENDER") || t.contains("Security threat")
+        })
+        .collect();
+    let start = relevant.len().saturating_sub(max_lines);
+    relevant[start..].join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
