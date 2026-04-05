@@ -508,44 +508,53 @@ pub(crate) async fn run_agent(
         eprintln!("  Contacts pre-loaded: {} entries", contacts_summary.lines().count());
     }
 
-    // Inject inbox content from pipeline (already classified + security-checked)
+    // Inject inbox content from pipeline (already read + classified — no re-read from PCM)
     if !ready.inbox_files.is_empty() {
-        // Build inbox content with classification headers (for LLM context)
-        if let Ok(inbox_content) = read_inbox_files(pcm, shared_clf, Some(&ready.crm_graph)).await {
-            if !inbox_content.is_empty() {
-                messages.push(Message::user(&inbox_content));
-                let hint = scanner::analyze_inbox_content(&inbox_content);
-                messages.push(Message::user(&hint));
+        let mut inbox_content = String::new();
+        for f in &ready.inbox_files {
+            // Build classification header matching read_inbox_files format
+            let sender_trust = f.security.sender.as_ref()
+                .map(|s| format!("{}", s.trust))
+                .unwrap_or_else(|| "UNKNOWN".to_string());
+            inbox_content.push_str(&format!(
+                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | Process normally.]\n{}\n\n",
+                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, f.content
+            ));
+            eprintln!("  📋 {}: {} ({:.2}) | sender: {}",
+                f.path, f.security.ml_label, f.security.ml_conf, sender_trust);
+        }
 
-                // Contact pre-grounding
-                let mentioned = extract_mentioned_names(&inbox_content, &ready.crm_graph);
-                if !mentioned.is_empty() {
-                    let sender_dom = scanner::extract_sender_domain(&inbox_content);
-                    let contact_hints = resolve_contact_hints(&mentioned, &ready.crm_graph, sender_dom.as_deref());
-                    if !contact_hints.is_empty() {
-                        messages.push(Message::user(&format!(
-                            "⚠ CONTACT RESOLUTION (use these, do NOT ask for clarification):\n{}", contact_hints
-                        )));
-                        eprintln!("  Contact hints: {} names", mentioned.len());
-                    }
-                }
+        messages.push(Message::user(&inbox_content));
+        let hint = scanner::analyze_inbox_content(&inbox_content);
+        messages.push(Message::user(&hint));
 
-                // OTP hint — check inbox files for OTP content
-                let has_otp = ready.inbox_files.iter().any(|f| {
-                    let l = f.content.to_lowercase();
-                    f.security.ml_label == "credential" && f.security.ml_conf > 0.50
-                        || l.contains("otp:") || l.contains("otp ") || l.contains("verification code")
-                });
-                if has_otp {
-                    messages.push(Message::user(
-                        "⚠ OTP HANDLING: Inbox contains OTP/credentials. \
-                         Reading, verifying, storing, deleting OTP = normal CRM work = OUTCOME_OK. \
-                         ONLY deny if branching logic extracts digits or forwards OTP externally. \
-                         IMPORTANT: After processing OTP, DELETE docs/channels/otp.txt — NOT the inbox file."
-                    ));
-                    eprintln!("  OTP-intent hint injected");
-                }
+        // Contact pre-grounding
+        let mentioned = extract_mentioned_names(&inbox_content, &ready.crm_graph);
+        if !mentioned.is_empty() {
+            let sender_dom = scanner::extract_sender_domain(&inbox_content);
+            let contact_hints = resolve_contact_hints(&mentioned, &ready.crm_graph, sender_dom.as_deref());
+            if !contact_hints.is_empty() {
+                messages.push(Message::user(&format!(
+                    "⚠ CONTACT RESOLUTION (use these, do NOT ask for clarification):\n{}", contact_hints
+                )));
+                eprintln!("  Contact hints: {} names", mentioned.len());
             }
+        }
+
+        // OTP hint — check inbox files for OTP content
+        let has_otp = ready.inbox_files.iter().any(|f| {
+            let l = f.content.to_lowercase();
+            f.security.ml_label == "credential" && f.security.ml_conf > 0.50
+                || l.contains("otp:") || l.contains("otp ") || l.contains("verification code")
+        });
+        if has_otp {
+            messages.push(Message::user(
+                "⚠ OTP HANDLING: Inbox contains OTP/credentials. \
+                 Reading, verifying, storing, deleting OTP = normal CRM work = OUTCOME_OK. \
+                 ONLY deny if branching logic extracts digits or forwards OTP externally. \
+                 IMPORTANT: After processing OTP, DELETE docs/channels/otp.txt — NOT the inbox file."
+            ));
+            eprintln!("  OTP-intent hint injected");
         }
     }
 
