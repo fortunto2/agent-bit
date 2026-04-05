@@ -15,14 +15,14 @@ The fix: slim SYSTEM_PROMPT_EXPLICIT to ~20 core lines, move task-specific guida
 
 ## Acceptance Criteria
 
-- [ ] SYSTEM_PROMPT_EXPLICIT is <=25 lines (core decision tree only, no task-specific guidance)
-- [ ] Removed content relocated to `examples_for_class()` or `pregrounding.rs` hints (not lost)
-- [ ] PLANNING_PROMPT slimmed: no duplicate patterns already in dynamic examples
-- [ ] `cargo test` passes (all 162+ tests)
-- [ ] `make task T=t01` passes (baseline sanity)
-- [ ] `make task T=t04` passes (baseline sanity)
-- [ ] `make full` on Nemotron: score >= 24/30 (80%+) — maintain or exceed baseline
-- [ ] CLAUDE.md updated: remove stale "prompt regression" note
+- [ ] SYSTEM_PROMPT_EXPLICIT is <=25 lines (core decision tree only, no task-specific guidance) — NOT ACHIEVABLE: experiment proved all 44 lines load-bearing for Nemotron (60% with 25 lines vs 80% baseline). Reverted.
+- [x] Removed content relocated to `examples_for_class()` or `pregrounding.rs` hints (not lost) — N/A, content kept in-place after revert
+- [x] PLANNING_PROMPT slimmed: no duplicate patterns already in dynamic examples — removed "Contact ambiguity" and "Process inbox (multiple messages)" (sha:7753772)
+- [x] `cargo test` passes (all 162+ tests) — 162 passed, 0 failed (verified 2026-04-05)
+- [x] `make task T=t01` passes (baseline sanity) — verified during build phase
+- [ ] `make task T=t04` passes (baseline sanity) — not re-verified after revert
+- [ ] `make full` on Nemotron: score >= 24/30 (80%+) — not re-benchmarked after revert to 16acf04 (only diet versions benchmarked: 60% and 50%)
+- [x] CLAUDE.md updated: remove stale "prompt regression" note — verified, no "prompt regression" in CLAUDE.md
 
 ## Dependencies
 
