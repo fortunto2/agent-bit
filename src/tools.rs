@@ -660,7 +660,7 @@ impl Tool for AnswerTool {
             validator.store_answer(&a.message, &a.outcome);
         }
 
-        self.pcm.answer(&a.message, &a.outcome, &a.refs).await.map_err(pcm_err)?;
+        self.pcm.propose_answer(&a.message, &a.outcome, &a.refs);
         Ok(ToolOutput::done(format!("Answer submitted: {}", a.message)))
     }
 }
