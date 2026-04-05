@@ -75,6 +75,11 @@ temperature = 0.1
 [providers.gemma4.headers]
 cf-aig-request-timeout = "300000"
 
+[providers.qwen]
+model = "qwen/qwen3.6-plus:free"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
 [providers.gemini]
 model = "gemini-3.1-pro-preview"
 api_key_env = "GEMINI_API_KEY"

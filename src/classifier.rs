@@ -121,6 +121,9 @@ impl InboxClassifier {
         Ok(Self { session, tokenizer, class_embeddings })
     }
 
+    /// Access the tokenizer for word-level analysis.
+    pub fn tokenizer(&self) -> &Tokenizer { &self.tokenizer }
+
     /// Encode text into a normalized embedding vector using the ONNX model.
     pub fn encode(&mut self, text: &str) -> Result<Array1<f32>> {
         let encoding = self.tokenizer

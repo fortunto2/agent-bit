@@ -129,6 +129,16 @@ INTENT_CLASSES = {
         "Compose an email to the account manager about the review",
         "Reply to the customer request via email",
     ],
+    "intent_unclear": [
+        "Archive the thread and upd",
+        "Process this inbox ent",
+        "Send the",
+        "Do the thing with",
+        "incomplete truncated request that ends abruptly mid",
+        "ambiguous instruction that was cut off before finishing the sen",
+        "the request was cut off mid sentence and",
+        "please handle the fil",
+    ],
 }
 
 # Combined for embedding generation
