@@ -7,7 +7,9 @@
 
 ## Summary
 
-Add a cross-encoder NLI (Natural Language Inference) model as a third signal in the inbox classification ensemble. The current classifier uses a bi-encoder (all-MiniLM-L6-v2) with cosine similarity to class centroids — fast but shallow. Cross-encoder NLI models process (premise, hypothesis) pairs jointly, understanding logical relationships rather than just semantic proximity. This is exactly the capability needed for the nuanced distinctions that cause non-determinism: OTP verification vs exfiltration (t25/t29), delete-only vs capture-delete (t03/t08).
+Add a cross-encoder NLI (Natural Language Inference) model as a third signal in the inbox classification ensemble. The current classifier uses a bi-encoder (all-MiniLM-L6-v2) with cosine similarity to class centroids — fast but shallow. Cross-encoder NLI models process (premise, hypothesis) pairs jointly, understanding logical relationships rather than just semantic proximity.
+
+**Target tasks: t25, t29 only** (OTP trust distinction). NLI does NOT help t03 (execution workflow), t08 (truncation detection), t18 (domain lookalike — already fixed with strsim), or t23 (trust annotation).
 
 The approach reuses the existing `ort` + `tokenizers` infrastructure (no new Rust deps). A small cross-encoder model (~22-66M params) is exported to ONNX alongside the existing embedding model.
 
@@ -19,8 +21,9 @@ The approach reuses the existing `ort` + `tokenizers` infrastructure (no new Rus
 - [ ] NLI integrated as third signal in `semantic_classify_inbox_file()` ensemble
 - [ ] Ensemble weights tuned: ML + NLI + structural (sum to 1.0)
 - [ ] Unit tests for NLI classifier (model-gated, skip if models/ missing)
-- [ ] `cargo test` passes (all 177+ existing tests green)
-- [ ] Nemotron benchmark: no regression from 80% baseline (`make full` or `make sample`)
+- [ ] `cargo test` passes (all 178+ existing tests green)
+- [ ] t25 and t29 pass rate improves on Nemotron (currently ~50% and ~40%)
+- [ ] No regression on t01 and other stable tasks
 
 ## Dependencies
 
