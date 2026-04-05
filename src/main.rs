@@ -728,4 +728,14 @@ mod tests {
         assert_eq!(summary.lines().count(), 5);
         assert!(summary.contains("→ step_19")); // most recent
     }
+
+    #[test]
+    fn execution_summary_excludes_classification_headers() {
+        let history = "→ read(inbox/msg.md)\n[CLASSIFICATION: injection (0.95) | EXFILTRATION]\n[SENDER DOMAIN MISMATCH]\n→ answer({outcome: DENIED})\nWritten to outbox/1.json";
+        let summary = pregrounding::build_execution_summary(history, 10);
+        assert!(!summary.contains("[CLASSIFICATION"), "Classification headers must be excluded");
+        assert!(!summary.contains("[SENDER"), "Sender trust headers must be excluded");
+        assert!(summary.contains("→ read"));
+        assert!(summary.contains("→ answer"));
+    }
 }
