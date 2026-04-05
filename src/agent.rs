@@ -16,7 +16,7 @@ use sgr_agent::tool::ToolDef;
 use sgr_agent::types::{Message, Role};
 
 /// Max entries in the action ledger (rotates oldest when full).
-const LEDGER_MAX: usize = 10;
+const LEDGER_MAX: usize = 25;
 
 /// Router: filter tool definitions by task_type and step number.
 /// Returns a subset of `all_defs` appropriate for the current routing state.
@@ -282,7 +282,7 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         }
         msgs.extend_from_slice(messages);
 
-        // Inject action ledger for context (helps avoid repeating searches)
+        // Inject action ledger + observation log for context
         if let Some(ledger) = self.ledger_text() {
             msgs.push(Message::assistant(&ledger));
         }
@@ -573,6 +573,28 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         // Record tool call in action ledger
         let step = ctx.iteration as u32;
         self.record_action(step, tool_name, "", output);
+
+        // Compressed observation: tool → short summary (max 80 chars)
+        let summary = match tool_name {
+            "read" => {
+                let path = output.lines().next().unwrap_or("").replace("$ cat ", "");
+                let lines = output.lines().count();
+                format!("read({}) → {} lines", path.trim(), lines)
+            }
+            "write" => {
+                let written = output.lines().find(|l| l.starts_with("Written to"))
+                    .unwrap_or(output).to_string();
+                written[..written.len().min(80)].to_string()
+            }
+            "delete" => output[..output.len().min(60)].to_string(),
+            "search" => {
+                let matches = output.lines().last().unwrap_or("");
+                format!("search → {}", &matches[..matches.len().min(60)])
+            }
+            "answer" => format!("answer → {}", &output[..output.len().min(60)]),
+            _ => format!("{}()", tool_name),
+        };
+        ctx.observe(summary);
 
         // Track reads-since-last-write (for write-nudge)
         // Only write-class tools reset the counter; search/find/list/tree do NOT
