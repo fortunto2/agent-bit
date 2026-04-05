@@ -229,16 +229,18 @@ Results tracked in `benchmarks/runs/`.
 Plans live in `docs/plan/{trackId}/` (spec.md + plan.md). Use `/solo:build {trackId}` to execute.
 
 **Cost policy — save OpenAI credits:**
-- **Primary model: Nemotron** (free via CF Workers AI). Use for ALL development and testing.
+- **Primary models: Nemotron + Gemma 4** (both free via CF Workers AI). Use for ALL development and testing.
+- **Gemma 4 26B** (`--provider gemma4`): faster than Nemotron, comparable quality. Use for quick validation.
 - **OpenAI (GPT-5.4/mini): ONLY for final validation** — max 1-2 runs per session, not for iteration.
-- `make task T=tXX` — defaults to Nemotron. Do NOT add `PROVIDER=openai` unless specifically validating.
-- Never run `make full PROVIDER=openai-full` — too expensive. Use Nemotron for full benchmarks.
+- `make task T=tXX` — defaults to Nemotron. `make task T=tXX PROVIDER=gemma4` for quick checks.
+- Never run `make full PROVIDER=openai-full` — too expensive.
 
 **Verification after every code change:**
 ```bash
-cargo test                         # unit tests must pass
-make task T=tXX                    # verify on Nemotron (FREE, default)
-make task T=tXX PROVIDER=openai-full  # ONLY for final validation (costs money)
+cargo test                              # unit tests must pass
+make task T=tXX                         # verify on Nemotron (FREE, default)
+make task T=tXX PROVIDER=gemma4         # cross-validate on Gemma 4 (FREE, faster)
+make task T=tXX PROVIDER=openai-full    # ONLY for final validation (costs money)
 ```
 
 **Debugging a failing task — MANDATORY workflow:**
