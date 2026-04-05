@@ -418,30 +418,12 @@ async fn verify_and_submit(
             }
         }
         None => {
-            // No proposed answer — use verifier as primary, guess_outcome as fallback
+            // No proposed answer — agent didn't call answer(). Use guess_outcome heuristic.
+            // Verifier is not used here: its value is in correcting a wrong outcome code,
+            // not in guessing from scratch (CRM content confuses it — e.g. articles about "injection").
             let text = if last_msg.is_empty() { "Unable to determine answer" } else { last_msg };
-
-            // Skip verifier if no meaningful execution happened (API error, early abort)
-            let verified = if execution_summary.is_empty() {
-                None
-            } else {
-                pregrounding::run_outcome_verifier(
-                    model, base_url, api_key, extra_headers, temperature,
-                    instruction, &execution_summary, "UNKNOWN", text,
-                ).await
-            };
-
-            let outcome = match verified {
-                Some(ref v) if v.confidence >= 0.6 => {
-                    eprintln!("  🔍 Verifier: auto-answer {} (conf={:.2}) — {}", v.outcome, v.confidence, v.reason);
-                    v.outcome.as_str()
-                }
-                _ => {
-                    let guessed = guess_outcome(text, history);
-                    eprintln!("  ⚠ Auto-answer [{}] (verifier unavailable): {}", guessed, &text[..text.len().min(100)]);
-                    guessed
-                }
-            };
+            let outcome = guess_outcome(text, history);
+            eprintln!("  ⚠ Auto-answer [{}]: {}", outcome, &text[..text.len().min(100)]);
             let _ = pcm.answer(text, outcome, &[]).await;
         }
     }
