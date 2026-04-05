@@ -615,7 +615,23 @@ impl Tool for AnswerTool {
             validator.store_answer(&a.message, &a.outcome);
         }
 
-        self.pcm.propose_answer(&a.message, &a.outcome, &a.refs);
+        // Auto-refs: if LLM didn't provide refs and outcome is OK, populate from recent reads
+        let refs = if a.refs.is_empty() && a.outcome == "OUTCOME_OK" {
+            let reads = self.pcm.recent_read_paths();
+            // Filter to meaningful paths (accounts/, contacts/, not README, not tree output)
+            let auto: Vec<String> = reads.into_iter()
+                .filter(|p| (p.starts_with("accounts/") || p.starts_with("contacts/") || p.starts_with("my-invoices/"))
+                    && !p.contains("README"))
+                .collect();
+            if !auto.is_empty() {
+                eprintln!("  📎 Auto-refs: {:?}", auto);
+            }
+            auto
+        } else {
+            a.refs
+        };
+
+        self.pcm.propose_answer(&a.message, &a.outcome, &refs);
         Ok(ToolOutput::done(format!("Answer submitted: {}", a.message)))
     }
 }

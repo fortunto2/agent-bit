@@ -18,6 +18,8 @@ pub struct PcmClient {
     inner: PcmRuntimeClient<HttpClient>,
     pub answer_submitted: AtomicBool,
     proposed_answer: Mutex<Option<ProposedAnswer>>,
+    /// Paths of files read during this trial — for auto-refs in AnswerTool.
+    recent_reads: Mutex<Vec<String>>,
 }
 
 impl PcmClient {
@@ -28,6 +30,7 @@ impl PcmClient {
             inner: PcmRuntimeClient::new(http, config),
             answer_submitted: AtomicBool::new(false),
             proposed_answer: Mutex::new(None),
+            recent_reads: Mutex::new(Vec::new()),
         }
     }
 
@@ -66,7 +69,20 @@ impl PcmClient {
                 if end_line > 0 { end_line.to_string() } else { "$".into() }, path)
         } else if number { format!("$ cat -n {}", path) }
         else { format!("$ cat {}", path) };
+        // Track read paths for auto-refs
+        if let Ok(mut reads) = self.recent_reads.lock() {
+            let p = path.trim_start_matches('/').to_string();
+            if !reads.contains(&p) {
+                reads.push(p);
+                if reads.len() > 20 { reads.remove(0); }
+            }
+        }
         Ok(format!("{}\n{}", header, v.content))
+    }
+
+    /// Get recent read paths (for auto-refs in AnswerTool).
+    pub fn recent_read_paths(&self) -> Vec<String> {
+        self.recent_reads.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub async fn write(&self, path: &str, content: &str, start_line: i32, end_line: i32) -> Result<()> {
