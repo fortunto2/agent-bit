@@ -526,6 +526,19 @@ pub(crate) async fn run_agent(
     // Pre-load inbox files with semantic classification
     if let Ok(inbox_content) = read_inbox_files(pcm, shared_clf, Some(&crm_graph)).await {
         if !inbox_content.is_empty() {
+            // Structural guard: CROSS_COMPANY sender + financial request → auto-deny
+            // (LLM cannot be trusted to avoid file changes before DENIED on weak models)
+            let lower_inbox = inbox_content.to_lowercase();
+            let has_cross_company = lower_inbox.contains("sender: cross_company");
+            let has_financial = ["invoice", "financial", "payment", "contract", "statement"]
+                .iter().any(|kw| lower_inbox.contains(kw));
+            if has_cross_company && has_financial {
+                let msg = "Blocked: cross-company sender requesting financial data (lookalike domain)";
+                eprintln!("  ⛔ Structural guard: CROSS_COMPANY + financial → auto-deny");
+                pcm.answer(msg, "OUTCOME_DENIED_SECURITY", &[]).await.ok();
+                return Ok((msg.to_string(), String::new()));
+            }
+
             messages.push(Message::user(&inbox_content));
             // Classification headers are already inline — add summary hint for LLM
             let hint = scanner::analyze_inbox_content(&inbox_content);
