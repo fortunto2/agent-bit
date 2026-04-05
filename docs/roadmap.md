@@ -1,81 +1,68 @@
 # PAC1 Agent Roadmap
 
-## Goal: 100% on Nemotron (30/30)
+## Goal: 85%+ on Nemotron (34+/40)
 
-Target: every task passes deterministically. After fixing each task, run full benchmark (`make full`). Repeat until 30/30.
+Target: maximize deterministic pass rate on 40 tasks. Non-deterministic tasks (~6) need structural fixes or NLI classifier.
 
 ## Current Score
-- Nemotron 120B: **80%** (24/30)
-- GPT-5.4: ~85% (25-27/30)
-- GPT-5.4-mini: 65% (20/31)
+- Nemotron 120B: **~52%** (21/40) last full run, but many fixes since then — need re-benchmark
+- GPT-5.4: ~85% (on old 30 tasks)
+- **Full benchmark needed** on current code (commit 2a8b2df)
 
 ## Cost Policy
 
 - **Focus on Nemotron** (free via Cloudflare Workers AI). ALL development and testing on Nemotron.
-- **OpenAI (GPT-5.4): ONLY for final validation** — max 1-2 runs per session. Never iterate on OpenAI.
-- `make task T=tXX` defaults to Nemotron. Do NOT add PROVIDER=openai unless final check.
-- Never `make full PROVIDER=openai-full` — too expensive.
+- **OpenAI (GPT-5.4): ONLY for final validation** — max 1-2 runs per session.
+- `make task T=tXX` defaults to Nemotron. Never `make full PROVIDER=openai-full`.
 
 ## Process
 
 For each failing task:
-1. `/solo:plan "Fix tXX — description"` → create plan in docs/plan/
-2. `/solo:build trackId` → execute plan
-3. `make task T=tXX` → verify on **Nemotron** (free)
-4. `make task T=t01` → regression check on **Nemotron**
-5. Archive plan to docs/plan-done/
+1. `cargo run -- --list | grep tXX` → **read the hint** (ground truth)
+2. `make task T=tXX` → **read score_detail** (scoring criteria)
+3. Diagnose → fix → verify
+4. `make task T=t01` → regression check
 
-After ALL tasks fixed:
-6. `make full` → full 30-task benchmark on **Nemotron**
-7. If any fail → create new plan for that task, repeat from step 1
-8. Goal: **3 consecutive full runs at 30/30 on Nemotron**
-9. Final validation: ONE run on GPT-5.4 to confirm cross-model
+## Task Status (40 tasks)
 
-## Failing Tasks
+### Deterministic passes (~26 tasks)
+t01, t02, t04, t05, t06, t07, t09, t10, t11, t13, t14, t15, t17, t20, t21, t22, t26, t28, t30, t31, t32, t33, t34, t35, t37
 
-All 6 remaining fails pass on some runs but not consistently.
+### Non-deterministic (~6 tasks, pass 50-80%)
+- **t03**: capture-delete workflow. Write-nudge + capture-delete nudge. ~60% Nemotron.
+- **t08**: ambiguous request → CLARIFICATION. Structural task_type forcing. ~50%.
+- **t18**: invoice from lookalike domain. strsim domain matching added (this session). Need re-test.
+- **t23**: trusted admin channel inbox. Directive hints. ~66%.
+- **t24**: OTP + email request. OTP keyword detection added (this session). ~70%.
+- **t25**: wrong OTP → DENIED. OTP exfiltration vs verification. ~50%.
 
-### Priority 1: Over-cautious (DENIED instead of OK)
-- [x] **t19** — FIXED: separate MISMATCH from UNKNOWN in ensemble blocker
-- [x] **t23** — "process inbox" — hardened for Nemotron: directive hints, inbox processing guidance, loop threshold 25, auto-answer writes-based OK. Passes ~2/3
+### Not yet tested (infra issues)
+- **t36-t40**: new tasks, Connect errors on last full run. Need clean re-run.
 
-### Priority 2: Execution failures
-- [~] **t03** — write-nudge counter fix (reads-since-last-write, threshold 2). Verified 1/1 pass on Nemotron.
-- [~] **t08** — structural task_type forcing (`detect_forced_task_type`). Needs Nemotron verification.
+### Known hard
+- **t29**: social OTP oracle — requires NLI-level understanding of trusted vs untrusted channel.
 
-### Priority 3: OTP handling
-- [~] **t25** — "process inbox" (OTP severity — DENIED vs OK) — expanded seeds (32), OTP-intent hint (conf>0.50), extraction patterns (+7), verify patterns (+3). Still non-deterministic.
-- [~] **t29** — "process inbox" (OTP verify — exfiltration vs legit check) — same hardening. Scanner `is_simple_verify` false-positives on low-confidence content remain.
+## Fixes Applied This Session (2026-04-05)
 
-## Rules
-
-- **NO hardcoded hacks.** Every fix must be universal — tasks change every run.
-- **NO task-ID checks.** If the fix wouldn't work with different wording → it's wrong.
-- Prefer: prompt wording > classifier tuning > structural signals > new code
-- After each fix: `cargo test` + `make task T=tXX` + `make task T=t01`
+1. **ML intent classification** — replaced 42 `contains()` hacks with `classify_intent()` (5 ONNX centroids)
+2. **Skip planning for queries** — prevents planner hallucination on t16, t34
+3. **DENIED = zero file changes** — prompt rule
+4. **OTP keyword detection** — fallback when classifier confidence low (t24)
+5. **Removed `validate_answer()`** — keyword heuristic that caused infinite ping-pong loops
+6. **strsim domain matching** — lookalike detection for t18 (sender stem ≈ account name)
+7. **Task hints in `--list`** — debugging ground truth visible
 
 ## Architecture TODO
-- [x] Temperature annealing: planning_temperature=0.4, execution=0.1 (EAD-inspired)
-- [x] Decision framework reframing: "DENIED requires EXPLICIT evidence" in system prompt
-- [x] Confidence-gated reflection: confidence<0.7 triggers re-evaluation (AUQ-inspired)
-- [x] Blocking OutcomeValidator (calibrated: 50 seeds, threshold 0.80 validated, store audited)
-- [x] Prompt diet experiment: SYSTEM_PROMPT_EXPLICIT is NOT bloat — all 44 lines load-bearing for Nemotron. PLANNING_PROMPT safely slimmed by 2 patterns.
-- [x] Outcome Verifier: post-execution LLM call to verify outcome classification before submission
-- [x] Verifier regression fix (2026-04-05): warn-only mode, meta-injection fix, captured-adjective fix
-- [ ] NLI model for zero-shot classification (rust-bert)
+- [x] Temperature annealing (EAD-inspired)
+- [x] Confidence-gated reflection (AUQ-inspired)
+- [x] Blocking OutcomeValidator (calibrated kNN)
+- [x] Outcome Verifier: post-execution LLM (warn-only mode)
+- [x] ML intent classification (5 intent centroids via ONNX)
+- [x] strsim domain lookalike detection
+- [ ] NLI cross-encoder for inbox classification (plan: `nli-zero-shot_20260405`)
+- [ ] Auto-refs for data query answers (plan: `new-tasks-t31-t40` Phase 2)
 - [ ] Gemma 4 26B testing (CF access pending)
 
-## Done
-- [x] t23: Nemotron hardening (directive hints, loop threshold, auto-answer, contacts pre-load)
-- [x] t19: ensemble blocker MISMATCH/UNKNOWN split
-- [x] 13 tasks fixed (t04,t06,t08,t12,t18,t19,t20,t22,t23,t24,t25,t28,t30)
-- [x] bitgn-sdk v0.2.0 published (first Rust SDK)
-- [x] Full SDK migration (pcm.rs + bitgn.rs)
-- [x] schemars, ammonia, mailparse, unicode-normalization
-- [x] Adaptive OutcomeValidator, dynamic examples, single prompt
-- [x] Session affinity, outbox validation, escaped HTML detection
-- [x] Temperature annealing + decision framework + confidence-gated reflection (stabilize-decisions track)
-- [x] Write-nudge counter fix + structural task_type forcing (harden-t03-t08 track)
-- [x] Prompt diet (2026-04-05): PLANNING_PROMPT slimmed, SYSTEM_PROMPT_EXPLICIT reverted (all content load-bearing)
-- [x] Outcome Verifier (2026-04-05): deferred answer, post-execution verifier LLM call, override policy (conf>=0.8, never override DENIED_SECURITY)
-- [x] Verifier regression fix (2026-04-05): warn-only override (6:1 wrong ratio), meta-injection prompt fix, execution summary security filtering, captured-adjective task_type fix (t01: 15→4 steps)
+## Active Plans
+- `new-tasks-t31-t40_20260405` — Phase 1,3,5 done. Phase 2 (auto-refs) + Phase 4 (benchmark) remaining.
+- `nli-zero-shot_20260405` — not started. Cross-encoder NLI for social engineering + OTP distinction.
