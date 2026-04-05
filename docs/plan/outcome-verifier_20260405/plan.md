@@ -9,7 +9,7 @@
 
 Deferred answer pattern: AnswerTool stores proposed answer → execution loop ends → verifier LLM call reviews history → final submission via pcm.answer(). One extra LLM call per trial, replaces fragile `guess_outcome()` heuristic and catches outcome classification errors.
 
-## Phase 1: Deferred Answer Infrastructure
+## Phase 1: Deferred Answer Infrastructure <!-- checkpoint:e1aa184 -->
 
 Add ProposedAnswer storage to PcmClient so AnswerTool can defer RPC submission.
 
@@ -27,14 +27,14 @@ Add ProposedAnswer storage to PcmClient so AnswerTool can defer RPC submission.
 Add the verification prompt and `run_outcome_verifier()` function.
 
 ### Tasks
-- [ ] Task 2.1: Add `VERIFIER_PROMPT` to `src/prompts.rs` — focused 4-way classification with numbered steps and examples per outcome. Include explicit Nemotron-friendly verbose style.
-- [ ] Task 2.2: Add `verify_outcome_tool_def()` to `src/prompts.rs` — function calling schema returning `{outcome, reason, confidence}`.
-- [ ] Task 2.3: Add `run_outcome_verifier()` to `src/pregrounding.rs` — accepts (LLM config params, instruction, execution_summary, proposed_answer). Builds messages: system=VERIFIER_PROMPT, user=instruction+summary+proposed. Calls `llm.tools_call()` with verify schema. Returns `VerifiedOutcome { outcome, reason, confidence }`. Falls back to proposed answer on LLM error.
-- [ ] Task 2.4: Unit tests for `verify_outcome_tool_def()` schema validation and response parsing.
+- [x] Task 2.1: Add `VERIFIER_PROMPT` to `src/prompts.rs` — focused 4-way classification with numbered steps and examples per outcome. Include explicit Nemotron-friendly verbose style.
+- [x] Task 2.2: Add `verify_outcome_tool_def()` to `src/prompts.rs` — function calling schema returning `{outcome, reason, confidence}`.
+- [x] Task 2.3: Add `run_outcome_verifier()` to `src/pregrounding.rs` — accepts (LLM config params, instruction, execution_summary, proposed_answer). Builds messages: system=VERIFIER_PROMPT, user=instruction+summary+proposed. Calls `llm.tools_call()` with verify schema. Returns `VerifiedOutcome { outcome, reason, confidence }`. Falls back to proposed answer on LLM error.
+- [x] Task 2.4: Unit tests for `verify_outcome_tool_def()` schema validation and response parsing.
 
 ### Verification
-- [ ] `cargo test` passes
-- [ ] `run_outcome_verifier()` compiles and handles error cases
+- [x] `cargo test` passes (169 tests)
+- [x] `run_outcome_verifier()` compiles and handles error cases
 
 ## Phase 3: Integration & Override Policy
 
