@@ -87,7 +87,9 @@ fn detect_forced_task_type(instruction: &str) -> Option<&'static str> {
         return None;
     }
     // Exclusion: if instruction also implies file creation/editing, it's not delete-only
-    let has_write_intent = lower.contains("captur")  // capture, capturing, captured
+    // "captured" is adjective (describes target), not write intent; "capturing"/"capture" are verbs
+    let has_write_intent = lower.contains("capturing")
+        || (lower.contains("capture") && !lower.contains("captured"))
         || lower.contains("distill")
         || lower.contains("write")
         || lower.contains("creat")  // create, creating, created
@@ -967,6 +969,18 @@ mod tests {
     #[test]
     fn forced_task_type_delete_with_update_excluded() {
         assert_eq!(detect_forced_task_type("delete old data and update the log"), None);
+    }
+
+    #[test]
+    fn forced_task_type_remove_captured_cards() {
+        // "captured" is adjective (describes target), not active write intent
+        assert_eq!(detect_forced_task_type("remove all captured cards"), Some("delete"));
+    }
+
+    #[test]
+    fn forced_task_type_capture_verb_excluded() {
+        // "capture" as imperative verb implies write intent
+        assert_eq!(detect_forced_task_type("capture the data and delete old files"), None);
     }
 
     #[test]
