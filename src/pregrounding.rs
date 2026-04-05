@@ -580,8 +580,17 @@ pub(crate) async fn run_agent(
         }
     }
 
+    // Scale max_steps for multi-inbox: 5+ messages need more room
+    let effective_max_steps = if ready.inbox_files.len() > 3 {
+        let scaled = max_steps + (ready.inbox_files.len() * 4);
+        eprintln!("  📬 Multi-inbox ({} files): max_steps {}→{}", ready.inbox_files.len(), max_steps, scaled);
+        scaled
+    } else {
+        max_steps
+    };
+
     let loop_config = LoopConfig {
-        max_steps,
+        max_steps: effective_max_steps,
         loop_abort_threshold: 25,
         max_messages: 80,
         auto_complete_threshold: 5,
