@@ -11,23 +11,24 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 40 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 181 unit tests
+cargo test                                        # 188 unit tests
 cargo run -- --audit-store                        # audit adaptive store
 ```
 
 ## Architecture
 
 ```
+src/pipeline.rs      -- enum state machine (New→Classified→InboxScanned→SecurityChecked→Ready)
 src/main.rs          -- CLI, orchestration, verify_and_submit, guess_outcome
 src/prompts.rs       -- system prompts, planning prompt, dynamic examples
 src/scanner.rs       -- security scanning, inbox classification, domain matching
-src/pregrounding.rs  -- contact pre-grounding, inbox reading, planning, agent execution
+src/pregrounding.rs  -- context assembly, planning, hints, agent execution (uses pipeline states)
 src/agent.rs         -- Pac1Agent (Router + Structured CoT reasoning)
 src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
 src/pcm.rs           -- PcmRuntime client (11 file-system RPCs + ProposedAnswer)
 src/tools.rs         -- 11 Tool implementations + security guard + OutcomeValidator
 src/config.rs        -- Provider config with prompt_mode, temperature, planning_temperature
-src/classifier.rs    -- ONNX classifier + OutcomeValidator (adaptive kNN)
+src/classifier.rs    -- ONNX classifier (security + intent) + OutcomeValidator (adaptive kNN)
 src/crm_graph.rs     -- petgraph CRM knowledge graph (contacts, accounts, sender trust)
 ```
 
@@ -47,22 +48,26 @@ Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep)
 
 **Anti-pattern: do NOT use `contains()` / `split_whitespace()` / manual word overlap for string similarity. Use `strsim::normalized_levenshtein()` instead.**
 
-## Decision Pipeline
+## Decision Pipeline (enum state machine)
 
 ```
-instruction --> prescan (HTML only) --> start trial
-  --> build CRM graph (contacts/accounts, strips PCM headers)
-  --> classify inbox files (ML + structural + sender trust)
-  --> domain matching (MATCH/MISMATCH/UNKNOWN)
-  --> pre-grounding (tree, schema, inbox, channel stats)
-  --> contact pre-grounding (extract names, resolve ambiguity via CRM graph)
-  --> OutcomeValidator (seed + adaptive prototypes)
-  --> planning phase (read-only, 5 steps, planning_temperature=0.4)
-  --> execution loop (Pac1Agent, max 20 steps, SearchTool w/ CRM annotation, confidence-gated reflection)
-  --> propose_answer() (deferred, no RPC yet)
-  --> outcome verifier (single LLM call, 4-way classification, override policy)
-  --> submit_proposed() (final RPC submission)
+pipeline::New(instruction)
+  → classify()        [STAGE:classify]     — prescan + ML security label + ML intent
+pipeline::Classified { instruction, intent, label }
+  → scan_inbox()      [STAGE:scan_inbox]   — read inbox files, assess sender trust + security per file
+pipeline::InboxScanned { ..., inbox_files, crm_graph }
+  → check_security()  [STAGE:security]     — evaluate all inbox assessments, block on first threat
+pipeline::SecurityChecked { ... }
+  → ready()           [STAGE:ready]        — mark ready for LLM
+pipeline::Ready { instruction, intent, inbox_files, crm_graph }
+  → [pregrounding.rs] — context assembly, planning, hints, sgr_agent::run_loop()
+  → verify_and_submit() — outcome verifier + final RPC
 ```
+
+Each transition returns `Result<NextState, BlockReason>`. First block short-circuits — LLM never runs.
+Stage-by-stage trace in stderr: `[STAGE:classify]`, `[STAGE:scan_inbox]`, `[STAGE:security]`, `[STAGE:ready]`.
+
+Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_security().
 
 ## Key Design Decisions
 
