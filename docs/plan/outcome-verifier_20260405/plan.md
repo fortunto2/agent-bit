@@ -36,7 +36,7 @@ Add the verification prompt and `run_outcome_verifier()` function.
 - [x] `cargo test` passes (169 tests)
 - [x] `run_outcome_verifier()` compiles and handles error cases
 
-## Phase 3: Integration & Override Policy
+## Phase 3: Integration & Override Policy <!-- checkpoint:2c70b08 -->
 
 Wire verifier into main execution flow, replace guess_outcome, add override logic.
 
@@ -55,13 +55,13 @@ Wire verifier into main execution flow, replace guess_outcome, add override logi
 ## Phase 4: Docs & Cleanup
 
 ### Tasks
-- [ ] Task 4.1: Update CLAUDE.md — add Outcome Verifier section documenting: deferred answer pattern, override policy, verifier prompt design, logging format.
-- [ ] Task 4.2: Update `docs/roadmap.md` — add verifier to Architecture section, note impact on failing tasks.
-- [ ] Task 4.3: Remove dead code — `guess_outcome()` body simplified to fallback-only (verifier primary), clean unused imports.
+- [x] Task 4.1: Update CLAUDE.md — added Outcome Verifier section, updated architecture, decision pipeline, test count.
+- [x] Task 4.2: Update `docs/roadmap.md` — added verifier to Architecture and Done sections.
+- [x] Task 4.3: Cleanup — `guess_outcome()` comment updated to reflect fallback-only role, `auto_submit_if_needed` removed, unused `Ordering` import removed.
 
 ### Verification
-- [ ] CLAUDE.md reflects current project state
-- [ ] Linter clean, tests pass
+- [x] CLAUDE.md reflects current project state
+- [x] Linter clean, tests pass
 
 ## Final Verification
 - [ ] All acceptance criteria from spec met

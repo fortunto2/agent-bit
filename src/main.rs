@@ -420,10 +420,16 @@ async fn verify_and_submit(
         None => {
             // No proposed answer — use verifier as primary, guess_outcome as fallback
             let text = if last_msg.is_empty() { "Unable to determine answer" } else { last_msg };
-            let verified = pregrounding::run_outcome_verifier(
-                model, base_url, api_key, extra_headers, temperature,
-                instruction, &execution_summary, "UNKNOWN", text,
-            ).await;
+
+            // Skip verifier if no meaningful execution happened (API error, early abort)
+            let verified = if execution_summary.is_empty() {
+                None
+            } else {
+                pregrounding::run_outcome_verifier(
+                    model, base_url, api_key, extra_headers, temperature,
+                    instruction, &execution_summary, "UNKNOWN", text,
+                ).await
+            };
 
             let outcome = match verified {
                 Some(ref v) if v.confidence >= 0.6 => {
@@ -460,9 +466,9 @@ fn apply_override_policy(
     None // low confidence, keep proposed
 }
 
-/// Guess outcome from last message + full message history.
-/// Strong signals: model explicitly called answer() (already handled before this),
-/// or history shows successful writes. Weak signal: last_msg keyword matching.
+/// Fallback heuristic: guess outcome from last message + history.
+/// Only used when BOTH the agent failed to call answer() AND the verifier LLM call failed.
+/// Primary path is: AnswerTool → ProposedAnswer → Verifier → submit.
 fn guess_outcome(last_msg: &str, history: &str) -> &'static str {
     let h = history.to_lowercase();
     let l = last_msg.to_lowercase();
