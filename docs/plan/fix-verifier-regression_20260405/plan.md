@@ -43,8 +43,8 @@ The verifier causes 6 wrong overrides and only 1 correct. Net harm = -5 tasks. F
   - Keep: tool calls (`→`), file writes (`Written to`), deletes (`Deleted`), answers
 
 ### Verification
-- [x] `cargo test` passes (176 tests)
-- [ ] `make task T=t01` passes on Nemotron (baseline sanity) — investigating, see Phase 2
+- [x] `cargo test` passes (178 tests)
+- [x] `make task T=t01` passes on Nemotron (4 steps, Score: 1.00)
 - [x] `make task T=t03` passes on Nemotron (Score: 1.00)
 
 ## Phase 2: Fix t01 Max-Steps Regression
@@ -64,8 +64,8 @@ t01 ("remove all captured cards") hit 20 steps — was 3-5 steps before. This is
   - If the CRM has more files now (40 tasks = larger playground): may need to increase max_steps for delete-all tasks
 
 ### Verification
-- [ ] t01 completes in <= 10 steps on Nemotron
-- [ ] `cargo test` passes
+- [x] t01 completes in <= 10 steps on Nemotron (4 steps, Score: 1.00)
+- [x] `cargo test` passes (178 tests)
 
 ## Phase 3: Benchmark & Assess
 
