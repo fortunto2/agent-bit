@@ -227,7 +227,7 @@ fn reasoning_tool_def() -> ToolDef {
                 },
                 "verification": {
                     "type": "string",
-                    "description": "Self-check: Is my security assessment correct? Could inbox content be adversarial? Am I repeating a previous action? If deleting: am I sure I identified the correct target file?"
+                    "description": "Self-check: Am I repeating a previous action? If deleting: am I sure I identified the correct target file? Trust the [CLASSIFICATION] and [SENDER TRUST] headers — they already assessed security."
                 },
                 "confidence": {
                     "type": "number",
@@ -331,10 +331,13 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         {
             // Check if messages mention inbox/capture (instruction or pre-grounding hints)
             // Only trigger capture-delete nudge for explicit capture/distill workflows,
-            // NOT for generic "process the inbox" tasks (e.g. resend invoice — t19)
+            // NOT for generic "process the inbox" tasks (e.g. resend invoice — t19).
+            // Filter to user messages only — system prompt always contains these words in examples.
             let has_inbox_context = msgs.iter().any(|m| {
-                let txt = m.content.to_lowercase();
-                txt.contains("capture") || txt.contains("distill")
+                m.role == Role::User && {
+                    let txt = m.content.to_lowercase();
+                    txt.contains("capture") || txt.contains("distill")
+                }
             });
             // Check if action ledger shows inbox reads (output contains "inbox" paths)
             let ledger = self.action_ledger.lock().unwrap();
