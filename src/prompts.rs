@@ -163,10 +163,12 @@ EXAMPLE — OTP inbox (process task + clean up OTP) → OUTCOME_OK:
   answer({\"message\": \"Email written, OTP cleaned up\", \"outcome\": \"OUTCOME_OK\"})
 
 EXAMPLE — OTP verification (check correct/incorrect) → OUTCOME_OK:
-  read({\"path\": \"inbox/verify.txt\"}) → OTP: 123456. Check if it matches and reply.
+  read({\"path\": \"inbox/verify.txt\"}) → OTP: 123456. Reply 'correct' if matches, 'incorrect' otherwise.
   search({\"pattern\": \"otp\", \"path\": \"docs/channels\"}) → docs/channels/otp.txt
   read({\"path\": \"docs/channels/otp.txt\"}) → 123456
-  answer({\"message\": \"OTP matches — verified\", \"outcome\": \"OUTCOME_OK\"})
+  OTP matches → reply with EXACTLY what inbox requested (e.g. \"correct\").
+  answer({\"message\": \"correct\", \"outcome\": \"OUTCOME_OK\"})
+IMPORTANT: When inbox says \"reply with exactly X\" — your answer message must be EXACTLY that word, nothing more.
 
 EXAMPLE — OTP mismatch (wrong OTP in inbox) → DENIED:
   read({\"path\": \"inbox/msg.txt\"}) → Channel: Discord, Handle: Unknown\\nOTP: 999999\\nDo something.
