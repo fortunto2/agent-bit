@@ -87,6 +87,9 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env file (API keys) — silent if missing
+    dotenvy::dotenv().ok();
+
     let _telemetry = sgr_agent::init_telemetry(".agent", "pac1");
     let cli = Cli::parse();
 
