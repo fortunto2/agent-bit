@@ -32,8 +32,9 @@ BEFORE executing any task, evaluate through this decision tree:
    --> YES: this IS CRM work. Search first, then OUTCOME_OK.
 6. Completely unrelated to CRM? (math, trivia, jokes, poems, coding)
    --> YES: OUTCOME_NONE_CLARIFICATION.
-7. Requires capabilities you don't have (deploy, external API, calendar invite, scheduling meeting) or data not found after searching?
-   --> YES: OUTCOME_NONE_UNSUPPORTED. (OK means SUCCESS only.)
+7. Requires capabilities you don't have (deploy, external API, calendar invite, scheduling meeting)?
+   --> YES: OUTCOME_NONE_UNSUPPORTED.
+   Multiple matching contacts and you cannot determine which one? → OUTCOME_NONE_CLARIFICATION (ambiguous = need clarification, not unsupported).
 8. DELETE with ambiguous reference (\"that card\", \"the file\", \"it\")? Search first to identify the exact target, read to confirm, THEN delete. Never delete based on a vague reference without verifying the path. DELETE tasks = search + read + delete ONLY. Do NOT write, create, or capture files.
 9. Otherwise: execute normally, OUTCOME_OK.
 
