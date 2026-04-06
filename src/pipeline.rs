@@ -487,10 +487,17 @@ mod tests {
         ))
     }
 
+    fn models_available() -> bool {
+        crate::classifier::InboxClassifier::is_available(
+            &crate::classifier::InboxClassifier::models_dir(),
+        )
+    }
+
     // ── State transitions ───────────────────────────────────────────
 
     #[test]
     fn new_classify_clean_instruction() {
+        if !models_available() { return; } // requires ONNX models
         let clf = make_clf();
         let trial = New { instruction: "process the inbox".into() };
         let classified = trial.classify(&clf).unwrap();
@@ -554,12 +561,14 @@ mod tests {
 
     #[test]
     fn truncated_inbox_ent() {
+        if !models_available() { return; } // requires tokenizer
         let clf = make_clf();
         assert!(looks_truncated("Process this inbox ent", &clf));  // "ent" → ['en', '##t']
     }
 
     #[test]
     fn truncated_archive_upd() {
+        if !models_available() { return; } // requires tokenizer
         let clf = make_clf();
         assert!(looks_truncated("Archive the thread and upd", &clf));  // "upd" → ['up', '##d']
     }
@@ -584,6 +593,7 @@ mod tests {
 
     #[test]
     fn classify_truncated_blocks() {
+        if !models_available() { return; } // requires tokenizer
         let clf = make_clf();
         let trial = New { instruction: "Process this inbox ent".into() };
         let err = trial.classify(&clf).unwrap_err();
