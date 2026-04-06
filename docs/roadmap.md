@@ -72,10 +72,10 @@ make task T=tXX                   # read score_detail + step trace table
 - [x] OpenRouter Qwen provider configured
 
 ## Architecture TODO
-- [ ] **NLI cross-encoder** — helps t25, t29. Plan: `nli-zero-shot_20260405`
+- [x] **NLI cross-encoder** — implemented via ONNX (nli-deberta-v3-xsmall). 3-way ensemble. No regression on stable tasks. NLI adds signal on natural text, neutral on structured OTP messages.
 - [ ] Full benchmark on current code (`make full`)
 - [ ] Dead code cleanup: scanner.rs still has unused helpers
 
 ## Active Plans
 - `new-tasks-t31-t40_20260405` — Phase 4 (benchmark) remaining only
-- `nli-zero-shot_20260405` — not started. Helps t25, t29.
+- `nli-zero-shot_20260405` — complete. NLI classifier integrated into ensemble.
