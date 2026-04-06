@@ -274,15 +274,17 @@ benchmarks/tasks/{task}/{provider}_{timestamp}/
 ├── contacts.txt     # pre-loaded contacts summary
 ├── accounts.txt     # pre-loaded accounts summary
 ├── inbox_00_*.txt   # raw inbox files + classification headers
-└── pipeline.txt     # instruction, intent, label, inbox count
+├── pipeline.txt     # instruction, intent, label, inbox count
+└── bitgn_log.url    # BitGN runtime log URL (open in browser)
 ```
 `make task` auto-dumps via DUMP_TRIAL env. `make full` does not (parallel). `benchmarks/tasks/` is gitignored.
 
 **Debugging a failing task — MANDATORY workflow:**
 1. `cargo run -- --list` — read the **hint** (e.g. "invoice from lookalike", "unknown discord + valid OTP"). Hint tells you what the harness expects.
 2. `make task T=tXX` — read **score_detail** lines (e.g. "expected outcome X got Y", "unexpected file delete", "missing reference"). These are the harness scoring criteria.
-3. Read trial logs (`--- Trial logs ---` section) — harness-side view of what changed.
-4. ONLY THEN form a hypothesis and fix. Do NOT guess from instruction text alone — hints and score_detail are the source of truth.
+3. **Open BitGN log** — `cat benchmarks/tasks/tXX/*/bitgn_log.url` → open URL in browser or `WebFetch URL/?format=json&offset=0` to see harness-side RPC timeline (all reads, writes, deletes, answer). This shows EXACTLY what the agent did from the harness perspective.
+4. Read trial dump files (inbox, contacts, accounts, pipeline) for offline analysis.
+5. ONLY THEN form a hypothesis and fix. Do NOT guess from instruction text alone — hints, score_detail, and BitGN logs are the source of truth.
 
 **Available skills:**
 - `/evolve tXX` -- autonomous hypothesis-test loop for a failing task

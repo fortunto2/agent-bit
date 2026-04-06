@@ -230,8 +230,18 @@ async fn main() -> Result<()> {
                     return;
                 }
             };
+            let log_url = format!("https://{}.eu.bitgn.com", trial.trial_id);
             eprintln!("  Trial: {}", trial.trial_id);
-            eprintln!("  📋 Log: https://{}.eu.bitgn.com", trial.trial_id);
+            eprintln!("  📋 Log: {}", log_url);
+
+            // Save log URL into dump dir for offline access
+            if let Ok(dump_dir) = std::env::var("DUMP_TRIAL") {
+                let _ = std::fs::create_dir_all(&dump_dir);
+                let _ = std::fs::write(
+                    format!("{}/bitgn_log.url", dump_dir),
+                    format!("{}\n", log_url),
+                );
+            }
 
             let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
             let (last_msg, history) = run_trial(

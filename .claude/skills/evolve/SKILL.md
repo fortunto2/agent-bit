@@ -109,7 +109,7 @@ Then run the task and read **score_detail** lines (printed after `Score:`):
 
 **Do NOT skip this step.** Hints + score_detail are the harness scoring criteria. Without them you're guessing.
 
-### Step 1: Read the full log
+### Step 1: Read the full log + BitGN runtime log
 
 ```bash
 cat /tmp/evolve-{task_id}.log
@@ -125,6 +125,16 @@ Extract:
 - **LLM reasoning** — what the model thought at each step (🔍 Verify lines)
 - **Actions taken** — what tools the model called
 - **Final answer** — what outcome was submitted
+
+**BitGN runtime log (harness-side view):**
+```bash
+# Get URL from dump
+cat benchmarks/tasks/{task_id}/*/bitgn_log.url
+# Fetch full RPC timeline via WebFetch:
+WebFetch "URL/?format=json&offset=0"
+```
+Shows ALL RPCs from harness perspective: every read, write, delete, answer with actual file contents.
+This is the ground truth — more reliable than agent-side logs for understanding what actually happened.
 
 ### Step 2: Identify the failure point
 
