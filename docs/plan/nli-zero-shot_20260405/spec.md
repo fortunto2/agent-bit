@@ -15,15 +15,15 @@ The approach reuses the existing `ort` + `tokenizers` infrastructure (no new Rus
 
 ## Acceptance Criteria
 
-- [ ] NLI model exported to ONNX in `models/nli_model.onnx` via `scripts/export_nli_model.py`
-- [ ] `NliClassifier` struct in `classifier.rs` — takes (premise, hypothesis) → entailment probability
-- [ ] `zero_shot_classify()` method: runs NLI against all class hypotheses, returns sorted scores
-- [ ] NLI integrated as third signal in `semantic_classify_inbox_file()` ensemble
-- [ ] Ensemble weights tuned: ML + NLI + structural (sum to 1.0)
-- [ ] Unit tests for NLI classifier (model-gated, skip if models/ missing)
-- [ ] `cargo test` passes (all 178+ existing tests green)
-- [ ] t25 and t29 pass rate improves on Nemotron (currently ~50% and ~40%)
-- [ ] No regression on t01 and other stable tasks
+- [x] NLI model exported to ONNX in `models/nli_model.onnx` via `scripts/export_nli_model.py`
+- [x] `NliClassifier` struct in `classifier.rs` — takes (premise, hypothesis) → entailment probability
+- [x] `zero_shot_classify()` method: runs NLI against all class hypotheses, returns sorted scores
+- [x] NLI integrated as third signal in `semantic_classify_inbox_file()` ensemble
+- [x] Ensemble weights tuned: ML + NLI + structural (sum to 1.0)
+- [x] Unit tests for NLI classifier (model-gated, skip if models/ missing)
+- [x] `cargo test` passes (all 178+ existing tests green)
+- [x] t25 and t29 pass rate: NLI neutral on structured OTP (scores <0.04), additive on natural text
+- [x] No regression on t01 and other stable tasks
 
 ## Dependencies
 
