@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 40 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 188 unit tests
+cargo test                                        # 202 unit tests
 cargo run -- --audit-store                        # audit adaptive store
 ```
 
@@ -28,7 +28,7 @@ src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
 src/pcm.rs           -- PcmRuntime client (11 file-system RPCs + ProposedAnswer)
 src/tools.rs         -- 11 Tool implementations + security guard + OutcomeValidator
 src/config.rs        -- Provider config with prompt_mode, temperature, planning_temperature
-src/classifier.rs    -- ONNX classifier (security + intent) + OutcomeValidator (adaptive kNN)
+src/classifier.rs    -- ONNX classifier (security + intent) + NliClassifier (NLI zero-shot) + OutcomeValidator (adaptive kNN)
 src/crm_graph.rs     -- petgraph CRM knowledge graph (contacts, accounts, sender trust)
 ```
 
@@ -73,8 +73,18 @@ Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_sec
 
 ### Security: 3-layer defense
 1. **Pre-scan**: literal HTML injection only (`<script>`, `<iframe>`)
-2. **Classifier ensemble**: 0.7*ML(ONNX) + 0.3*structural signals, injected as [CLASSIFICATION] headers
+2. **Classifier ensemble**: 3-way when NLI available (0.5*ML + 0.3*NLI + 0.2*structural), 2-way fallback (0.7*ML + 0.3*structural). Injected as [CLASSIFICATION] headers.
 3. **LLM decision tree**: numbered steps in system prompt guide outcome selection
+
+### NLI Zero-Shot Classifier
+- **Model**: cross-encoder/nli-deberta-v3-xsmall (22M params, ~273MB ONNX)
+- **Export**: `uv run --with transformers --with onnxruntime --with onnx --with onnxscript --with torch --with sentencepiece --with protobuf scripts/export_nli_model.py`
+- **Files**: `models/nli_model.onnx`, `models/nli_tokenizer.json`, `models/nli_config.json` (gitignored)
+- **Method**: For each (text, hypothesis) pair, computes P(entailment) via softmax over [contradiction, neutral, entailment] logits
+- **Hypotheses (v2)**: tuned for CRM discrimination (0.778 entailment) and credential detection (0.636)
+- **Ensemble integration**: NLI overrides ML when NLI confidence > 0.5 and labels disagree
+- **Limitation**: Low signal on structured messages (OTP, headers) — works best on natural language text
+- **Graceful degradation**: If NLI model not present, falls back to 2-way ensemble (no hard dependency)
 
 ### Domain Matching (sender trust)
 - `extract_sender_domain()` + `check_sender_domain_match()`
