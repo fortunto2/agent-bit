@@ -9,7 +9,7 @@ use crate::pcm::PcmClient;
 #[derive(Debug, Clone)]
 pub enum Node {
     Contact { name: String, email: Option<String> },
-    Account { name: String },
+    Account { name: String, account_manager: Option<String> },
     Domain { name: String },
 }
 
@@ -172,6 +172,9 @@ impl CrmGraph {
             let domain = v.get("domain").or(v.get("Domain")).or(v.get("website"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            let account_manager = v.get("account_manager").or(v.get("accountManager"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             // Record ID → name mapping for contact.account_id resolution
             if let Some(id) = v.get("id").and_then(|v| v.as_str()) {
                 if !name.is_empty() {
@@ -179,13 +182,14 @@ impl CrmGraph {
                 }
             }
             if !name.is_empty() {
-                self.add_account(&name, domain.as_deref());
+                self.add_account_full(&name, domain.as_deref(), account_manager.as_deref());
             }
             return;
         }
 
         let mut name = String::new();
         let mut domain = None;
+        let mut account_manager = None;
         for line in content.lines() {
             let lower = line.to_lowercase();
             if lower.starts_with("# ") {
@@ -194,10 +198,12 @@ impl CrmGraph {
                 name = line.splitn(2, ':').last().unwrap_or("").trim().to_string();
             } else if lower.starts_with("domain:") || lower.starts_with("website:") {
                 domain = line.splitn(2, ':').last().map(|s| s.trim().to_string());
+            } else if lower.starts_with("account_manager:") || lower.starts_with("account manager:") {
+                account_manager = line.splitn(2, ':').last().map(|s| s.trim().to_string());
             }
         }
         if !name.is_empty() {
-            self.add_account(&name, domain.as_deref());
+            self.add_account_full(&name, domain.as_deref(), account_manager.as_deref());
         }
     }
 
@@ -225,7 +231,7 @@ impl CrmGraph {
             let account_idx = if let Some(&idx) = self.name_index.get(&company.to_lowercase()) {
                 idx
             } else {
-                let idx = self.graph.add_node(Node::Account { name: company.to_string() });
+                let idx = self.graph.add_node(Node::Account { name: company.to_string(), account_manager: None });
                 self.name_index.insert(company.to_lowercase(), idx);
                 idx
             };
@@ -234,10 +240,23 @@ impl CrmGraph {
     }
 
     pub fn add_account(&mut self, name: &str, domain: Option<&str>) {
+        self.add_account_full(name, domain, None);
+    }
+
+    pub fn add_account_full(&mut self, name: &str, domain: Option<&str>, account_manager: Option<&str>) {
         let account_idx = if let Some(&idx) = self.name_index.get(&name.to_lowercase()) {
+            // Update account_manager if provided and node already exists
+            if let Some(mgr) = account_manager {
+                if let Node::Account { ref mut account_manager, .. } = self.graph[idx] {
+                    *account_manager = Some(mgr.to_string());
+                }
+            }
             idx
         } else {
-            let idx = self.graph.add_node(Node::Account { name: name.to_string() });
+            let idx = self.graph.add_node(Node::Account {
+                name: name.to_string(),
+                account_manager: account_manager.map(|s| s.to_string()),
+            });
             self.name_index.insert(name.to_lowercase(), idx);
             idx
         };
@@ -384,7 +403,7 @@ impl CrmGraph {
     pub fn account_for_contact(&self, contact_name: &str) -> Option<String> {
         let &idx = self.name_index.get(&contact_name.to_lowercase())?;
         self.graph.neighbors(idx).find_map(|n| {
-            if let Node::Account { ref name } = self.graph[n] {
+            if let Node::Account { ref name, .. } = self.graph[n] {
                 Some(name.clone())
             } else {
                 None
@@ -442,12 +461,12 @@ impl CrmGraph {
         self.graph.node_count()
     }
 
-    /// Compact summary of all accounts with domains and linked contacts for pre-grounding.
-    /// Format: "- AccountName (domain.com) — contacts: X, Y" per line.
+    /// Compact summary of all accounts with domains, manager, and linked contacts for pre-grounding.
+    /// Format: "- AccountName (domain.com) — mgr: X — contacts: Y, Z" per line.
     pub fn accounts_summary(&self) -> String {
         let mut lines: Vec<String> = Vec::new();
         for idx in self.graph.node_indices() {
-            if let Node::Account { ref name } = self.graph[idx] {
+            if let Node::Account { ref name, ref account_manager } = self.graph[idx] {
                 // Find domain via outgoing HasDomain edge
                 let domain = self.graph.neighbors(idx).find_map(|n| {
                     if let Node::Domain { ref name } = self.graph[n] {
@@ -468,12 +487,13 @@ impl CrmGraph {
                     })
                     .collect();
                 let domain_str = domain.as_deref().unwrap_or("no domain");
+                let mgr_str = account_manager.as_deref().unwrap_or("none");
                 let contacts_str = if contacts.is_empty() {
                     "none".to_string()
                 } else {
                     contacts.join(", ")
                 };
-                lines.push(format!("- {} ({}) — contacts: {}", name, domain_str, contacts_str));
+                lines.push(format!("- {} ({}) — mgr: {} — contacts: {}", name, domain_str, mgr_str, contacts_str));
             }
         }
         lines.sort();
@@ -487,7 +507,7 @@ impl CrmGraph {
         for idx in self.graph.node_indices() {
             if let Node::Contact { ref name, ref email } = self.graph[idx] {
                 let account = self.graph.neighbors(idx).find_map(|n| {
-                    if let Node::Account { ref name } = self.graph[n] {
+                    if let Node::Account { ref name, .. } = self.graph[n] {
                         Some(name.clone())
                     } else {
                         None

@@ -433,7 +433,7 @@ pub(crate) async fn run_agent(
     let accounts_summary = ready.crm_graph.accounts_summary();
     if !accounts_summary.is_empty() {
         messages.push(Message::user(&format!(
-            "ACCOUNTS (pre-loaded — use these for account lookups):\n{}", accounts_summary
+            "ACCOUNTS (pre-loaded — use these to identify the right account, then ALWAYS read() the account file before answering):\n{}\nIMPORTANT: When a task references an account, you MUST read() the account file (accounts/acct_XXX.json) to confirm details. Do NOT rely on search results or this summary alone.", accounts_summary
         )));
         eprintln!("  Accounts pre-loaded: {} entries", accounts_summary.lines().count());
     }
