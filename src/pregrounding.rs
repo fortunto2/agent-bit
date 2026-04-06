@@ -642,10 +642,15 @@ pub(crate) async fn run_agent(
                 n
             )));
         } else {
-            messages.push(Message::user(
-                "REMINDER: After processing inbox content, you MUST delete the original inbox file(s). \
-                 Workflow: act (write/update) → DELETE inbox file → answer."
-            ));
+            // Only push delete reminder when instruction explicitly involves capture/distill/delete workflow.
+            // For "process the inbox" tasks that respond to requests (resend invoice, etc.), do NOT force deletion.
+            let instr_lower = ready.instruction.to_lowercase();
+            if instr_lower.contains("capture") || instr_lower.contains("distill") || (instr_lower.contains("delete") && instr_lower.contains("inbox")) {
+                messages.push(Message::user(
+                    "REMINDER: After processing inbox content, you MUST delete the original inbox file(s). \
+                     Workflow: act (write/update) → DELETE inbox file → answer."
+                ));
+            }
         }
     }
 

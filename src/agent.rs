@@ -330,9 +330,11 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             && self.capture_delete_nudge_sent.load(Ordering::SeqCst) == 0
         {
             // Check if messages mention inbox/capture (instruction or pre-grounding hints)
+            // Only trigger capture-delete nudge for explicit capture/distill workflows,
+            // NOT for generic "process the inbox" tasks (e.g. resend invoice — t19)
             let has_inbox_context = msgs.iter().any(|m| {
                 let txt = m.content.to_lowercase();
-                txt.contains("inbox") || txt.contains("capture") || txt.contains("distill")
+                txt.contains("capture") || txt.contains("distill")
             });
             // Check if action ledger shows inbox reads (output contains "inbox" paths)
             let ledger = self.action_ledger.lock().unwrap();
