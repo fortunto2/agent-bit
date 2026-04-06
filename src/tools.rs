@@ -670,38 +670,42 @@ impl Tool for AnswerTool {
             validator.store_answer(&a.message, &a.outcome);
         }
 
-        // Auto-refs: if LLM didn't provide refs and outcome is OK, populate from recent reads
+        // Auto-refs: merge LLM-provided refs with recent reads for complete coverage.
         // Also follow account_id references: contact file → account file
-        let refs = if a.refs.is_empty() && a.outcome == "OUTCOME_OK" {
+        let refs = {
             let reads = self.pcm.recent_read_paths();
-            let mut auto: Vec<String> = reads.iter()
-                .filter(|p| (p.starts_with("accounts/") || p.starts_with("contacts/") || p.starts_with("my-invoices/"))
-                    && !p.contains("README"))
-                .cloned()
-                .collect();
+            let mut merged: Vec<String> = a.refs.clone();
 
-            // Follow account_id: if we read contacts/cont_XXX.json, infer accounts/acct_XXX.json
-            let inferred: Vec<String> = reads.iter()
-                .filter(|p| p.starts_with("contacts/"))
-                .filter_map(|p| {
-                    // contacts/cont_009.json → accounts/acct_009.json
-                    let id = p.trim_start_matches("contacts/cont_").trim_end_matches(".json");
-                    if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit() || c == '_') {
-                        let acct_path = format!("accounts/acct_{}.json", id);
-                        if !auto.contains(&acct_path) { Some(acct_path) } else { None }
-                    } else {
-                        None
+            if a.outcome == "OUTCOME_OK" {
+                // Add recent reads (accounts, contacts, invoices) not already in refs
+                for p in reads.iter() {
+                    if (p.starts_with("accounts/") || p.starts_with("contacts/") || p.starts_with("my-invoices/"))
+                        && !p.contains("README") && !merged.contains(p)
+                    {
+                        merged.push(p.clone());
                     }
-                })
-                .collect();
-            auto.extend(inferred);
+                }
 
-            if !auto.is_empty() {
-                eprintln!("  📎 Auto-refs: {:?}", auto);
+                // Follow account_id: if we read contacts/cont_XXX.json, infer accounts/acct_XXX.json
+                let inferred: Vec<String> = reads.iter()
+                    .filter(|p| p.starts_with("contacts/"))
+                    .filter_map(|p| {
+                        let id = p.trim_start_matches("contacts/cont_").trim_end_matches(".json");
+                        if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit() || c == '_') {
+                            let acct_path = format!("accounts/acct_{}.json", id);
+                            if !merged.contains(&acct_path) { Some(acct_path) } else { None }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                merged.extend(inferred);
             }
-            auto
-        } else {
-            a.refs
+
+            if merged.len() > a.refs.len() {
+                eprintln!("  📎 Auto-refs merged: {:?}", merged);
+            }
+            merged
         };
 
         self.pcm.propose_answer(&a.message, &a.outcome, &refs);
