@@ -40,3 +40,4 @@ tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 ndarray = "0.16"
 petgraph = "0.7"
 strsim = "0.11"
+dotenvy = "0.15.7"
