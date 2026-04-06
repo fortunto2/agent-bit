@@ -55,6 +55,17 @@ sgr_mode = false  # experimental: multi-action works but Nemotron loops on compl
 cf-aig-request-timeout = "300000"
 x-session-affinity = "pac1-agent"
 
+[providers.nemotron-v2]
+model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
+base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
+api_key_env = "CF_AI_API_KEY"
+prompt_mode = "v2"
+temperature = 0.1
+planning_temperature = 0.4
+[providers.nemotron-v2.headers]
+cf-aig-request-timeout = "300000"
+x-session-affinity = "pac1-agent"
+
 # AI-NOTE: Keychain auth uses Claude Code subscription OAuth token (sk-ant-oat01-...).
 # Haiku works. Sonnet/opus get 429 (subscription rate limit on premium models).
 # Token expires ~8h — restart agent if you get 401. See sgr-agent/providers/CLAUDE_PROXY_RESEARCH.md.
