@@ -20,6 +20,9 @@ pub struct PcmClient {
     proposed_answer: Mutex<Option<ProposedAnswer>>,
     /// Paths of files read during this trial — for auto-refs in AnswerTool.
     recent_reads: Mutex<Vec<String>>,
+    /// Read cache — keyed by path. Invalidated by write/delete to same path.
+    /// Single owner: PcmClient. All tools share via Arc<PcmClient>.
+    read_cache: Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl PcmClient {
@@ -31,6 +34,7 @@ impl PcmClient {
             answer_submitted: AtomicBool::new(false),
             proposed_answer: Mutex::new(None),
             recent_reads: Mutex::new(Vec::new()),
+            read_cache: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -60,6 +64,17 @@ impl PcmClient {
     }
 
     pub async fn read(&self, path: &str, number: bool, start_line: i32, end_line: i32) -> Result<String> {
+        // Cache: full-file reads (no line range, no numbering)
+        let is_cacheable = start_line == 0 && end_line == 0 && !number;
+        let norm = path.trim_start_matches('/');
+        if is_cacheable {
+            if let Ok(cache) = self.read_cache.lock() {
+                if let Some(cached) = cache.get(norm) {
+                    return Ok(cached.clone());
+                }
+            }
+        }
+
         let resp = self.inner.read(proto::ReadRequest {
             path: path.into(), number, start_line, end_line, ..Default::default()
         }).await.map_err(|e| Self::err("Read", e))?;
@@ -69,15 +84,22 @@ impl PcmClient {
                 if end_line > 0 { end_line.to_string() } else { "$".into() }, path)
         } else if number { format!("$ cat -n {}", path) }
         else { format!("$ cat {}", path) };
-        // Track read paths for auto-refs
+        let result = format!("{}\n{}", header, v.content);
+
+        // Track read paths for auto-refs + cache
         if let Ok(mut reads) = self.recent_reads.lock() {
-            let p = path.trim_start_matches('/').to_string();
+            let p = norm.to_string();
             if !reads.contains(&p) {
                 reads.push(p);
                 if reads.len() > 20 { reads.remove(0); }
             }
         }
-        Ok(format!("{}\n{}", header, v.content))
+        if is_cacheable {
+            if let Ok(mut cache) = self.read_cache.lock() {
+                cache.insert(norm.to_string(), result.clone());
+            }
+        }
+        Ok(result)
     }
 
     /// Get recent read paths (for auto-refs in AnswerTool).
@@ -89,12 +111,19 @@ impl PcmClient {
         self.inner.write(proto::WriteRequest {
             path: path.into(), content: content.into(), start_line, end_line, ..Default::default()
         }).await.map_err(|e| Self::err("Write", e))?;
+        // Invalidate read cache — file content changed
+        if let Ok(mut cache) = self.read_cache.lock() {
+            cache.remove(path.trim_start_matches('/'));
+        }
         Ok(())
     }
 
     pub async fn delete(&self, path: &str) -> Result<()> {
         self.inner.delete(proto::DeleteRequest { path: path.into(), ..Default::default() })
             .await.map_err(|e| Self::err("Delete", e))?;
+        if let Ok(mut cache) = self.read_cache.lock() {
+            cache.remove(path.trim_start_matches('/'));
+        }
         Ok(())
     }
 

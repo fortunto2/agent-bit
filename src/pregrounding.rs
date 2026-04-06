@@ -167,7 +167,7 @@ pub(crate) async fn run_planning_phase(
 
     // Read-only tools for planning + submit_plan
     let registry = ToolRegistry::new()
-        .register(tools::ReadTool::new(pcm.clone()))
+        .register(tools::ReadTool(pcm.clone()))
         .register(tools::SearchTool(pcm.clone(), None))
         .register(tools::FindTool(pcm.clone()))
         .register(tools::ListTool(pcm.clone()))
@@ -533,7 +533,7 @@ pub(crate) async fn run_agent(
 
     // Build tool registry with OutcomeValidator (passed in from main.rs for score-gated learning)
     let registry = ToolRegistry::new()
-        .register(tools::ReadTool::new(pcm.clone()))
+        .register(tools::ReadTool(pcm.clone()))
         .register(tools::WriteTool(pcm.clone()))
         .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
         .register(tools::FindTool(pcm.clone()))
