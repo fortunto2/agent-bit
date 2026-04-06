@@ -231,6 +231,7 @@ async fn main() -> Result<()> {
                 }
             };
             eprintln!("  Trial: {}", trial.trial_id);
+            eprintln!("  📋 Log: https://{}.eu.bitgn.com", trial.trial_id);
 
             let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
             let (last_msg, history) = run_trial(
