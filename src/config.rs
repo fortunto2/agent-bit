@@ -82,7 +82,7 @@ impl Config {
         };
 
         let headers: Vec<(String, String)> = p.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let prompt_mode = p.prompt_mode.clone().unwrap_or_else(|| "standard".into());
+        let prompt_mode = p.prompt_mode.clone().unwrap_or_else(|| "explicit".into());
         let temperature = p.temperature.unwrap_or(0.2);
         let planning_temperature = p.planning_temperature.unwrap_or(0.4);
 
