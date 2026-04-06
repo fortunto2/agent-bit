@@ -32,6 +32,7 @@ pub struct BlockReason {
 pub struct SenderAssessment {
     pub trust: SenderTrust,
     pub domain_match: &'static str,
+    #[allow(dead_code)]
     pub reasons: Vec<String>,
 }
 
@@ -42,6 +43,7 @@ pub struct SecurityAssessment {
     pub blocked: Option<BlockReason>,
     pub ml_label: String,
     pub ml_conf: f32,
+    #[allow(dead_code)]
     pub structural: f32,
     pub sender: Option<SenderAssessment>,
 }
@@ -106,6 +108,7 @@ impl std::fmt::Debug for SecurityChecked {
 pub struct Ready {
     pub instruction: String,
     pub intent: String,
+    #[allow(dead_code)]
     pub instruction_label: String,
     pub inbox_files: Vec<InboxFile>,
     pub crm_graph: CrmGraph,

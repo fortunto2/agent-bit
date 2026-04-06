@@ -14,7 +14,9 @@ pub(crate) type SharedNliClassifier = Arc<std::sync::Mutex<Option<classifier::Nl
 pub(crate) struct FileClassification {
     pub label: String,
     pub confidence: f32,
+    #[allow(dead_code)]
     pub sender_trust: crm_graph::SenderTrust,
+    #[allow(dead_code)]
     pub recommendation: String,
 }
 
