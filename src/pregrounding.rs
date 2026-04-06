@@ -596,32 +596,57 @@ pub(crate) async fn run_agent(
         auto_complete_threshold: 5,
     };
 
-    // Collect RunStats from loop events for evolution tracking
+    // Collect RunStats + step trace for evolution tracking
     let mut run_stats = RunStats::default();
+    let step_trace: std::sync::Arc<std::sync::Mutex<Vec<(u32, String, String)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let trace_ref = step_trace.clone();
+    let mut current_step: u32 = 0;
+
     let result = run_loop(
         &agent, &registry, &mut ctx, &mut messages, &loop_config,
         |event| match event {
             LoopEvent::StepStart { step } => {
                 run_stats.steps = step;
-                eprintln!("  [step {}/{}]", step, max_steps);
+                current_step = step as u32;
             }
             LoopEvent::Decision(ref d) => {
                 for tc in &d.tool_calls {
-                    let args_str = tc.arguments.to_string();
-                    let preview = if args_str.len() > 120 { &args_str[..args_str.floor_char_boundary(120)] } else { &args_str };
-                    eprintln!("    → {}({})", tc.name, preview);
+                    let key_arg = tc.arguments.as_object()
+                        .and_then(|o| o.get("path").or(o.get("pattern")).or(o.get("root")))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    eprintln!("    → {}({})", tc.name, key_arg);
                 }
             }
             LoopEvent::ToolResult { name, output } => {
-                let p = if output.len() > 150 { &output[..output.floor_char_boundary(150)] } else { &output };
-                eprintln!("    {} = {}", name, p.replace('\n', "↵"));
+                // Compact result summary
+                let summary = if output.starts_with("$ cat ") || output.starts_with("$ ls ") {
+                    let lines = output.lines().count();
+                    format!("{} lines", lines)
+                } else if output.starts_with("Written to ") {
+                    output[..output.len().min(60)].to_string()
+                } else if output.starts_with("Deleted ") {
+                    output.to_string()
+                } else if output.starts_with("Answer submitted") {
+                    "✓ submitted".to_string()
+                } else {
+                    let p = &output[..output.len().min(50)];
+                    p.replace('\n', " ")
+                };
+                eprintln!("    {} = {}", name, summary);
+
+                // Record for trace table
+                if let Ok(mut trace) = trace_ref.lock() {
+                    trace.push((current_step, name.to_string(), summary.clone()));
+                }
+
                 run_stats.successful_calls += 1;
                 run_stats.cost_chars += output.len();
             }
             LoopEvent::Completed { steps } => {
                 run_stats.completed = true;
                 run_stats.steps = steps;
-                eprintln!("  ✓ Done in {} steps", steps);
             }
             LoopEvent::LoopDetected { count } => {
                 run_stats.loop_warnings += 1;
@@ -639,11 +664,28 @@ pub(crate) async fn run_agent(
     )
     .await;
 
+    // Print step trace table
+    if let Ok(trace) = step_trace.lock() {
+        if !trace.is_empty() {
+            eprintln!("  ┌─────┬────────────┬─────────────────────────────────────────────────┐");
+            eprintln!("  │ Step│ Tool       │ Result                                          │");
+            eprintln!("  ├─────┼────────────┼─────────────────────────────────────────────────┤");
+            for (step, tool, result) in trace.iter() {
+                let t = if tool.len() > 10 { &tool[..10] } else { tool };
+                let r = if result.len() > 47 { &result[..result.floor_char_boundary(47)] } else { result };
+                eprintln!("  │{:4} │ {:10} │ {:47} │", step, t, r);
+            }
+            eprintln!("  └─────┴────────────┴─────────────────────────────────────────────────┘");
+        }
+    }
+    let status = if run_stats.completed { "✓ Done" } else { "⚠ Max steps" };
+    eprintln!("  {} in {} steps | {} tool calls | {} errors",
+        status, run_stats.steps, run_stats.successful_calls, run_stats.tool_errors);
+
     // Evolution: score + evaluate + log
     let eff_score = evolution::score(&run_stats);
     let improvements = evolution::evaluate(&run_stats);
-    eprintln!("  📊 Efficiency: {:.2} | steps={} errors={} loops={}",
-        eff_score, run_stats.steps, run_stats.tool_errors, run_stats.loop_warnings);
+    eprintln!("  📊 Efficiency: {:.2}", eff_score);
     for imp in &improvements {
         eprintln!("  💡 [P{}] {}: {}", imp.priority, imp.title, imp.reason);
     }
