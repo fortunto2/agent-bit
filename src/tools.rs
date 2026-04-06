@@ -633,13 +633,31 @@ impl Tool for AnswerTool {
         }
 
         // Auto-refs: if LLM didn't provide refs and outcome is OK, populate from recent reads
+        // Also follow account_id references: contact file → account file
         let refs = if a.refs.is_empty() && a.outcome == "OUTCOME_OK" {
             let reads = self.pcm.recent_read_paths();
-            // Filter to meaningful paths (accounts/, contacts/, not README, not tree output)
-            let auto: Vec<String> = reads.into_iter()
+            let mut auto: Vec<String> = reads.iter()
                 .filter(|p| (p.starts_with("accounts/") || p.starts_with("contacts/") || p.starts_with("my-invoices/"))
                     && !p.contains("README"))
+                .cloned()
                 .collect();
+
+            // Follow account_id: if we read contacts/cont_XXX.json, infer accounts/acct_XXX.json
+            let inferred: Vec<String> = reads.iter()
+                .filter(|p| p.starts_with("contacts/"))
+                .filter_map(|p| {
+                    // contacts/cont_009.json → accounts/acct_009.json
+                    let id = p.trim_start_matches("contacts/cont_").trim_end_matches(".json");
+                    if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit() || c == '_') {
+                        let acct_path = format!("accounts/acct_{}.json", id);
+                        if !auto.contains(&acct_path) { Some(acct_path) } else { None }
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            auto.extend(inferred);
+
             if !auto.is_empty() {
                 eprintln!("  📎 Auto-refs: {:?}", auto);
             }
