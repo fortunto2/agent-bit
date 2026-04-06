@@ -326,3 +326,35 @@ Pipeline: build→deploy→review | Tracks: 17 completed | Iters: ~86 | Waste: 4
 - Last 4 tracks (calibrate, prompt-diet, outcome-verifier): 12 iters, 0 waste — pipeline excellence when not fighting infrastructure
 - Technical axis 9/10: outcome verifier, confidence reflection, temperature annealing, CRM graph, structural task-type forcing, 65-seed adaptive kNN
 - Benchmark: Nemotron 80%, GPT-5.4 85% — strong for a free model
+
+## 2026-04-06 (Final, updated) | agent-bit | Factory Score: 3/10
+
+Pipeline: build→deploy→review | Tracks: 28 completed | Iters: 97 | Waste: 38.1% | Score: 6.1/10
+
+### Defects
+- **CRITICAL** | solo-dev.sh: No stall detection — **13th retro**. 14-iter deploy spin + 8-iter build spin + 3-iter review spin = 25 wasted iters from 3 spin loops.
+  - Fix: `solo-dev.sh` — track `last_sha`, abort after 3 consecutive same-SHA + no-signal
+- **CRITICAL** | solo-dev.sh: No per-stage timeout. 329m single build consumed global timeout. 3 global timeouts total.
+  - Fix: `solo-dev.sh` — per-stage timeouts: build=90m, deploy=30m, review=30m
+- **HIGH** | solo:deploy: No local-only project detection (13th retro). CLI agent = spin-loop bait.
+  - Fix: `/deploy` SKILL.md — detect CLI/local in CLAUDE.md, auto-`<solo:done/>`
+- **HIGH** | solo:build: Spec checkbox maintenance absent (13th retro). 2 tracks at 0% checkboxes despite completion.
+  - Fix: `/build` SKILL.md — post-phase spec.md checkbox pass
+
+### Harness Gaps
+- **Context:** CLAUDE.md at 21KB — clean and accurate. Account pre-loading added (parity with contacts). No scratch/ for observation masking.
+- **Constraints:** **Retro→fix feedback loop broken for 13 retros.** Same 4 defects, same patches proposed, zero applied. Evolution log now 370+ lines of process theater.
+- **Precedents:** Last 7 tracks (calibrate → account-context) all clean 3/3. Account pre-loading solved 5 tasks without ML — simple context injection > complex NLP. Pipeline works excellently when not fighting infrastructure.
+
+### Missing
+- **META-CRITICAL:** Retro→fix pipeline. 13 retros, zero factory patches applied.
+- Stall detection, per-stage timeout, local-only deploy, spec checkbox auto-update — all designed, none landed.
+
+### What worked well
+- 28 tracks completed autonomously across ~65h wall time
+- Test suite: 105 → 215 (+105%), zero regressions
+- 95.7% conventional commits (200/209 since Apr 3)
+- refine-security-signals: narrowed Signal 5 to domain-mismatch-only, threaded scanner recommendation to agent annotations
+- Account pre-loading, NLI 3-way ensemble, pipeline state machine, kNN outcome validator, deferred answers
+- v0.3.0 + v0.4.0 released, 215 tests green
+- Last 8 tracks: 24 iters, 0 waste — pipeline fundamentals proven solid
