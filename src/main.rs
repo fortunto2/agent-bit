@@ -32,6 +32,8 @@ mod pipeline;
 mod pregrounding;
 mod prompts;
 mod scanner;
+#[allow(dead_code)]
+mod pac1_sgr;
 mod tools;
 
 #[derive(Parser)]
