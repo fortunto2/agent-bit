@@ -442,6 +442,44 @@ impl CrmGraph {
         self.graph.node_count()
     }
 
+    /// Compact summary of all accounts with domains and linked contacts for pre-grounding.
+    /// Format: "- AccountName (domain.com) — contacts: X, Y" per line.
+    pub fn accounts_summary(&self) -> String {
+        let mut lines: Vec<String> = Vec::new();
+        for idx in self.graph.node_indices() {
+            if let Node::Account { ref name } = self.graph[idx] {
+                // Find domain via outgoing HasDomain edge
+                let domain = self.graph.neighbors(idx).find_map(|n| {
+                    if let Node::Domain { ref name } = self.graph[n] {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                });
+                // Find contacts via incoming WorksAt edges
+                let contacts: Vec<String> = self.graph
+                    .neighbors_directed(idx, petgraph::Direction::Incoming)
+                    .filter_map(|n| {
+                        if let Node::Contact { ref name, .. } = self.graph[n] {
+                            Some(name.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let domain_str = domain.as_deref().unwrap_or("no domain");
+                let contacts_str = if contacts.is_empty() {
+                    "none".to_string()
+                } else {
+                    contacts.join(", ")
+                };
+                lines.push(format!("- {} ({}) — contacts: {}", name, domain_str, contacts_str));
+            }
+        }
+        lines.sort();
+        lines.join("\n")
+    }
+
     /// Compact summary of all contacts with their accounts for pre-grounding.
     /// Format: "name (email) — account" per line.
     pub fn contacts_summary(&self) -> String {
@@ -650,5 +688,54 @@ mod tests {
         assert!(summary.contains("john@acme.com"), "Summary should contain email");
         assert!(summary.contains("Acme Corp"), "Summary should contain account");
         assert!(summary.lines().count() >= 2, "Summary should have multiple lines");
+    }
+
+    #[test]
+    fn accounts_summary_format() {
+        let g = build_test_graph();
+        let summary = g.accounts_summary();
+        assert!(summary.contains("Acme Corp"), "Summary should contain account name");
+        assert!(summary.contains("acme.com"), "Summary should contain domain");
+        assert!(summary.contains("Globex Inc"), "Summary should contain second account");
+        assert!(summary.contains("globex.com"), "Summary should contain second domain");
+        assert!(summary.lines().count() >= 2, "Summary should have multiple lines");
+    }
+
+    #[test]
+    fn accounts_summary_includes_contacts() {
+        let g = build_test_graph();
+        let summary = g.accounts_summary();
+        // Acme Corp has John Smith and Jane Doe
+        let acme_line = summary.lines().find(|l| l.contains("Acme Corp")).unwrap();
+        assert!(acme_line.contains("John Smith"), "Acme line should list John Smith");
+        assert!(acme_line.contains("Jane Doe"), "Acme line should list Jane Doe");
+        // Globex has Bob Wilson
+        let globex_line = summary.lines().find(|l| l.contains("Globex Inc")).unwrap();
+        assert!(globex_line.contains("Bob Wilson"), "Globex line should list Bob Wilson");
+    }
+
+    #[test]
+    fn accounts_summary_sorted() {
+        let g = build_test_graph();
+        let summary = g.accounts_summary();
+        let lines: Vec<&str> = summary.lines().collect();
+        assert!(lines[0].contains("Acme Corp"), "First line should be Acme (alphabetical)");
+        assert!(lines[1].contains("Globex Inc"), "Second line should be Globex (alphabetical)");
+    }
+
+    #[test]
+    fn accounts_summary_no_domain() {
+        let mut g = CrmGraph::new();
+        g.add_account("No Domain Corp", None);
+        let summary = g.accounts_summary();
+        assert!(summary.contains("no domain"), "Account without domain should show 'no domain'");
+    }
+
+    #[test]
+    fn accounts_summary_no_contacts() {
+        let mut g = CrmGraph::new();
+        g.add_account("Lonely Corp", Some("lonely.com"));
+        let summary = g.accounts_summary();
+        assert!(summary.contains("contacts: none"), "Account with no contacts should show 'none'");
     }
 }
