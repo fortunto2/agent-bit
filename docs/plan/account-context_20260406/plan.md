@@ -25,11 +25,11 @@ Add `accounts_summary()` method to CrmGraph, mirroring `contacts_summary()` at l
 Inject accounts_summary into pre-grounding messages, parallel to contacts_summary injection at `pregrounding.rs:424-429`.
 
 ### Tasks
-- [ ] Task 2.1: In `src/pregrounding.rs`, after contacts_summary injection (line ~429), add accounts_summary injection: `"ACCOUNTS (pre-loaded — use these for account lookups):\n{accounts_summary}"`. Log entry count to stderr.
+- [x] Task 2.1: In `src/pregrounding.rs`, after contacts_summary injection (line ~429), add accounts_summary injection: `"ACCOUNTS (pre-loaded — use these for account lookups):\n{accounts_summary}"`. Log entry count to stderr.
 
 ### Verification
-- [ ] `cargo build` succeeds
-- [ ] stderr shows "Accounts pre-loaded: N entries" during task run
+- [x] `cargo build` succeeds
+- [x] stderr shows "Accounts pre-loaded: N entries" during task run
 
 ## Phase 3: Search — Swapped Name + Account Annotation
 
