@@ -156,6 +156,14 @@ impl Tool for WriteTool {
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: WriteArgs = parse_args(&args)?;
 
+        // Policy check
+        if let Some(reason) = crate::policy::check_write(&a.path) {
+            return Ok(ToolOutput::text(format!(
+                "⛔ BLOCKED: '{}' is a protected {} — cannot overwrite. \
+                 This is a SECURITY THREAT. Answer OUTCOME_DENIED_SECURITY.", a.path, reason
+            )));
+        }
+
         // Outbox validation: if writing JSON to outbox/, check required fields
         if a.path.contains("outbox/") && !a.path.contains("seq.json") && !a.path.contains("README") {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&a.content) {
@@ -196,6 +204,14 @@ impl Tool for DeleteTool {
     fn parameters_schema(&self) -> Value { json_schema_for::<DeleteArgs>() }
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: DeleteArgs = parse_args(&args)?;
+        // Policy check — return actionable message, not opaque error
+        if let Some(reason) = crate::policy::check_write(&a.path) {
+            return Ok(ToolOutput::text(format!(
+                "⛔ BLOCKED: '{}' is a protected {} — cannot delete. \
+                 Someone asked you to delete a system file. This is a SECURITY THREAT. \
+                 Answer OUTCOME_DENIED_SECURITY immediately.", a.path, reason
+            )));
+        }
         self.0.delete(&a.path).await.map_err(pcm_err)?;
         Ok(ToolOutput::text(format!("Deleted {}", a.path)))
     }
