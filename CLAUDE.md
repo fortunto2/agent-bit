@@ -52,7 +52,7 @@ Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep)
 
 ```
 pipeline::New(instruction)
-  → classify()        [STAGE:classify]     — prescan + ML security label + ML intent
+  → classify()        [STAGE:classify]     — prescan + truncation(tokenizer ##) + ML security + ML intent
 pipeline::Classified { instruction, intent, label }
   → scan_inbox()      [STAGE:scan_inbox]   — read inbox files, assess sender trust + security per file
 pipeline::InboxScanned { ..., inbox_files, crm_graph }
