@@ -323,6 +323,31 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             msgs.push(Message::user(&nudge));
         }
 
+        // Capture-write guard: if capture/distill task has inbox reads but NO writes yet,
+        // inject strong reminder to write BEFORE deleting. Fires every step until a write occurs.
+        // This prevents the 3-step failure mode: read → delete → answer (score 0).
+        {
+            let has_capture_context = msgs.iter().any(|m| {
+                m.role == Role::User && {
+                    let txt = m.content.to_lowercase();
+                    txt.contains("capture") || txt.contains("distill")
+                }
+            });
+            if has_capture_context {
+                let ledger = self.action_ledger.lock().unwrap();
+                let has_any_read = ledger.iter().any(|e| e.contains("read"));
+                let has_any_write = ledger.iter().any(|e| e.contains("write"));
+                drop(ledger);
+                if has_any_read && !has_any_write {
+                    let nudge = "⚠ CAPTURE GUARD: You have read files but NOT written anything yet. \
+                                 You MUST write() to the capture folder AND distill card BEFORE deleting. \
+                                 Do NOT delete or answer until you have written.";
+                    eprintln!("  📝 Capture-write guard at step {}", step);
+                    msgs.push(Message::user(nudge));
+                }
+            }
+        }
+
         // Capture-delete nudge: at 30%+ of steps, if task involves inbox capture
         // and inbox files were read but not deleted, strongly remind to delete
         // (lowered from 50% — agent often finishes writes by step 6-8, needs delete reminder earlier)
