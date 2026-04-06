@@ -29,6 +29,7 @@ mod config;
 mod crm_graph;
 mod pcm;
 mod pipeline;
+mod policy;
 mod pregrounding;
 mod prompts;
 mod scanner;
