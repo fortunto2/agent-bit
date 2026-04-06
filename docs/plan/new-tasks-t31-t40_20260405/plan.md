@@ -23,7 +23,7 @@ Planning phase rewrites instruction with wrong target. Fix: ML intent classifica
 - [x] Task 1.3: Add DATA QUERY hint for `intent_query`: "Read source file, include refs in answer()". <!-- sha:5dce69e -->
 
 ### Verification
-- [x] `cargo test` passes (181 tests)
+- [x] `cargo test` passes (195 tests)
 - [x] `make task T=t16` passes on Nemotron (was failing due to planning hallucination, now 1.00)
 - [x] t34 passes on Nemotron (same root cause as t16)
 
@@ -34,14 +34,15 @@ The evaluator expects file refs in answer() for data-query tasks. The LLM often 
 ### Tasks
 
 - [x] Task 2.1: Add DATA QUERY pregrounding hint telling agent to include file path in refs. <!-- sha:5dce69e -->
-- [ ] Task 2.2: **Auto-refs** — structural fallback when LLM still omits refs:
-  - Track recent reads in PcmClient: `recent_reads: Mutex<Vec<String>>`
-  - AnswerTool: if `refs` is empty AND outcome is OK → auto-populate from recent reads
-  - This is insurance — hint works ~80% of the time, auto-refs catches the rest
+- [x] Task 2.2: **Auto-refs** implemented: <!-- sha:3f68344, 4489f61 -->
+  - PcmClient tracks `recent_read_paths()` from read() calls
+  - AnswerTool: if refs empty + OK → auto-populate from recent reads (accounts/, contacts/, invoices/)
+  - account_id inference: contacts/cont_XXX.json → accounts/acct_XXX.json
+  - Read cache in ReadTool via sgr-agent tool_cache (eliminates redundant PCM reads)
 
 ### Verification
-- [ ] `cargo test` passes
-- [ ] t34 and t16 consistently include refs
+- [x] `cargo test` passes (195 tests)
+- [x] t16 consistently includes refs (auto-refs from recent reads)
 
 ## Phase 3: Prompt Hints for New Task Patterns — DONE
 
@@ -54,7 +55,7 @@ The evaluator expects file refs in answer() for data-query tasks. The LLM often 
 - [x] Task 3.2: Task hints visible in `--list` output for debugging. <!-- sha:1adae89 -->
 
 ### Verification
-- [x] `cargo test` passes (181 tests)
+- [x] `cargo test` passes (195 tests)
 
 ## Phase 4: Benchmark New Tasks — NEEDS RE-RUN
 
