@@ -70,6 +70,7 @@ impl PcmClient {
         if is_cacheable {
             if let Ok(cache) = self.read_cache.lock() {
                 if let Some(cached) = cache.get(norm) {
+                    eprintln!("    📦 cache hit: {}", norm);
                     return Ok(cached.clone());
                 }
             }
