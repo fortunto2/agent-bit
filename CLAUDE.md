@@ -260,10 +260,23 @@ Plans live in `docs/plan/{trackId}/` (spec.md + plan.md). Use `/solo:build {trac
 **Verification after every code change:**
 ```bash
 cargo test                              # unit tests must pass
-make task T=tXX                         # verify on Nemotron (FREE, default)
+make task T=tXX                         # verify + save logs + dump PCM data
 make task T=tXX PROVIDER=gemma4         # cross-validate on Gemma 4 (FREE, faster)
 make task T=tXX PROVIDER=openai-full    # ONLY for final validation (costs money)
 ```
+
+**Trial logs & PCM data dump:**
+```
+benchmarks/tasks/{task}/{provider}_{timestamp}/
+├── run.log          # full agent log (steps, tool calls, score)
+├── tree.txt         # PCM filesystem tree
+├── agents.md        # AGENTS.MD content
+├── contacts.txt     # pre-loaded contacts summary
+├── accounts.txt     # pre-loaded accounts summary
+├── inbox_00_*.txt   # raw inbox files + classification headers
+└── pipeline.txt     # instruction, intent, label, inbox count
+```
+`make task` auto-dumps via DUMP_TRIAL env. `make full` does not (parallel). `benchmarks/tasks/` is gitignored.
 
 **Debugging a failing task — MANDATORY workflow:**
 1. `cargo run -- --list` — read the **hint** (e.g. "invoice from lookalike", "unknown discord + valid OTP"). Hint tells you what the harness expects.
