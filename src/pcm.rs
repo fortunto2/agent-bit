@@ -109,6 +109,9 @@ impl PcmClient {
     }
 
     pub async fn write(&self, path: &str, content: &str, start_line: i32, end_line: i32) -> Result<()> {
+        if let Some(reason) = crate::policy::check_write(path) {
+            anyhow::bail!("BLOCKED: '{}' is protected ({}) — cannot overwrite", path, reason);
+        }
         self.inner.write(proto::WriteRequest {
             path: path.into(), content: content.into(), start_line, end_line, ..Default::default()
         }).await.map_err(|e| Self::err("Write", e))?;
@@ -120,6 +123,9 @@ impl PcmClient {
     }
 
     pub async fn delete(&self, path: &str) -> Result<()> {
+        if let Some(reason) = crate::policy::check_write(path) {
+            anyhow::bail!("BLOCKED: '{}' is protected ({}) — cannot delete", path, reason);
+        }
         self.inner.delete(proto::DeleteRequest { path: path.into(), ..Default::default() })
             .await.map_err(|e| Self::err("Delete", e))?;
         if let Ok(mut cache) = self.read_cache.lock() {
