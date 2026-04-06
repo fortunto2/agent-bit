@@ -9,7 +9,13 @@ use crate::pcm::PcmClient;
 #[derive(Debug, Clone)]
 pub enum Node {
     Contact { name: String, email: Option<String> },
-    Account { name: String, account_manager: Option<String> },
+    Account {
+        name: String,
+        account_manager: Option<String>,
+        industry: Option<String>,
+        country: Option<String>,
+        description: Option<String>,
+    },
     Domain { name: String },
 }
 
@@ -175,6 +181,15 @@ impl CrmGraph {
             let account_manager = v.get("account_manager").or(v.get("accountManager"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+            let industry = v.get("industry").or(v.get("Industry")).or(v.get("sector"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let country = v.get("country").or(v.get("Country")).or(v.get("region"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let description = v.get("description").or(v.get("Description")).or(v.get("notes"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             // Record ID → name mapping for contact.account_id resolution
             if let Some(id) = v.get("id").and_then(|v| v.as_str()) {
                 if !name.is_empty() {
@@ -182,7 +197,8 @@ impl CrmGraph {
                 }
             }
             if !name.is_empty() {
-                self.add_account_full(&name, domain.as_deref(), account_manager.as_deref());
+                self.add_account_extended(&name, domain.as_deref(), account_manager.as_deref(),
+                    industry.as_deref(), country.as_deref(), description.as_deref());
             }
             return;
         }
@@ -190,6 +206,9 @@ impl CrmGraph {
         let mut name = String::new();
         let mut domain = None;
         let mut account_manager = None;
+        let mut industry = None;
+        let mut country = None;
+        let mut description = None;
         for line in content.lines() {
             let lower = line.to_lowercase();
             if lower.starts_with("# ") {
@@ -200,10 +219,17 @@ impl CrmGraph {
                 domain = line.splitn(2, ':').last().map(|s| s.trim().to_string());
             } else if lower.starts_with("account_manager:") || lower.starts_with("account manager:") {
                 account_manager = line.splitn(2, ':').last().map(|s| s.trim().to_string());
+            } else if lower.starts_with("industry:") || lower.starts_with("sector:") {
+                industry = line.splitn(2, ':').last().map(|s| s.trim().to_string());
+            } else if lower.starts_with("country:") || lower.starts_with("region:") {
+                country = line.splitn(2, ':').last().map(|s| s.trim().to_string());
+            } else if lower.starts_with("description:") || lower.starts_with("notes:") {
+                description = line.splitn(2, ':').last().map(|s| s.trim().to_string());
             }
         }
         if !name.is_empty() {
-            self.add_account_full(&name, domain.as_deref(), account_manager.as_deref());
+            self.add_account_extended(&name, domain.as_deref(), account_manager.as_deref(),
+                industry.as_deref(), country.as_deref(), description.as_deref());
         }
     }
 
@@ -231,7 +257,7 @@ impl CrmGraph {
             let account_idx = if let Some(&idx) = self.name_index.get(&company.to_lowercase()) {
                 idx
             } else {
-                let idx = self.graph.add_node(Node::Account { name: company.to_string(), account_manager: None });
+                let idx = self.graph.add_node(Node::Account { name: company.to_string(), account_manager: None, industry: None, country: None, description: None });
                 self.name_index.insert(company.to_lowercase(), idx);
                 idx
             };
@@ -244,11 +270,38 @@ impl CrmGraph {
     }
 
     pub fn add_account_full(&mut self, name: &str, domain: Option<&str>, account_manager: Option<&str>) {
+        self.add_account_extended(name, domain, account_manager, None, None, None);
+    }
+
+    pub fn add_account_extended(
+        &mut self,
+        name: &str,
+        domain: Option<&str>,
+        account_manager: Option<&str>,
+        industry: Option<&str>,
+        country: Option<&str>,
+        description: Option<&str>,
+    ) {
         let account_idx = if let Some(&idx) = self.name_index.get(&name.to_lowercase()) {
-            // Update account_manager if provided and node already exists
-            if let Some(mgr) = account_manager {
-                if let Node::Account { ref mut account_manager, .. } = self.graph[idx] {
-                    *account_manager = Some(mgr.to_string());
+            // Update fields if provided and node already exists
+            if let Node::Account {
+                account_manager: ref mut mgr_field,
+                industry: ref mut ind_field,
+                country: ref mut cty_field,
+                description: ref mut desc_field,
+                ..
+            } = self.graph[idx] {
+                if let Some(mgr) = account_manager {
+                    *mgr_field = Some(mgr.to_string());
+                }
+                if let Some(ind) = industry {
+                    *ind_field = Some(ind.to_string());
+                }
+                if let Some(cty) = country {
+                    *cty_field = Some(cty.to_string());
+                }
+                if let Some(desc) = description {
+                    *desc_field = Some(desc.to_string());
                 }
             }
             idx
@@ -256,6 +309,9 @@ impl CrmGraph {
             let idx = self.graph.add_node(Node::Account {
                 name: name.to_string(),
                 account_manager: account_manager.map(|s| s.to_string()),
+                industry: industry.map(|s| s.to_string()),
+                country: country.map(|s| s.to_string()),
+                description: description.map(|s| s.to_string()),
             });
             self.name_index.insert(name.to_lowercase(), idx);
             idx
@@ -462,11 +518,11 @@ impl CrmGraph {
     }
 
     /// Compact summary of all accounts with domains, manager, and linked contacts for pre-grounding.
-    /// Format: "- AccountName (domain.com) — mgr: X — contacts: Y, Z" per line.
+    /// Includes industry/country/description when available to help resolve account paraphrases.
     pub fn accounts_summary(&self) -> String {
         let mut lines: Vec<String> = Vec::new();
         for idx in self.graph.node_indices() {
-            if let Node::Account { ref name, ref account_manager } = self.graph[idx] {
+            if let Node::Account { ref name, ref account_manager, ref industry, ref country, ref description } = self.graph[idx] {
                 // Find domain via outgoing HasDomain edge
                 let domain = self.graph.neighbors(idx).find_map(|n| {
                     if let Node::Domain { ref name } = self.graph[n] {
@@ -493,7 +549,17 @@ impl CrmGraph {
                 } else {
                     contacts.join(", ")
                 };
-                lines.push(format!("- {} ({}) — mgr: {} — contacts: {}", name, domain_str, mgr_str, contacts_str));
+                // Build optional metadata suffix for paraphrase resolution
+                let mut meta_parts: Vec<&str> = Vec::new();
+                if let Some(ind) = industry { meta_parts.push(ind); }
+                if let Some(cty) = country { meta_parts.push(cty); }
+                if let Some(desc) = description { meta_parts.push(desc); }
+                let meta_str = if meta_parts.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", meta_parts.join(", "))
+                };
+                lines.push(format!("- {} ({}) — mgr: {} — contacts: {}{}", name, domain_str, mgr_str, contacts_str, meta_str));
             }
         }
         lines.sort();
