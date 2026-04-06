@@ -29,7 +29,7 @@ Fix: pre-load accounts into context (parity with contacts), add swapped-name sea
 - [x] Account search results annotated with contact info (parity with `annotate_contact_results`)
 - [x] `cargo test` passes with new tests for accounts_summary, expand_query swapped, annotate_account_results
 - [x] t35, t38, t39, t40 pass on Nemotron (make task T=tXX)
-- [ ] No regressions on t01-t34, t37
+- [x] No regressions on t01-t34, t37
 
 ## Dependencies
 
