@@ -71,10 +71,13 @@ Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_sec
 
 ## Key Design Decisions
 
-### Security: 3-layer defense
+### Security: 3-layer defense + 5-signal assess_security
 1. **Pre-scan**: literal HTML injection only (`<script>`, `<iframe>`)
-2. **Classifier ensemble**: 3-way when NLI available (0.5*ML + 0.3*NLI + 0.2*structural), 2-way fallback (0.7*ML + 0.3*structural). Injected as [CLASSIFICATION] headers.
+2. **Classifier ensemble**: 3-way when NLI available (0.5*ML + 0.3*NLI + 0.2*structural), 2-way fallback (0.7*ML + 0.3*structural). Injected as [CLASSIFICATION] headers with scanner recommendation text.
 3. **LLM decision tree**: numbered steps in system prompt guide outcome selection
+- **Signal 5** (lookalike guard): requires `CrossCompany + domain_match == "mismatch" + financial` — NOT all CrossCompany senders
+- **Recommendation threading**: `SecurityAssessment.recommendation` carries scanner's nuanced guidance (e.g. "OTP verification — process normally") to agent annotations
+- **Mismatch warning**: `[⚠ SENDER DOMAIN MISMATCH]` injected when domain_match == "mismatch", matching system prompt step 3
 
 ### NLI Zero-Shot Classifier
 - **Model**: cross-encoder/nli-deberta-v3-xsmall (22M params, ~273MB ONNX)
