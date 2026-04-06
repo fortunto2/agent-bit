@@ -434,7 +434,11 @@ pub(crate) async fn run_agent(
         eprintln!("  📁 Trial data dumped to {}", dump_dir);
     }
 
-    let template = prompts::SYSTEM_PROMPT_EXPLICIT;
+    let template = if prompt_mode == "v2" {
+        prompts::SYSTEM_PROMPT_V2
+    } else {
+        prompts::SYSTEM_PROMPT_EXPLICIT
+    };
     // Dynamic example injection based on classifier output
     let examples = prompts::examples_for_class(&instruction_label);
     let hint = std::env::var("HINT").unwrap_or_default();
