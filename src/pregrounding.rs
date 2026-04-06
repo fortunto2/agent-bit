@@ -429,6 +429,15 @@ pub(crate) async fn run_agent(
         eprintln!("  Contacts pre-loaded: {} entries", contacts_summary.lines().count());
     }
 
+    // Pre-load account summary (parity with contacts — LLM needs account names for paraphrase resolution)
+    let accounts_summary = ready.crm_graph.accounts_summary();
+    if !accounts_summary.is_empty() {
+        messages.push(Message::user(&format!(
+            "ACCOUNTS (pre-loaded — use these for account lookups):\n{}", accounts_summary
+        )));
+        eprintln!("  Accounts pre-loaded: {} entries", accounts_summary.lines().count());
+    }
+
     // Inject inbox content from pipeline (already read + classified — no re-read from PCM)
     if !ready.inbox_files.is_empty() {
         let mut inbox_content = String::new();
