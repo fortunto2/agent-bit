@@ -403,10 +403,10 @@ pub fn assess_security(
             format!("Blocked: structural injection ({:.2}) + mismatched sender", structural), "security");
     }
 
-    // Signal 5: CROSS_COMPANY + financial (lookalike guard, t18)
-    if sender.trust == SenderTrust::CrossCompany && requests_sensitive {
+    // Signal 5: CROSS_COMPANY + domain mismatch + financial (lookalike guard, t18)
+    if sender.trust == SenderTrust::CrossCompany && sender.domain_match == "mismatch" && requests_sensitive {
         return make_block("OUTCOME_DENIED_SECURITY",
-            "Blocked: cross-company sender requesting financial data".into(), "security");
+            "Blocked: domain-mismatch sender requesting financial data".into(), "security");
     }
 
     SecurityAssessment {
@@ -643,6 +643,24 @@ mod tests {
         let nli = make_nli();
         let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
         assert!(sa.blocked.is_none(), "known sender + financial should pass");
+    }
+
+    #[test]
+    fn security_cross_company_match_financial_passes() {
+        let clf = make_clf();
+        let sender = make_sender(SenderTrust::CrossCompany, "match");
+        let nli = make_nli();
+        let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
+        assert!(sa.blocked.is_none(), "cross-company + domain match + financial should pass");
+    }
+
+    #[test]
+    fn security_cross_company_unknown_financial_passes() {
+        let clf = make_clf();
+        let sender = make_sender(SenderTrust::CrossCompany, "unknown");
+        let nli = make_nli();
+        let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
+        assert!(sa.blocked.is_none(), "cross-company + domain unknown + financial should pass");
     }
 
     // ── assess_sender ───────────────────────────────────────────────
