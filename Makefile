@@ -1,4 +1,4 @@
-.PHONY: build test run list dry-run task sample revert preflight release-build
+.PHONY: build test run list dry-run task sample revert preflight release-build competition
 
 -include .env
 export
@@ -65,3 +65,11 @@ preflight:
 release-build:
 	cargo build --release
 	@echo "Binary: $$(cargo metadata --format-version 1 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["target_directory"])')/release/pac1"
+
+# Competition day: preflight + warmup + scored run
+competition:
+	@$(MAKE) preflight
+	@echo "\n=== Warmup (Nemotron, free) ==="
+	cargo run --release -- --provider nemotron --parallel 3
+	@echo "\n=== Scored Run (GPT-5.4) ==="
+	cargo run --release -- --provider openai-full --parallel 3
