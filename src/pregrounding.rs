@@ -15,7 +15,7 @@ use crate::classifier;
 use crate::crm_graph;
 use crate::pcm;
 use crate::prompts;
-use crate::scanner::{self, SharedClassifier};
+use crate::scanner::{self, SharedClassifier, SharedNliClassifier};
 use crate::tools;
 
 /// Extract person names mentioned in inbox content (From: display names + body mentions of CRM contacts).
@@ -318,6 +318,7 @@ pub(crate) async fn run_agent(
     temperature: f32,
     planning_temperature: f32,
     shared_clf: &SharedClassifier,
+    shared_nli: &SharedNliClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
 ) -> Result<(String, String)> {
     use crate::pipeline;
@@ -370,7 +371,7 @@ pub(crate) async fn run_agent(
     eprintln!("  CRM graph: {} nodes", crm_graph.node_count());
 
     let account_domains = scanner::collect_account_domains(pcm).await;
-    let scanned = match classified.scan_inbox(pcm, shared_clf, crm_graph, &account_domains).await {
+    let scanned = match classified.scan_inbox(pcm, shared_clf, shared_nli, crm_graph, &account_domains).await {
         Ok(s) => s,
         Err(block) => {
             eprintln!("  ⛔ [STAGE:{}] {}", block.stage, block.message);

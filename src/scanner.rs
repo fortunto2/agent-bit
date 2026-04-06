@@ -7,6 +7,9 @@ use crate::pcm;
 /// Shared classifier — loaded once, used by all parallel trials.
 pub(crate) type SharedClassifier = Arc<std::sync::Mutex<Option<classifier::InboxClassifier>>>;
 
+/// Shared NLI classifier — loaded once, used by all parallel trials.
+pub(crate) type SharedNliClassifier = Arc<std::sync::Mutex<Option<classifier::NliClassifier>>>;
+
 /// Semantic classification result for a single inbox file.
 pub(crate) struct FileClassification {
     pub label: String,
@@ -126,11 +129,12 @@ pub(crate) fn structural_injection_score(text: &str) -> f32 {
     classifier::structural_injection_score(text)
 }
 
-/// Classify a single inbox file using ML classifier + CRM graph.
-/// Falls back to rule-based if classifier is not available.
+/// Classify a single inbox file using ML classifier + NLI + CRM graph.
+/// Falls back to 2-way ensemble (ML + structural) if NLI is not available.
 pub(crate) fn semantic_classify_inbox_file(
     content: &str,
     classifier: Option<&mut classifier::InboxClassifier>,
+    nli_clf: Option<&mut classifier::NliClassifier>,
     graph: Option<&crm_graph::CrmGraph>,
 ) -> FileClassification {
     // ML classification
@@ -151,23 +155,63 @@ pub(crate) fn semantic_classify_inbox_file(
         }
     };
 
+    // NLI classification (optional third signal)
+    let nli_scores = if let Some(nli) = nli_clf {
+        match nli.zero_shot_classify(content, classifier::NLI_HYPOTHESES) {
+            Ok(scores) => {
+                eprintln!("  [NLI] scores: {:?}", scores.iter().map(|(l, s)| format!("{}={:.3}", l, s)).collect::<Vec<_>>().join(", "));
+                Some(scores)
+            }
+            Err(e) => {
+                eprintln!("  [NLI] error: {:#}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Structural signal detection
     let structural_score = structural_injection_score(content);
 
-    // Weighted ensemble: 0.7 * ML + 0.3 * structural
-    // If ≥2 structural signals (score ≥ 0.30), boost injection to min 0.5
-    let (label, confidence) = if structural_score >= 0.30 && ml_label != "injection" {
-        // Strong structural signals override ML — likely injection
-        let boosted = (0.7 * ml_confidence + 0.3 * structural_score).max(0.5);
-        ("injection".to_string(), boosted)
-    } else if ml_label == "injection" {
-        // ML says injection — blend with structural
-        let blended = 0.7 * ml_confidence + 0.3 * structural_score;
-        ("injection".to_string(), blended)
+    // Ensemble: 3-way (0.5*ML + 0.3*NLI + 0.2*structural) or 2-way (0.7*ML + 0.3*structural)
+    let (label, confidence) = if let Some(ref nli_scores) = nli_scores {
+        // 3-way ensemble with NLI
+        let nli_top_label = &nli_scores[0].0;
+        let nli_top_score = nli_scores[0].1;
+
+        if structural_score >= 0.30 && ml_label != "injection" {
+            // Strong structural signals override — likely injection
+            let boosted = (0.5 * ml_confidence + 0.3 * nli_top_score + 0.2 * structural_score).max(0.5);
+            ("injection".to_string(), boosted)
+        } else if ml_label == "injection" {
+            // ML says injection — blend with NLI and structural
+            let nli_inj = nli_scores.iter().find(|(l, _)| l == "injection").map(|(_, s)| *s).unwrap_or(0.0);
+            let blended = 0.5 * ml_confidence + 0.3 * nli_inj + 0.2 * structural_score;
+            ("injection".to_string(), blended)
+        } else if nli_top_score > 0.5 && nli_top_label != &ml_label {
+            // NLI has high confidence and disagrees with ML — NLI wins
+            // (NLI is better at nuanced semantic classification like credential vs CRM)
+            let blended = 0.3 * ml_confidence + 0.5 * nli_top_score + 0.2 * (1.0 - structural_score);
+            (nli_top_label.clone(), blended.min(nli_top_score))
+        } else {
+            // Agreement or low NLI confidence — ML leads
+            let nli_ml_score = nli_scores.iter().find(|(l, _)| l == &ml_label).map(|(_, s)| *s).unwrap_or(0.0);
+            let blended = 0.5 * ml_confidence + 0.3 * nli_ml_score + 0.2 * (1.0 - structural_score);
+            (ml_label, blended.min(ml_confidence))
+        }
     } else {
-        // No injection signals — use ML result with minor structural adjustment
-        let blended = 0.7 * ml_confidence + 0.3 * (1.0 - structural_score);
-        (ml_label, blended.min(ml_confidence)) // don't inflate non-injection confidence
+        // 2-way ensemble (no NLI) — original behavior
+        if structural_score >= 0.30 && ml_label != "injection" {
+            let boosted = (0.7 * ml_confidence + 0.3 * structural_score).max(0.5);
+            ("injection".to_string(), boosted)
+        } else if ml_label == "injection" {
+            let blended = 0.7 * ml_confidence + 0.3 * structural_score;
+            ("injection".to_string(), blended)
+        } else {
+            let blended = 0.7 * ml_confidence + 0.3 * (1.0 - structural_score);
+            (ml_label, blended.min(ml_confidence))
+        }
     };
 
     // Sender trust from graph
@@ -692,7 +736,7 @@ mod tests {
     // ─── OTP credential classification (t25/t29) ──────────────────────
 
     fn classify_recommendation(content: &str) -> String {
-        let fc = semantic_classify_inbox_file(content, None, None);
+        let fc = semantic_classify_inbox_file(content, None, None, None);
         fc.recommendation
     }
 
