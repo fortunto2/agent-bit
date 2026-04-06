@@ -439,6 +439,7 @@ pub(crate) async fn run_agent(
     }
 
     // Inject inbox content from pipeline (already read + classified — no re-read from PCM)
+    let mut has_otp = false;
     if !ready.inbox_files.is_empty() {
         let mut inbox_content = String::new();
         for f in &ready.inbox_files {
@@ -476,8 +477,8 @@ pub(crate) async fn run_agent(
             }
         }
 
-        // OTP hint — check inbox files for OTP content
-        let has_otp = ready.inbox_files.iter().any(|f| {
+        // OTP hint — check inbox files for OTP content (variable used later for agent otp_mode)
+        has_otp = ready.inbox_files.iter().any(|f| {
             let l = f.content.to_lowercase();
             f.security.ml_label == "credential" && f.security.ml_conf > 0.50
                 || l.contains("otp:") || l.contains("otp ") || l.contains("verification code")
@@ -546,6 +547,9 @@ pub(crate) async fn run_agent(
 
     let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode);
     agent.set_intent(&instruction_intent);
+    if has_otp {
+        agent.set_otp_mode();
+    }
     let mut ctx = AgentContext::new();
 
     // ── Planning phase: decompose task into steps ─────────────────────
@@ -580,7 +584,17 @@ pub(crate) async fn run_agent(
         ));
     } else if instruction_intent == "intent_inbox" {
         let n = ready.inbox_files.len();
-        if n > 2 {
+        if has_otp {
+            // OTP mode: don't tell agent to delete inbox files — OTP hint already handles deletion guidance
+            if n > 2 {
+                messages.push(Message::user(&format!(
+                    "INBOX PROCESSING ({} messages already shown above — do NOT re-read them): \
+                     Act on each message directly from context. For each: process the request, then answer. \
+                     Skip messages that need no CRM action. Include account file paths in answer() refs.",
+                    n
+                )));
+            }
+        } else if n > 2 {
             messages.push(Message::user(&format!(
                 "INBOX PROCESSING ({} messages already shown above — do NOT re-read them): \
                  Act on each message directly from context. For each: search account → write/update → delete inbox file. \
