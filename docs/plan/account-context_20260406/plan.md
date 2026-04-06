@@ -36,14 +36,14 @@ Inject accounts_summary into pre-grounding messages, parallel to contacts_summar
 Fix `expand_query()` for swapped names and add account search annotation.
 
 ### Tasks
-- [ ] Task 3.1: In `src/tools.rs`, update `expand_query()` (line 314) — for 2-word queries, add reversed word order variant after original. "Blom Frederike" → ["Blom Frederike", "Frederike Blom", "Frederike", "Blom"].
-- [ ] Task 3.2: In `src/tools.rs`, add `annotate_account_results()` — when searching `accounts/` with multiple results, annotate each with linked contacts (from CrmGraph). Mirror `annotate_contact_results()` (line 474) but for accounts.
-- [ ] Task 3.3: Wire `annotate_account_results()` in SearchTool `execute()`/`execute_readonly()` — when `a.root.starts_with("accounts")`, call it (same pattern as contacts annotation at line 513).
-- [ ] Task 3.4: Add tests: `expand_query` swapped name produces reversed variant; `annotate_account_results` annotates multi-account results with contacts.
+- [x] Task 3.1: In `src/tools.rs`, update `expand_query()` (line 314) — for 2-word queries, add reversed word order variant after original. "Blom Frederike" → ["Blom Frederike", "Frederike Blom", "Frederike", "Blom"].
+- [x] Task 3.2: In `src/tools.rs`, add `annotate_account_results()` — when searching `accounts/` with multiple results, annotate each with linked contacts (from CrmGraph). Mirror `annotate_contact_results()` (line 474) but for accounts.
+- [x] Task 3.3: Wire `annotate_account_results()` in SearchTool `execute()`/`execute_readonly()` — when `a.root.starts_with("accounts")`, call it (same pattern as contacts annotation at line 513).
+- [x] Task 3.4: Add tests: `expand_query` swapped name produces reversed variant; `annotate_account_results` annotates multi-account results with contacts.
 
 ### Verification
-- [ ] `cargo test -- tools` passes with new tests
-- [ ] `cargo test` all pass (no regressions)
+- [x] `cargo test -- tools` passes with new tests
+- [x] `cargo test` all pass (no regressions)
 
 ## Phase 4: Docs & Verification
 

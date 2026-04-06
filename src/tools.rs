@@ -322,6 +322,10 @@ fn expand_query(pattern: &str) -> Vec<String> {
     }
 
     let mut variants = vec![pattern.to_string()];
+    // For 2-word queries, add reversed order ("Blom Frederike" → "Frederike Blom")
+    if words.len() == 2 {
+        variants.push(format!("{} {}", words[1], words[0]));
+    }
     // Add last word (usually surname) — highest signal
     if let Some(last) = words.last() {
         variants.push(last.to_string());
@@ -500,6 +504,36 @@ fn annotate_contact_results(output: &str, crm: &CrmGraph) -> String {
         output, contact_files.len(), annotations.join("\n"))
 }
 
+/// When searching accounts/ with multiple results, annotate with linked contacts.
+fn annotate_account_results(output: &str, crm: &CrmGraph) -> String {
+    let files = unique_files_from_search(output, 10);
+    let account_files: Vec<&String> = files.iter()
+        .filter(|f| f.starts_with("accounts/"))
+        .collect();
+
+    if account_files.len() <= 1 {
+        return output.to_string();
+    }
+
+    let mut annotations = Vec::new();
+    for file in &account_files {
+        let basename = file.rsplit('/').next().unwrap_or(file)
+            .trim_end_matches(".md").trim_end_matches(".json")
+            .replace('-', " ").replace('_', " ");
+        let contacts = crm.contacts_for_account(&basename);
+        if !contacts.is_empty() {
+            annotations.push(format!("  {} → contacts: {}", file, contacts.join(", ")));
+        }
+    }
+
+    if annotations.is_empty() {
+        return output.to_string();
+    }
+
+    format!("{}\n\n[ACCOUNT DISAMBIGUATION: {} accounts found]\n{}",
+        output, account_files.len(), annotations.join("\n"))
+}
+
 #[async_trait]
 impl Tool for SearchTool {
     fn name(&self) -> &str { "search" }
@@ -510,9 +544,11 @@ impl Tool for SearchTool {
         let a: SearchArgs = parse_args(&args)?;
         let raw = smart_search(&self.0, &a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
         let expanded = auto_expand_search(&self.0, raw).await;
-        let annotated = if a.root.starts_with("contacts") {
-            if let Some(ref crm) = self.1 {
+        let annotated = if let Some(ref crm) = self.1 {
+            if a.root.starts_with("contacts") {
                 annotate_contact_results(&expanded, crm)
+            } else if a.root.starts_with("accounts") {
+                annotate_account_results(&expanded, crm)
             } else { expanded }
         } else { expanded };
         let guarded = guard_content(annotated);
@@ -523,9 +559,11 @@ impl Tool for SearchTool {
         let a: SearchArgs = parse_args(&args)?;
         let raw = smart_search(&self.0, &a.root, &a.pattern, a.limit).await.map_err(pcm_err)?;
         let expanded = auto_expand_search(&self.0, raw).await;
-        let annotated = if a.root.starts_with("contacts") {
-            if let Some(ref crm) = self.1 {
+        let annotated = if let Some(ref crm) = self.1 {
+            if a.root.starts_with("contacts") {
                 annotate_contact_results(&expanded, crm)
+            } else if a.root.starts_with("accounts") {
+                annotate_account_results(&expanded, crm)
             } else { expanded }
         } else { expanded };
         let guarded = guard_content(annotated);
@@ -716,9 +754,9 @@ mod tests {
     // ─── expand_query ───────────────────────────────────────────────
 
     #[test]
-    fn expand_multi_word() {
+    fn expand_two_words_with_reversed() {
         let v = expand_query("John Smith");
-        assert_eq!(v, vec!["John Smith", "Smith", "John"]);
+        assert_eq!(v, vec!["John Smith", "Smith John", "Smith", "John"]);
     }
 
     #[test]
@@ -822,5 +860,50 @@ mod tests {
             "Should annotate multiple contacts. Got: {}", result);
         assert!(result.contains("Acme Corp"), "Should show Acme Corp account");
         assert!(result.contains("Other Inc"), "Should show Other Inc account");
+    }
+
+    // ─── expand_query swapped name ─────────────────────────────────
+
+    #[test]
+    fn expand_swapped_name() {
+        let v = expand_query("Blom Frederike");
+        assert_eq!(v[0], "Blom Frederike");
+        assert_eq!(v[1], "Frederike Blom", "Should have reversed variant");
+        assert!(v.contains(&"Blom".to_string()));
+        assert!(v.contains(&"Frederike".to_string()));
+    }
+
+    #[test]
+    fn expand_three_words_no_reversed() {
+        let v = expand_query("John Van Smith");
+        // 3+ words: no reversed variant (only 2-word queries get it)
+        assert_eq!(v, vec!["John Van Smith", "Smith", "John"]);
+    }
+
+    // ─── annotate_account_results ──────────────────────────────────
+
+    #[test]
+    fn annotate_single_account_no_annotation() {
+        let mut g = CrmGraph::new();
+        g.add_contact("John Smith", Some("john@acme.com"), Some("Acme Corp"));
+        g.add_account("Acme Corp", Some("acme.com"));
+        let output = "$ rg -n Acme\naccounts/acme-corp.md:1:Name: Acme Corp";
+        let result = annotate_account_results(output, &g);
+        assert_eq!(result, output, "Single account = no annotation needed");
+    }
+
+    #[test]
+    fn annotate_multiple_accounts_with_contacts() {
+        let mut g = CrmGraph::new();
+        g.add_contact("John Smith", Some("john@acme.com"), Some("Acme Corp"));
+        g.add_contact("Bob Wilson", Some("bob@globex.com"), Some("Globex Inc"));
+        g.add_account("Acme Corp", Some("acme.com"));
+        g.add_account("Globex Inc", Some("globex.com"));
+        let output = "$ rg -n Corp\naccounts/acme-corp.md:1:Name: Acme Corp\naccounts/globex-inc.md:1:Name: Globex Inc";
+        let result = annotate_account_results(output, &g);
+        assert!(result.contains("[ACCOUNT DISAMBIGUATION: 2 accounts found]"),
+            "Should annotate multiple accounts. Got: {}", result);
+        assert!(result.contains("John Smith"), "Should show linked contact for Acme");
+        assert!(result.contains("Bob Wilson"), "Should show linked contact for Globex");
     }
 }
