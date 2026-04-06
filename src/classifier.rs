@@ -1161,7 +1161,7 @@ mod tests {
             "Update the contact record for John Smith.",
             "This text is about managing contacts, emails, or customer data",
         ).unwrap();
-        assert!(score >= 0.0 && score <= 1.0, "entailment score should be in [0,1], got {}", score);
+        assert!((0.0..=1.0).contains(&score), "entailment score should be in [0,1], got {}", score);
         assert!(score > 0.3, "CRM text should have meaningful entailment with CRM hypothesis, got {}", score);
     }
 }
