@@ -103,7 +103,7 @@ pub fn sgr_tool_def(tool_names: &[&str]) -> sgr_agent::tool::ToolDef {
 
     sgr_agent::tool::ToolDef {
         name: "next_step".into(),
-        description: "Reason about the task and select the next tool.".into(),
+        description: "Reason and select 1-5 tools to execute. Batch same-type ops.".into(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
@@ -120,17 +120,28 @@ pub fn sgr_tool_def(tool_names: &[&str]) -> sgr_agent::tool::ToolDef {
                     "type": "array", "items": {"type": "string"},
                     "description": "0-3 remaining steps"
                 },
-                "tool_name": {
-                    "type": "string", "enum": tool_enum,
-                    "description": "Tool to execute NOW"
-                },
-                "tool_args": {
-                    "type": "object",
-                    "description": "Arguments for selected tool"
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool_name": { "type": "string", "enum": tool_enum },
+                            "path": { "type": "string" },
+                            "content": { "type": "string" },
+                            "pattern": { "type": "string" },
+                            "root": { "type": "string" },
+                            "source": { "type": "string" },
+                            "destination": { "type": "string" },
+                            "message": { "type": "string" },
+                            "outcome": { "type": "string" }
+                        },
+                        "required": ["tool_name"]
+                    },
+                    "description": "1-5 tool calls to execute NOW. Batch same-type operations."
                 }
             },
             "required": ["current_state", "security_assessment", "task_completed",
-                         "remaining_steps", "tool_name", "tool_args"],
+                         "remaining_steps", "actions"],
             "additionalProperties": false
         }),
     }
@@ -195,20 +206,33 @@ impl SgrAgent for Pac1SgrAgent {
             let remaining: Vec<String> = a["remaining_steps"].as_array()
                 .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                 .unwrap_or_default();
-            let tool_name = a["tool_name"].as_str().unwrap_or("answer");
 
-            // Parse action
-            let mut aj = a["tool_args"].clone();
-            if let Some(obj) = aj.as_object_mut() {
-                obj.insert("tool_name".into(), serde_json::json!(tool_name));
-            } else {
-                aj = serde_json::json!({"tool_name": tool_name});
+            // Parse multi-action array
+            let raw_actions = a["actions"].as_array()
+                .cloned()
+                .unwrap_or_else(|| {
+                    // Fallback: single action from old schema
+                    if let Some(tn) = a["tool_name"].as_str() {
+                        let mut aj = a["tool_args"].clone();
+                        if let Some(obj) = aj.as_object_mut() {
+                            obj.insert("tool_name".into(), serde_json::json!(tn));
+                        }
+                        vec![aj]
+                    } else {
+                        vec![]
+                    }
+                });
+
+            let mut actions = Vec::new();
+            for raw in &raw_actions {
+                let action: Action = serde_json::from_value(raw.clone())
+                    .map_err(|e| format!("Parse action: {} ({})", e, raw))?;
+                actions.push(action);
             }
-            let action: Action = serde_json::from_value(aj.clone())
-                .map_err(|e| format!("Parse {} : {} ({})", tool_name, e, aj))?;
 
-            eprintln!("  [SGR {}] {} → {}", step + 1,
-                &state[..state.len().min(50)], action.signature());
+            let sigs: Vec<String> = actions.iter().map(|a| a.signature()).collect();
+            eprintln!("  [SGR {}] {} → {} action(s): {}", step + 1,
+                &state[..state.len().min(40)], actions.len(), sigs.join(", "));
 
             let mut hints = Vec::new();
             if a["security_assessment"].as_str() == Some("blocked") {
@@ -217,7 +241,7 @@ impl SgrAgent for Pac1SgrAgent {
 
             Ok(StepDecision {
                 situation: state, task: remaining, completed,
-                actions: vec![action], hints,
+                actions, hints,
                 call_ids: vec![call.id.clone()],
             })
         }

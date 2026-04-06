@@ -50,7 +50,7 @@ api_key_env = "CF_AI_API_KEY"
 
 temperature = 0.1
 planning_temperature = 0.4
-sgr_mode = false  # WIP: pure SGR 1 action/step — slower for bulk ops, needs multi-action support
+sgr_mode = false  # experimental: multi-action works but Nemotron loops on complex tasks
 [providers.nemotron.headers]
 cf-aig-request-timeout = "300000"
 x-session-affinity = "pac1-agent"
