@@ -184,6 +184,7 @@ async fn main() -> Result<()> {
     for task in &tasks {
         let task_id = task.task_id.clone();
         let preview = task.preview.clone();
+        let hint = task.hint.clone();
         let harness_url = cli.bitgn_url.clone();
         let api_key_clone = cli.api_key.clone();
         let benchmark = benchmark.to_string();
@@ -201,6 +202,9 @@ async fn main() -> Result<()> {
             let _permit = sem.acquire().await.unwrap();
             eprintln!("\n━━━ Task: {} ━━━", task_id);
             eprintln!("  {}", preview);
+            if !hint.is_empty() {
+                eprintln!("  💡 hint: {}", hint);
+            }
 
             let h = bitgn::HarnessClient::new(&harness_url, api_key_clone);
             let trial = match h.start_playground(&benchmark, &task_id).await {
