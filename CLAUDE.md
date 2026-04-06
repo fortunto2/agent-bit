@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 40 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 202 unit tests
+cargo test                                        # 211 unit tests
 cargo run -- --audit-store                        # audit adaptive store
 ```
 
@@ -105,6 +105,15 @@ Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_sec
 - CrmGraph `ingest_contact/account` strips PCM `$ cat` header and supports `full_name` field
 - UNKNOWN sender annotation is neutral ("new or external sender, process normally") — prevents over-cautious DENIED
 - Prompt includes explicit disambiguation example (search both contacts → pick best match → proceed)
+
+### Account Pre-Grounding (paraphrase resolution)
+- `accounts_summary()` — pre-loads all accounts (name, domain, account_manager, contacts) into agent context
+- Enables LLM to resolve account paraphrases ("Dutch banking customer" → "Blue Harbor Bank") from pre-loaded data
+- `account_manager` field parsed from account files (JSON `account_manager`/`accountManager`, markdown `account_manager:`)
+- `annotate_account_results()` — multi-account search results annotated with linked contacts (mirrors `annotate_contact_results()`)
+- `expand_query()` — 2-word queries now try reversed word order ("Blom Frederike" → also "Frederike Blom")
+- Auto-refs: always merges recent reads with LLM-provided refs (accounts, contacts, invoices)
+- Auto-refs: infers account file from contact file (contacts/cont_009.json → accounts/acct_009.json)
 
 ### Credential Detection
 - **Exfiltration** (DENIED): OTP + branching logic ("first character", "branch", "depending on")

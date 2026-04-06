@@ -3,7 +3,7 @@
 **Track ID:** account-context_20260406
 **Spec:** [spec.md](./spec.md)
 **Created:** 2026-04-06
-**Status:** [~] In Progress
+**Status:** [x] Complete
 
 ## Overview
 
@@ -14,8 +14,8 @@ Pre-load all accounts into agent context (parity with contacts), add swapped-nam
 Add `accounts_summary()` method to CrmGraph, mirroring `contacts_summary()` at line 447.
 
 ### Tasks
-- [x] Task 1.1: Add `accounts_summary()` to `src/crm_graph.rs` — iterate Account nodes, include name, domain (from HasDomain edges), and linked contacts (from incoming WorksAt edges). Format: `- AccountName (domain.com) — contacts: X, Y` per line. Sort alphabetically.
-- [x] Task 1.2: Add unit tests for `accounts_summary()` in `src/crm_graph.rs` — test with build_test_graph, verify format includes account names, domains, and linked contacts.
+- [x] Task 1.1: Add `accounts_summary()` to `src/crm_graph.rs` — iterate Account nodes, include name, domain (from HasDomain edges), and linked contacts (from incoming WorksAt edges). Format: `- AccountName (domain.com) — contacts: X, Y` per line. Sort alphabetically. <!-- sha:bae37a9 -->
+- [x] Task 1.2: Add unit tests for `accounts_summary()` in `src/crm_graph.rs` — test with build_test_graph, verify format includes account names, domains, and linked contacts. <!-- sha:bae37a9 -->
 
 ### Verification
 - [x] `cargo test -- crm_graph` passes with new tests
@@ -25,7 +25,7 @@ Add `accounts_summary()` method to CrmGraph, mirroring `contacts_summary()` at l
 Inject accounts_summary into pre-grounding messages, parallel to contacts_summary injection at `pregrounding.rs:424-429`.
 
 ### Tasks
-- [x] Task 2.1: In `src/pregrounding.rs`, after contacts_summary injection (line ~429), add accounts_summary injection: `"ACCOUNTS (pre-loaded — use these for account lookups):\n{accounts_summary}"`. Log entry count to stderr.
+- [x] Task 2.1: In `src/pregrounding.rs`, after contacts_summary injection (line ~429), add accounts_summary injection: `"ACCOUNTS (pre-loaded — use these for account lookups):\n{accounts_summary}"`. Log entry count to stderr. <!-- sha:4771fad -->
 
 ### Verification
 - [x] `cargo build` succeeds
@@ -36,10 +36,10 @@ Inject accounts_summary into pre-grounding messages, parallel to contacts_summar
 Fix `expand_query()` for swapped names and add account search annotation.
 
 ### Tasks
-- [x] Task 3.1: In `src/tools.rs`, update `expand_query()` (line 314) — for 2-word queries, add reversed word order variant after original. "Blom Frederike" → ["Blom Frederike", "Frederike Blom", "Frederike", "Blom"].
-- [x] Task 3.2: In `src/tools.rs`, add `annotate_account_results()` — when searching `accounts/` with multiple results, annotate each with linked contacts (from CrmGraph). Mirror `annotate_contact_results()` (line 474) but for accounts.
-- [x] Task 3.3: Wire `annotate_account_results()` in SearchTool `execute()`/`execute_readonly()` — when `a.root.starts_with("accounts")`, call it (same pattern as contacts annotation at line 513).
-- [x] Task 3.4: Add tests: `expand_query` swapped name produces reversed variant; `annotate_account_results` annotates multi-account results with contacts.
+- [x] Task 3.1: In `src/tools.rs`, update `expand_query()` (line 314) — for 2-word queries, add reversed word order variant after original. "Blom Frederike" → ["Blom Frederike", "Frederike Blom", "Frederike", "Blom"]. <!-- sha:55384c8 -->
+- [x] Task 3.2: In `src/tools.rs`, add `annotate_account_results()` — when searching `accounts/` with multiple results, annotate each with linked contacts (from CrmGraph). Mirror `annotate_contact_results()` (line 474) but for accounts. <!-- sha:55384c8 -->
+- [x] Task 3.3: Wire `annotate_account_results()` in SearchTool `execute()`/`execute_readonly()` — when `a.root.starts_with("accounts")`, call it (same pattern as contacts annotation at line 513). <!-- sha:55384c8 -->
+- [x] Task 3.4: Add tests: `expand_query` swapped name produces reversed variant; `annotate_account_results` annotates multi-account results with contacts. <!-- sha:55384c8 -->
 
 ### Verification
 - [x] `cargo test -- tools` passes with new tests
@@ -48,23 +48,23 @@ Fix `expand_query()` for swapped names and add account search annotation.
 ## Phase 4: Docs & Verification
 
 ### Tasks
-- [ ] Task 4.1: Verify on Nemotron: `make task T=t35`, `make task T=t38`, `make task T=t39`, `make task T=t40`
-- [ ] Task 4.2: Update CLAUDE.md — add accounts_summary, expand_query swapped name, annotate_account_results to architecture section
-- [ ] Task 4.3: Remove dead code — scanner.rs unused helpers (from roadmap TODO)
+- [x] Task 4.1: Verify on Nemotron: `make task T=t35`, `make task T=t38`, `make task T=t39`, `make task T=t40` <!-- sha:8625874 -->
+- [x] Task 4.2: Update CLAUDE.md — add accounts_summary, expand_query swapped name, annotate_account_results to architecture section <!-- sha:8625874 -->
+- [x] Task 4.3: Remove dead code — scanner.rs unused helpers (from roadmap TODO) — NO dead code found in pac1-agent <!-- sha:8625874 -->
 
 ### Verification
-- [ ] All acceptance criteria from spec met
-- [ ] Tests pass
-- [ ] Linter clean (clippy)
-- [ ] Build succeeds
+- [x] All acceptance criteria from spec met
+- [x] Tests pass
+- [x] Linter clean (clippy)
+- [x] Build succeeds
 
 ## Final Verification
 
-- [ ] All acceptance criteria from spec met
-- [ ] `cargo test` passes (200+ tests)
-- [ ] `cargo clippy` clean
-- [ ] `cargo build` succeeds
-- [ ] CLAUDE.md reflects current project state
+- [x] All acceptance criteria from spec met
+- [x] `cargo test` passes (211 tests)
+- [x] `cargo clippy` clean (no pac1-agent warnings)
+- [x] `cargo build` succeeds
+- [x] CLAUDE.md reflects current project state
 
 ## Context Handoff
 
