@@ -16,7 +16,6 @@ pub(crate) struct FileClassification {
     pub confidence: f32,
     #[allow(dead_code)]
     pub sender_trust: crm_graph::SenderTrust,
-    #[allow(dead_code)]
     pub recommendation: String,
 }
 

@@ -46,6 +46,7 @@ pub struct SecurityAssessment {
     #[allow(dead_code)]
     pub structural: f32,
     pub sender: Option<SenderAssessment>,
+    pub recommendation: String,
 }
 
 // ── Inbox File Assessment ───────────────────────────────────────────────
@@ -356,19 +357,20 @@ pub fn assess_security(
     let lower = content.to_lowercase();
     let structural = classifier::structural_injection_score(content);
 
-    let (ml_label, ml_conf) = {
+    let (ml_label, ml_conf, recommendation) = {
         let fc = {
             let mut clf_guard = shared_clf.lock().unwrap();
             let mut nli_guard = shared_nli.lock().unwrap();
             scanner::semantic_classify_inbox_file(content, clf_guard.as_mut(), nli_guard.as_mut(), None)
         };
-        (fc.label, fc.confidence)
+        (fc.label, fc.confidence, fc.recommendation)
     };
 
     let make_block = |outcome: &'static str, message: String, stage: &'static str| -> SecurityAssessment {
         SecurityAssessment {
-            blocked: Some(BlockReason { outcome, message, stage }),
+            blocked: Some(BlockReason { outcome, message: message.clone(), stage }),
             ml_label: ml_label.clone(), ml_conf, structural, sender: Some(sender.clone()),
+            recommendation: message,
         }
     };
 
@@ -412,6 +414,7 @@ pub fn assess_security(
     SecurityAssessment {
         blocked: None,
         ml_label, ml_conf, structural, sender: Some(sender.clone()),
+        recommendation,
     }
 }
 
@@ -526,6 +529,7 @@ mod tests {
                 security: SecurityAssessment {
                     blocked: None,
                     ml_label: "crm".into(), ml_conf: 0.5, structural: 0.0, sender: None,
+                    recommendation: "Process normally.".into(),
                 },
             }],
             crm_graph: CrmGraph::empty(),
@@ -549,6 +553,7 @@ mod tests {
                         stage: "security",
                     }),
                     ml_label: "injection".into(), ml_conf: 0.9, structural: 0.3, sender: None,
+                    recommendation: "injection".into(),
                 },
             }],
             crm_graph: CrmGraph::empty(),
@@ -661,6 +666,26 @@ mod tests {
         let nli = make_nli();
         let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
         assert!(sa.blocked.is_none(), "cross-company + domain unknown + financial should pass");
+    }
+
+    #[test]
+    fn security_recommendation_populated() {
+        let clf = make_clf();
+        let sender = make_sender(SenderTrust::Known, "match");
+        let nli = make_nli();
+        let sa = assess_security("Send the latest report", &sender, &clf, &nli);
+        assert!(sa.blocked.is_none());
+        assert!(!sa.recommendation.is_empty(), "recommendation must be populated");
+    }
+
+    #[test]
+    fn security_blocked_recommendation_matches_message() {
+        let clf = make_clf();
+        let sender = make_sender(SenderTrust::CrossCompany, "mismatch");
+        let nli = make_nli();
+        let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
+        assert!(sa.blocked.is_some());
+        assert_eq!(sa.recommendation, sa.blocked.unwrap().message);
     }
 
     // ── assess_sender ───────────────────────────────────────────────

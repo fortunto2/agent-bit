@@ -447,9 +447,14 @@ pub(crate) async fn run_agent(
                 .map(|s| format!("{}", s.trust))
                 .unwrap_or_else(|| "UNKNOWN".to_string());
             inbox_content.push_str(&format!(
-                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | Process normally.]\n{}\n\n",
-                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, f.content
+                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | {}]\n",
+                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, f.security.recommendation
             ));
+            // Inject domain mismatch warning matching system prompt step 3
+            if f.security.sender.as_ref().map_or(false, |s| s.domain_match == "mismatch") {
+                inbox_content.push_str("[⚠ SENDER DOMAIN MISMATCH]\n");
+            }
+            inbox_content.push_str(&format!("{}\n\n", f.content));
             eprintln!("  📋 {}: {} ({:.2}) | sender: {}",
                 f.path, f.security.ml_label, f.security.ml_conf, sender_trust);
         }
