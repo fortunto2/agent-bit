@@ -101,7 +101,10 @@ async fn main() -> Result<()> {
 
     let cfg = config::Config::load(&cli.config)?;
     let provider_name = cli.provider.as_deref().unwrap_or(&cfg.llm.provider);
-    let (model, base_url, llm_api_key, extra_headers, prompt_mode, temperature, planning_temperature) = cfg.resolve_provider(provider_name)?;
+    let (model, base_url, llm_api_key, extra_headers, prompt_mode, temperature, planning_temperature, sgr_mode) = cfg.resolve_provider(provider_name)?;
+    if sgr_mode {
+        eprintln!("[pac1] SGR mode: pure (single LLM call per step)");
+    }
     let max_steps = cli.max_steps.unwrap_or(cfg.agent.max_steps);
     let benchmark = &cfg.agent.benchmark;
 
@@ -233,7 +236,7 @@ async fn main() -> Result<()> {
             let (last_msg, history) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature,
-                &clf, &nli, ov.clone(),
+                &clf, &nli, ov.clone(), sgr_mode,
             ).await;
             verify_and_submit(
                 &pcm, &trial.instruction, &last_msg, &history,
@@ -331,7 +334,7 @@ async fn run_leaderboard(
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone()).await;
+        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
         verify_and_submit(
             &pcm, &trial.instruction, &last_msg, &history,
             model, base_url, llm_api_key, extra_headers, temperature,
@@ -376,8 +379,9 @@ async fn run_trial(
     shared_clf: &SharedClassifier,
     shared_nli: &scanner::SharedNliClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
+    sgr_mode: bool,
 ) -> (String, String) {
-    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator).await {
+    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator, sgr_mode).await {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);

@@ -59,17 +59,17 @@ impl AgentMessage for Msg {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "tool_name")]
 pub enum Action {
-    #[serde(rename = "read")] Read { path: String },
-    #[serde(rename = "write")] Write { path: String, content: String },
-    #[serde(rename = "delete")] Delete { path: String },
-    #[serde(rename = "search")] Search { pattern: String, #[serde(default)] root: String },
-    #[serde(rename = "list")] List { path: String },
-    #[serde(rename = "find")] Find { pattern: String, #[serde(default)] root: String },
+    #[serde(rename = "read")] Read { #[serde(default)] path: String },
+    #[serde(rename = "write")] Write { #[serde(default)] path: String, #[serde(default)] content: String },
+    #[serde(rename = "delete")] Delete { #[serde(default)] path: String },
+    #[serde(rename = "search")] Search { #[serde(default)] pattern: String, #[serde(default)] root: String },
+    #[serde(rename = "list")] List { #[serde(default = "default_root")] path: String },
+    #[serde(rename = "find")] Find { #[serde(default)] pattern: String, #[serde(default)] root: String },
     #[serde(rename = "tree")] Tree { #[serde(default = "default_root")] root: String },
-    #[serde(rename = "mkdir")] Mkdir { path: String },
-    #[serde(rename = "move_file")] MoveFile { source: String, destination: String },
+    #[serde(rename = "mkdir")] Mkdir { #[serde(default)] path: String },
+    #[serde(rename = "move_file")] MoveFile { #[serde(default)] source: String, #[serde(default)] destination: String },
     #[serde(rename = "answer")] Answer {
-        message: String,
+        #[serde(default)] message: String,
         #[serde(default = "default_ok")] outcome: String,
         #[serde(default)] refs: Vec<String>,
     },
