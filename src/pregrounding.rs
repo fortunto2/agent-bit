@@ -451,7 +451,7 @@ pub(crate) async fn run_agent(
                 f.path, f.security.ml_label, f.security.ml_conf, sender_trust, f.security.recommendation
             ));
             // Inject domain mismatch warning matching system prompt step 3
-            if f.security.sender.as_ref().map_or(false, |s| s.domain_match == "mismatch") {
+            if f.security.sender.as_ref().is_some_and(|s| s.domain_match == "mismatch") {
                 inbox_content.push_str("[⚠ SENDER DOMAIN MISMATCH]\n");
             }
             inbox_content.push_str(&format!("{}\n\n", f.content));
