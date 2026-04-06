@@ -6,3 +6,4 @@ models/
 .solo/
 .claude/
 .DS_Store
+benchmarks/tasks/
