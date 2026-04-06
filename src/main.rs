@@ -167,6 +167,12 @@ async fn main() -> Result<()> {
     );
     eprintln!("[pac1] Classifier: {}", if shared_clf.lock().unwrap().is_some() { "loaded (shared)" } else { "unavailable" });
 
+    // Load NLI classifier ONCE — shared across all parallel trials
+    let shared_nli: scanner::SharedNliClassifier = Arc::new(
+        std::sync::Mutex::new(classifier::NliClassifier::try_load(&classifier::InboxClassifier::models_dir()))
+    );
+    eprintln!("[pac1] NLI: {}", if shared_nli.lock().unwrap().is_some() { "loaded (shared)" } else { "unavailable" });
+
     // Build OutcomeValidator once — shared across all trials for score-gated learning
     let outcome_validator: Option<Arc<classifier::OutcomeValidator>> = {
         let store_path = std::path::PathBuf::from(".agent/outcome_store.json");
@@ -199,6 +205,7 @@ async fn main() -> Result<()> {
         let sem = semaphore.clone();
         let res = results.clone();
         let clf = shared_clf.clone();
+        let nli = shared_nli.clone();
         let ov = outcome_validator.clone();
 
         let handle = tokio::spawn(async move {
@@ -224,7 +231,7 @@ async fn main() -> Result<()> {
             let (last_msg, history) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature,
-                &clf, ov.clone(),
+                &clf, &nli, ov.clone(),
             ).await;
             verify_and_submit(
                 &pcm, &trial.instruction, &last_msg, &history,
@@ -300,6 +307,9 @@ async fn run_leaderboard(
     let shared_clf: SharedClassifier = Arc::new(
         std::sync::Mutex::new(classifier::InboxClassifier::try_load(&classifier::InboxClassifier::models_dir()))
     );
+    let shared_nli: scanner::SharedNliClassifier = Arc::new(
+        std::sync::Mutex::new(classifier::NliClassifier::try_load(&classifier::InboxClassifier::models_dir()))
+    );
 
     // Build OutcomeValidator once for score-gated learning across all trials
     let outcome_validator: Option<Arc<classifier::OutcomeValidator>> = {
@@ -319,7 +329,7 @@ async fn run_leaderboard(
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, outcome_validator.clone()).await;
+        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone()).await;
         verify_and_submit(
             &pcm, &trial.instruction, &last_msg, &history,
             model, base_url, llm_api_key, extra_headers, temperature,
@@ -362,9 +372,10 @@ async fn run_trial(
     model: &str, base_url: Option<&str>, api_key: &str,
     extra_headers: &[(String, String)], max_steps: usize, prompt_mode: &str, temperature: f32, planning_temperature: f32,
     shared_clf: &SharedClassifier,
+    shared_nli: &scanner::SharedNliClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
 ) -> (String, String) {
-    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, outcome_validator).await {
+    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator).await {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);
