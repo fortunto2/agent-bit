@@ -320,6 +320,7 @@ pub(crate) async fn run_agent(
     shared_clf: &SharedClassifier,
     shared_nli: &SharedNliClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
+    sgr_mode: bool,
 ) -> Result<(String, String)> {
     use crate::pipeline;
 
@@ -662,6 +663,56 @@ pub(crate) async fn run_agent(
     } else {
         max_steps
     };
+
+    // ── SGR Mode: pure single-call loop (4x faster on weak models) ────
+    if sgr_mode {
+        let sgr_llm = sgr_agent::llm::Llm::new(&config);
+        let sgr_agent = crate::pac1_sgr::Pac1SgrAgent::new(
+            pcm.clone(), sgr_llm, system_prompt.clone(), instruction_intent.clone(),
+        );
+        let sgr_config = sgr_agent::app_loop::LoopConfig {
+            max_steps: effective_max_steps,
+            loop_abort_threshold: 6,
+        };
+        // Convert messages to SGR Msg format
+        let mut session = sgr_agent::session::Session::<crate::pac1_sgr::Msg>::new("/tmp/pac1-sgr", 80)
+            .map_err(|e| anyhow::anyhow!("SGR session: {}", e))?;
+        // Inject system prompt + pre-grounding messages
+        session.push(crate::pac1_sgr::Role::System, system_prompt.clone());
+        for m in &messages {
+            session.push(crate::pac1_sgr::Role::User, m.content.clone());
+        }
+
+        let steps = sgr_agent::app_loop::run_loop(
+            &sgr_agent, &mut session, &sgr_config,
+            |event| {
+                use sgr_agent::app_loop::LoopEvent;
+                match event {
+                    LoopEvent::StepStart(n) => eprintln!("  [SGR step {}/{}]", n, effective_max_steps),
+                    LoopEvent::Completed => eprintln!("  ✓ SGR done"),
+                    LoopEvent::MaxStepsReached(n) => eprintln!("  ⚠ SGR max steps: {}", n),
+                    LoopEvent::LoopAbort(n) => eprintln!("  ⚠ SGR loop abort: {}", n),
+                    _ => {}
+                }
+            },
+        ).await.map_err(|e| anyhow::anyhow!("SGR loop: {}", e))?;
+
+        eprintln!("  📊 SGR completed in {} steps", steps);
+
+        // Extract last assistant message for verify_and_submit
+        use sgr_agent::session::AgentMessage as _;
+        let msgs = session.messages();
+        let last_msg = msgs.iter().rev()
+            .find(|m| *m.role() == crate::pac1_sgr::Role::Assistant)
+            .map(|m| m.content().to_string())
+            .unwrap_or_default();
+        let history: String = msgs.iter()
+            .map(|m| m.content().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        return Ok((last_msg, history));
+    }
 
     let loop_config = LoopConfig {
         max_steps: effective_max_steps,

@@ -45,6 +45,10 @@ pub struct ProviderSection {
     /// Separate temperature for planning phase (default 0.4). Higher = more exploration.
     #[serde(default)]
     pub planning_temperature: Option<f32>,
+    /// Pure SGR mode: single LLM call per step (reasoning + tool in one schema).
+    /// Faster on weak models (Nemotron, Gemma). Two-phase FC better on strong models (GPT-5.4).
+    #[serde(default)]
+    pub sgr_mode: Option<bool>,
 }
 
 fn default_max_steps() -> usize { 20 }
@@ -57,11 +61,12 @@ impl Config {
         toml::from_str(&text).context("parsing config.toml")
     }
 
-    /// Resolve provider by name, return (model, base_url, api_key, extra_headers, prompt_mode, temperature, planning_temperature).
+    /// Resolve provider by name, return (model, base_url, api_key, extra_headers, prompt_mode, temperature, planning_temperature, sgr_mode).
+    #[allow(clippy::type_complexity)]
     pub fn resolve_provider(
         &self,
         name: &str,
-    ) -> Result<(String, Option<String>, String, Vec<(String, String)>, String, f32, f32)> {
+    ) -> Result<(String, Option<String>, String, Vec<(String, String)>, String, f32, f32, bool)> {
         let p = self
             .providers
             .get(name)
@@ -86,7 +91,9 @@ impl Config {
         let temperature = p.temperature.unwrap_or(0.2);
         let planning_temperature = p.planning_temperature.unwrap_or(0.4);
 
-        Ok((p.model.clone(), p.base_url.clone(), api_key, headers, prompt_mode, temperature, planning_temperature))
+        let sgr_mode = p.sgr_mode.unwrap_or(false);
+
+        Ok((p.model.clone(), p.base_url.clone(), api_key, headers, prompt_mode, temperature, planning_temperature, sgr_mode))
     }
 }
 
@@ -113,7 +120,7 @@ planning_temperature = 0.4
         let cfg: Config = toml::from_str(toml_str).unwrap();
         let p = cfg.providers.get("test").unwrap();
         assert_eq!(p.planning_temperature, Some(0.4));
-        let (_, _, _, _, _, temp, plan_temp) = cfg.resolve_provider("test").unwrap();
+        let (_, _, _, _, _, temp, plan_temp, _) = cfg.resolve_provider("test").unwrap();
         assert!((temp - 0.1).abs() < 0.001);
         assert!((plan_temp - 0.4).abs() < 0.001);
     }
@@ -135,7 +142,7 @@ api_key = "sk-test"
         let cfg: Config = toml::from_str(toml_str).unwrap();
         let p = cfg.providers.get("test").unwrap();
         assert_eq!(p.planning_temperature, None);
-        let (_, _, _, _, _, temp, plan_temp) = cfg.resolve_provider("test").unwrap();
+        let (_, _, _, _, _, temp, plan_temp, _) = cfg.resolve_provider("test").unwrap();
         assert!((temp - 0.2).abs() < 0.001); // default temperature
         assert!((plan_temp - 0.4).abs() < 0.001); // default planning_temperature
     }
