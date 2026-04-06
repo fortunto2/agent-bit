@@ -290,3 +290,39 @@ Pipeline: build→deploy→review | Tracks: 1 (prompt-diet) | Iters: 3 | Waste: 
 - PLANNING_PROMPT safely slimmed (2 patterns removed, no regression)
 - Counter-intuitive finding documented: weak models need redundancy, not minimalism
 - Build skill handled complex workflow (code change → benchmark → analyze → revert → re-benchmark → document) in single iteration
+
+## 2026-04-05 (Full Retro) | agent-bit | Factory Score: 3/10
+
+Pipeline: build→deploy→review | Tracks: 17 completed | Iters: ~86 | Waste: 42%
+
+### Defects
+- **CRITICAL** | solo-lib.sh: Auth error circuit breaker unfixed across **11 retros**. Fingerprint-based detection defeated by varying session IDs. ~26 iterations lost.
+  - Fix: `solo-lib.sh:check_circuit_breaker()` — add `grep -qiE 'authentication_error|OAuth token|401|exit code 130.*empty'` BEFORE fingerprint
+- **CRITICAL** | solo-dev.sh: No stall/empty-output detection. 14-iter deploy spin (split-main-rs) + 8-iter build spin (stabilize-decisions).
+  - Fix: `solo-dev.sh` — if iter log < 100 bytes AND SHA unchanged, treat as session failure with backoff
+- **HIGH** | solo:deploy: No local-only project detection (11th retro). CLI/competition agents = guaranteed spin-loop.
+  - Fix: `/deploy` SKILL.md — detect CLI/local from CLAUDE.md, auto-`<solo:done/>`
+- **MEDIUM** | solo:build: Spec checkbox maintenance absent (11th retro). fix-t23 at 29% criteria despite completion.
+  - Fix: `/build` SKILL.md — post-phase spec.md checkbox pass
+
+### Harness Gaps
+- **Context:** CLAUDE.md at 16KB — healthy. 6 modules clean. Outcome verifier added clean 4-file change. No scratch/ for observation masking.
+- **Constraints:** **Retro→fix feedback loop broken for 11 retros.** Same defects documented, same patches proposed, zero applied. This file is growing but nothing changes. The retro skill needs a mechanism to track fix status or auto-apply patches.
+- **Precedents:** Prompt diet proved ALL static content load-bearing for Nemotron. Outcome verifier pattern (deferred answer → LLM verify → override policy) is clean and generalizable.
+
+### Missing
+- **META-CRITICAL:** Retro→fix pipeline. 11 retros = pure documentation theater. Need: retro findings → tracked issues → applied patches → verified fix.
+- Auth error content detection (11 retros unfixed)
+- Stall detection (11 retros unfixed)
+- Local-only deploy skip (11 retros unfixed)
+- Per-iteration timeout (60m cap)
+
+### What worked well
+- 17 tracks completed autonomously across ~38h wall time — exceptional throughput
+- Test suite: 105 → 177 (+72 tests, +69%), zero regressions
+- 92% conventional commits (264/286)
+- Outcome verifier: clean deferred-answer pattern, 3-file feature in 1 build iteration
+- Prompt diet: scientific method applied (hypothesis→experiment→revert), counter-intuitive finding preserved
+- Last 4 tracks (calibrate, prompt-diet, outcome-verifier): 12 iters, 0 waste — pipeline excellence when not fighting infrastructure
+- Technical axis 9/10: outcome verifier, confidence reflection, temperature annealing, CRM graph, structural task-type forcing, 65-seed adaptive kNN
+- Benchmark: Nemotron 80%, GPT-5.4 85% — strong for a free model
