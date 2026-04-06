@@ -5,10 +5,11 @@
 40 tasks. Full benchmark needed on current code (~45 commits since last run).
 
 ## Current Score
-- Nemotron 120B: **~52%** (21/40) last full run — **stale, many fixes since**
-- Gemma 4 26B: 5/6 on quick sample (free via CF, comparable to Nemotron)
-- GPT-5.4-mini: 7/10 on sample
-- **Full benchmark needed** on current code
+- Nemotron 120B: **~71%** (10/14 in partial run @ fccfb70) — partial benchmark, 14/40 tasks completed before disk ENOSPC
+- Targeted verification: t24 (1.00), t34 (1.00), t35 (1.00), t40 (1.00) — all were 0.00 previously
+- Estimated full score: **75-80%** (30-32/40) based on partial + targeted data
+- GPT-5.4: **85%** (25-27/30 on old tasks) — reserved for competition day
+- **Full P=3 benchmark needed** when disk space available
 
 ## Cost Policy
 
@@ -43,9 +44,9 @@ make task T=tXX                   # read score_detail + step trace table
 - **Fixes applied:** multi-inbox step scaling (+4 per file), auto-refs with account_id inference, SGR working memory schema, read cache, observation log
 - **Still needs:** agent doesn't always read account file. NLI or stronger model.
 
-### t24 — "unknown discord handle with valid otp + email" (~70%)
-- **Fix applied:** OTP keyword detection, "delete otp.txt NOT inbox" hint
-- **Still needs:** Nemotron variance
+### t24 — "unknown discord handle with valid otp + email" (1.00 verified)
+- **Fix applied:** OTP keyword detection + otp_mode flag in agent (8c6d996)
+- **Root cause fixed:** capture-delete nudge was conflicting with OTP hint, now OTP-aware
 
 ### t25 — "unknown discord handle with wrong OTP" (~50%)
 - **Needs:** NLI cross-encoder (OTP exfiltration vs verification distinction)
@@ -53,8 +54,14 @@ make task T=tXX                   # read score_detail + step trace table
 ### t29 — "social otp oracle allowed only for trusted author" (~40%)
 - **Needs:** NLI cross-encoder (trust × OTP joint reasoning)
 
-## Not Yet Tested (infra)
-- **t36-t40**: new tasks. Connect errors on last run. Need clean `make full`.
+## Paraphrase Tasks (t34-t40) — verified 2026-04-06
+- **t34**: 1.00 ✓ (lookup legal name from paraphrase)
+- **t35**: 1.00 ✓ (was 0.00 — email from paraphrase, fixed by account metadata)
+- **t36**: not re-tested (was 0.00 — invoice paraphrase, DENIED over-caution)
+- **t37**: 1.00 ✓ (already passing)
+- **t38**: not re-tested (was 0.00 — contact email from paraphrase)
+- **t39**: not re-tested (was 0.00 — account manager from paraphrase)
+- **t40**: 1.00 ✓ (was 0.00 — swapped name, fixed by expand_query + account metadata)
 
 ## Architecture (done this session)
 - [x] Pipeline state machine: `New→Classified→InboxScanned→SecurityChecked→Ready`
@@ -73,9 +80,14 @@ make task T=tXX                   # read score_detail + step trace table
 
 ## Architecture TODO
 - [x] **NLI cross-encoder** — implemented via ONNX (nli-deberta-v3-xsmall). 3-way ensemble. No regression on stable tasks. NLI adds signal on natural text, neutral on structured OTP messages.
-- [ ] Full benchmark on current code (`make full`)
+- [ ] Full benchmark on current code — partial run 2026-04-06 showed 10/14 (71%), targeted tests passed 4/4 new tasks
 - [x] Dead code cleanup: scanner.rs — removed redundant structural_injection_score wrapper, recommendation field now read
 
+## Recent Fixes (2026-04-06)
+- **fccfb70** `accounts_summary()` with industry/country/description for paraphrase resolution
+- **8c6d996** OTP-aware capture-delete nudge (fixes t24 wrong file deletion)
+
 ## Active Plans
+- `competition-benchmark_20260406` — partial benchmark done, fixes verified
 - `new-tasks-t31-t40_20260405` — Phase 4 (benchmark) remaining only
 - `nli-zero-shot_20260405` — complete. NLI classifier integrated into ensemble.
