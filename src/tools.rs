@@ -98,16 +98,7 @@ impl Tool for ListTool {
 
 // ─── read ────────────────────────────────────────────────────────────────────
 
-pub struct ReadTool {
-    pub pcm: Arc<PcmClient>,
-    cache: std::sync::Mutex<std::collections::HashMap<String, String>>,
-}
-
-impl ReadTool {
-    pub fn new(pcm: Arc<PcmClient>) -> Self {
-        Self { pcm, cache: std::sync::Mutex::new(std::collections::HashMap::new()) }
-    }
-}
+pub struct ReadTool(pub Arc<PcmClient>);
 
 #[derive(Deserialize, JsonSchema)]
 struct ReadArgs {
@@ -134,23 +125,8 @@ impl Tool for ReadTool {
     }
     async fn execute_readonly(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let a: ReadArgs = parse_args(&args)?;
-        // Cache: full-file reads (no line range) — avoids redundant PCM RPCs
-        if a.start_line == 0 && a.end_line == 0 && !a.number {
-            if let Ok(cache) = self.cache.lock() {
-                if let Some(cached) = cache.get(&a.path) {
-                    eprintln!("    📦 cache hit: {}", a.path);
-                    return Ok(ToolOutput::text(cached.clone()));
-                }
-            }
-        }
-        let result = self.pcm.read(&a.path, a.number, a.start_line, a.end_line).await.map_err(pcm_err)?;
-        let guarded = guard_content(result);
-        if a.start_line == 0 && a.end_line == 0 && !a.number {
-            if let Ok(mut cache) = self.cache.lock() {
-                cache.insert(a.path.clone(), guarded.clone());
-            }
-        }
-        Ok(ToolOutput::text(guarded))
+        // Cache lives in PcmClient — shared across all tools, invalidated by write/delete
+        self.0.read(&a.path, a.number, a.start_line, a.end_line).await.map(|c| ToolOutput::text(guard_content(c))).map_err(pcm_err)
     }
 }
 
@@ -177,10 +153,8 @@ impl Tool for WriteTool {
     fn name(&self) -> &str { "write" }
     fn description(&self) -> &str { "Write content to a file. Without start_line/end_line: overwrites entire file. With start_line and end_line: replaces only those lines (like sed). Example: start_line=5, end_line=7 replaces lines 5-7 with content. Use read with number=true first to see line numbers. Outbox emails: ALWAYS read outbox/README.MD first for required JSON format, include sent:false, read outbox/seq.json for next ID." }
     fn parameters_schema(&self) -> Value { json_schema_for::<WriteArgs>() }
-    async fn execute(&self, args: Value, ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+    async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: WriteArgs = parse_args(&args)?;
-        // Invalidate read cache for this path (content changed)
-        ctx.invalidate_cache(&format!("read:{}", a.path));
 
         // Outbox validation: if writing JSON to outbox/, check required fields
         if a.path.contains("outbox/") && !a.path.contains("seq.json") && !a.path.contains("README") {
@@ -220,9 +194,8 @@ impl Tool for DeleteTool {
     fn name(&self) -> &str { "delete" }
     fn description(&self) -> &str { "Delete a file. Security hygiene: after processing inbox messages with OTP codes or credentials, delete the source file (e.g. docs/channels/otp.txt) to prevent credential reuse." }
     fn parameters_schema(&self) -> Value { json_schema_for::<DeleteArgs>() }
-    async fn execute(&self, args: Value, ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+    async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: DeleteArgs = parse_args(&args)?;
-        ctx.invalidate_cache(&format!("read:{}", a.path));
         self.0.delete(&a.path).await.map_err(pcm_err)?;
         Ok(ToolOutput::text(format!("Deleted {}", a.path)))
     }
