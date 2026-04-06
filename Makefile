@@ -21,13 +21,14 @@ dry-run:
 	cargo run -- --provider $(PROVIDER) --dry-run
 
 # Single task: make task T=t18
-# Logs saved to benchmarks/tasks/{task}/{provider}_{timestamp}.log
+# Logs + trial data saved to benchmarks/tasks/{task}/{provider}_{timestamp}/
 task:
-	@mkdir -p benchmarks/tasks/$(T)
-	@LOGFILE="benchmarks/tasks/$(T)/$(PROVIDER)_$$(date +%Y%m%d_%H%M%S).log"; \
-	echo "=== $(T) | $(PROVIDER) | $$(date) ===" | tee "$$LOGFILE"; \
-	RUST_LOG=warn cargo run -- --provider $(PROVIDER) --task $(T) 2>&1 | tee -a "$$LOGFILE"; \
-	echo "Log: $$LOGFILE"
+	@STAMP=$$(date +%Y%m%d_%H%M%S); \
+	RUNDIR="benchmarks/tasks/$(T)/$(PROVIDER)_$$STAMP"; \
+	mkdir -p "$$RUNDIR"; \
+	echo "=== $(T) | $(PROVIDER) | $$(date) ===" | tee "$$RUNDIR/run.log"; \
+	DUMP_TRIAL="$$RUNDIR" RUST_LOG=warn cargo run -- --provider $(PROVIDER) --task $(T) 2>&1 | tee -a "$$RUNDIR/run.log"; \
+	echo "Run: $$RUNDIR"
 
 # 8-task quick sample with per-task logs
 sample:

@@ -393,6 +393,46 @@ pub(crate) async fn run_agent(
     // ── Pipeline Stage 4: Ready ─────────────────────────────────────
     let ready = checked.ready();
 
+    // Dump trial data for offline analysis (when DUMP_TRIAL dir is set)
+    if let Ok(dump_dir) = std::env::var("DUMP_TRIAL") {
+        let _ = std::fs::create_dir_all(&dump_dir);
+        // Tree
+        let _ = std::fs::write(format!("{}/tree.txt", dump_dir), &tree_out);
+        // Agents.md
+        if !agents_md.is_empty() {
+            let _ = std::fs::write(format!("{}/agents.md", dump_dir), &agents_md);
+        }
+        // CRM schema
+        if !crm_schema.is_empty() {
+            let _ = std::fs::write(format!("{}/crm_schema.txt", dump_dir), &crm_schema);
+        }
+        // Contacts + accounts summary
+        let contacts = ready.crm_graph.contacts_summary();
+        if !contacts.is_empty() {
+            let _ = std::fs::write(format!("{}/contacts.txt", dump_dir), &contacts);
+        }
+        let accounts = ready.crm_graph.accounts_summary();
+        if !accounts.is_empty() {
+            let _ = std::fs::write(format!("{}/accounts.txt", dump_dir), &accounts);
+        }
+        // Inbox files (raw content + classification)
+        for (i, f) in ready.inbox_files.iter().enumerate() {
+            let sender = f.security.sender.as_ref().map(|s| format!("{}", s.trust)).unwrap_or_default();
+            let header = format!("[{} ({:.2}) | sender: {} | {}]\n\n",
+                f.security.ml_label, f.security.ml_conf, sender, f.security.recommendation);
+            let _ = std::fs::write(
+                format!("{}/inbox_{:02}_{}.txt", dump_dir, i, f.path.replace('/', "_")),
+                format!("{}{}", header, f.content),
+            );
+        }
+        // Pipeline context
+        let _ = std::fs::write(format!("{}/pipeline.txt", dump_dir), format!(
+            "instruction: {}\nintent: {}\nlabel: {}\ninbox_files: {}\n",
+            ready.instruction, ready.intent, ready.instruction_label, ready.inbox_files.len(),
+        ));
+        eprintln!("  📁 Trial data dumped to {}", dump_dir);
+    }
+
     let template = prompts::SYSTEM_PROMPT_EXPLICIT;
     // Dynamic example injection based on classifier output
     let examples = prompts::examples_for_class(&instruction_label);
