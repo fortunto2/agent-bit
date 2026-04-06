@@ -130,6 +130,8 @@ pub struct Pac1Agent<C: LlmClient> {
     capture_delete_nudge_sent: AtomicU32,
     /// ML-classified instruction intent (e.g. "intent_delete"), used for task-type forcing
     forced_intent: Mutex<String>,
+    /// Whether inbox contains OTP content — suppresses inbox-delete nudge in favor of OTP-specific guidance
+    otp_mode: AtomicU32,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -148,12 +150,18 @@ impl<C: LlmClient> Pac1Agent<C> {
             confidence_reflections: AtomicU32::new(0),
             capture_delete_nudge_sent: AtomicU32::new(0),
             forced_intent: Mutex::new(String::new()),
+            otp_mode: AtomicU32::new(0),
         }
     }
 
     /// Set the ML-classified instruction intent for task-type forcing.
     pub fn set_intent(&self, intent: &str) {
         *self.forced_intent.lock().unwrap() = intent.to_string();
+    }
+
+    /// Mark that inbox contains OTP content — suppresses generic inbox-delete nudge.
+    pub fn set_otp_mode(&self) {
+        self.otp_mode.store(1, Ordering::SeqCst);
     }
 
     /// Record a tool call in the action ledger.
@@ -335,9 +343,15 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             if has_inbox_context && has_inbox_read && !has_inbox_delete {
                 // Only set flag when we actually inject the nudge
                 self.capture_delete_nudge_sent.store(1, Ordering::SeqCst);
-                let nudge = "⚠ URGENT: You have read inbox files but NOT deleted them. \
+                // In OTP mode, remind to delete docs/channels/otp.txt instead of inbox files
+                let nudge = if self.otp_mode.load(Ordering::SeqCst) == 1 {
+                    "⚠ URGENT: After processing OTP inbox, DELETE docs/channels/otp.txt — \
+                     do NOT delete the inbox file itself. Use delete('docs/channels/otp.txt') now."
+                } else {
+                    "⚠ URGENT: You have read inbox files but NOT deleted them. \
                      You MUST delete ALL processed inbox files (from 00_inbox/) BEFORE calling answer(). \
-                     Use delete() on each inbox file now.";
+                     Use delete() on each inbox file now."
+                };
                 eprintln!("  🗑️ Capture-delete nudge at step {}/{}", step, self.max_steps);
                 msgs.push(Message::user(nudge));
             }
