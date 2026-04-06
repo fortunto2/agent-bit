@@ -19,7 +19,7 @@ fn pcm_err(e: anyhow::Error) -> ToolError {
 }
 
 /// Post-read security guard: append warning if content contains injection patterns.
-fn guard_content(content: String) -> String {
+pub(crate) fn guard_content(content: String) -> String {
     let score = crate::scanner::threat_score(&content);
     if score >= 3 {
         format!(
