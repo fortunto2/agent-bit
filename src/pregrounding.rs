@@ -654,10 +654,14 @@ pub(crate) async fn run_agent(
             let instr_lower = ready.instruction.to_lowercase();
             if instr_lower.contains("capture") || instr_lower.contains("distill") || (instr_lower.contains("delete") && instr_lower.contains("inbox")) {
                 messages.push(Message::user(
-                    "CAPTURE-DISTILL: list 01_capture/ → write capture → read card template → write card → \
-                     read thread → write thread (MUST link to ../cards/{name}) → delete inbox → answer OK.\n\
-                     Instruction may have folder typo — use closest existing subfolder in 01_capture/.\n\
-                     Do NOT delete before all 3 writes (capture + card + thread). Do NOT read contacts."
+                    "CAPTURE-DISTILL WORKFLOW (follow ALL steps in order):\n\
+                     1. READ the inbox file (already loaded above — use it)\n\
+                     2. WRITE to capture folder (01_capture/{folder from instruction}/{same filename})\n\
+                     3. WRITE distill card to 02_distill/cards/{same filename}\n\
+                     4. DELETE the original inbox file from 00_inbox/\n\
+                     5. answer() with OUTCOME_OK\n\
+                     WRONG: read → delete → answer (score 0 — you SKIPPED the writes!)\n\
+                     You MUST write BEFORE deleting. Deletion without prior writes = FAIL."
                 ));
             }
         }
