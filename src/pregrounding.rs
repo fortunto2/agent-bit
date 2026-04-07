@@ -176,7 +176,7 @@ pub(crate) async fn run_planning_phase(
         .register(PlanTool);
 
     // PlanningAgent wraps Pac1Agent with read-only enforcement
-    let inner = agent::Pac1Agent::with_config(llm, prompts::PLANNING_PROMPT, 5, prompt_mode);
+    let inner = agent::Pac1Agent::with_config(llm, prompts::PLANNING_PROMPT, 5, prompt_mode, None);
     let planner = PlanningAgent::new(Box::new(inner))
         .with_allowed_tools(vec![
             "read".into(), "search".into(), "find".into(),
@@ -581,25 +581,29 @@ pub(crate) async fn run_agent(
     // Extract tool hooks from AGENTS.MD workflow rules
     let hook_registry = std::sync::Arc::new(crate::hooks::from_agents_md(&agents_md));
 
-    // Build tool registry with OutcomeValidator (passed in from main.rs for score-gated learning)
+    // Create workflow state machine (unified guards: budget, write, capture-delete, policy, hooks)
+    let workflow: crate::workflow::SharedWorkflowState = std::sync::Arc::new(
+        std::sync::Mutex::new(crate::workflow::WorkflowState::new(
+            &instruction_intent, max_steps, hook_registry.clone(), instruction,
+        ))
+    );
+
+    // Build tool registry + agent — workflow wired for guards/hooks
     let registry = ToolRegistry::new()
         .register(tools::ReadTool(pcm.clone()))
-        .register(tools::WriteTool::new(pcm.clone(), hook_registry.clone()))
+        .register(tools::WriteTool::new(pcm.clone(), hook_registry.clone(), Some(workflow.clone())))
         .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
         .register(tools::FindTool(pcm.clone()))
         .register(tools::ListTool(pcm.clone()))
         .register(tools::TreeTool(pcm.clone()))
-        .register(tools::DeleteTool(pcm.clone()))
+        .register(tools::DeleteTool::new(pcm.clone(), Some(workflow.clone())))
         .register(tools::MkDirTool(pcm.clone()))
         .register(tools::MoveTool(pcm.clone()))
         .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone()))
         .register(tools::ContextTool(pcm.clone()));
 
-    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode);
+    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, Some(workflow.clone()));
     agent.set_intent(&instruction_intent);
-    if has_otp {
-        agent.set_otp_mode();
-    }
     let mut ctx = AgentContext::new();
 
     // ── Planning phase: decompose task into steps ─────────────────────

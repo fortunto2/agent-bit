@@ -15,6 +15,9 @@
 
 use crate::hooks;
 
+/// Shared workflow state — Arc<Mutex> for multi-component access (agent + tools).
+pub type SharedWorkflowState = std::sync::Arc<std::sync::Mutex<WorkflowState>>;
+
 /// Workflow phase — what the agent is currently doing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Phase {

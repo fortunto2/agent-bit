@@ -116,26 +116,21 @@ pub struct Pac1Agent<C: LlmClient> {
     step_count: AtomicU32,
     /// Compact history of previous tool calls for LLM context
     action_ledger: Mutex<Vec<String>>,
-    /// Whether the adaptive nudge has been injected (one-time)
-    nudge_sent: AtomicU32, // 0 = not sent, 1 = sent
     /// Reflexion count per step (max 1 per step)
     reflexion_count: AtomicU32,
-    /// Consecutive read calls without an intervening write (for write-nudge)
-    consecutive_reads: AtomicU32,
-    /// Whether the write-nudge has been injected (one-time)
-    write_nudge_sent: AtomicU32,
     /// Confidence reflection count per decide_stateful call (max 1)
     confidence_reflections: AtomicU32,
-    /// Whether the capture-delete nudge has been injected (one-time)
-    capture_delete_nudge_sent: AtomicU32,
     /// ML-classified instruction intent (e.g. "intent_delete"), used for task-type forcing
     forced_intent: Mutex<String>,
-    /// Whether inbox contains OTP content — suppresses inbox-delete nudge in favor of OTP-specific guidance
-    otp_mode: AtomicU32,
+    /// Unified workflow state machine — replaces all scattered guards
+    workflow: Option<crate::workflow::SharedWorkflowState>,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
-    pub fn with_config(client: C, system_prompt: impl Into<String>, max_steps: u32, prompt_mode: &str) -> Self {
+    pub fn with_config(
+        client: C, system_prompt: impl Into<String>, max_steps: u32, prompt_mode: &str,
+        workflow: Option<crate::workflow::SharedWorkflowState>,
+    ) -> Self {
         Self {
             client,
             system_prompt: system_prompt.into(),
@@ -143,14 +138,10 @@ impl<C: LlmClient> Pac1Agent<C> {
             prompt_mode: prompt_mode.to_string(),
             step_count: AtomicU32::new(0),
             action_ledger: Mutex::new(Vec::new()),
-            nudge_sent: AtomicU32::new(0),
             reflexion_count: AtomicU32::new(0),
-            consecutive_reads: AtomicU32::new(0),
-            write_nudge_sent: AtomicU32::new(0),
             confidence_reflections: AtomicU32::new(0),
-            capture_delete_nudge_sent: AtomicU32::new(0),
             forced_intent: Mutex::new(String::new()),
-            otp_mode: AtomicU32::new(0),
+            workflow,
         }
     }
 
@@ -159,10 +150,6 @@ impl<C: LlmClient> Pac1Agent<C> {
         *self.forced_intent.lock().unwrap() = intent.to_string();
     }
 
-    /// Mark that inbox contains OTP content — suppresses generic inbox-delete nudge.
-    pub fn set_otp_mode(&self) {
-        self.otp_mode.store(1, Ordering::SeqCst);
-    }
 
     /// Record a tool call in the action ledger.
     pub fn record_action(&self, step: u32, tool_name: &str, key_arg: &str, result: &str) {
@@ -295,93 +282,12 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             msgs.push(Message::assistant(&ledger));
         }
 
-        // Adaptive nudge at >50% budget (one-time)
+        // Workflow nudges — unified state machine (budget, write, capture-delete)
         let step = self.step_count.load(Ordering::SeqCst);
-        if step > self.max_steps / 2
-            && self.nudge_sent.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok()
-        {
-            let nudge = format!(
-                "You have used {}/{} steps. Complete the task now or explain why you cannot.",
-                step, self.max_steps
-            );
-            eprintln!("  ⏰ Nudge: {}", nudge);
-            msgs.push(Message::user(&nudge));
-        }
-
-        // Write nudge: if 2+ reads-since-last-write, prompt the model to write
-        let reads = self.consecutive_reads.load(Ordering::SeqCst);
-        if reads >= 2
-            && self.write_nudge_sent.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok()
-        {
-            let nudge = format!(
-                "WRITE NUDGE: You have read files {} times without writing. \
-                 You already have the content — use write() now to make your changes. \
-                 Re-reading the same file will not help.",
-                reads
-            );
-            eprintln!("  ✏️ Write nudge: {} consecutive reads", reads);
-            msgs.push(Message::user(&nudge));
-        }
-
-        // Capture-write guard: if INSTRUCTION mentions capture/distill AND has reads but no writes,
-        // inject reminder. Only checks first user message (instruction), not AGENTS.MD or pregrounding.
-        {
-            let instruction_has_capture = msgs.first()
-                .is_some_and(|m| m.role == Role::User && {
-                    let txt = m.content.to_lowercase();
-                    (txt.contains("capture") || txt.contains("distill")) && !txt.contains("delete all") && !txt.contains("remove all")
-                });
-            if instruction_has_capture {
-                let ledger = self.action_ledger.lock().unwrap();
-                let has_any_read = ledger.iter().any(|e| e.contains("read"));
-                let has_any_write = ledger.iter().any(|e| e.contains("write"));
-                drop(ledger);
-                if has_any_read && !has_any_write {
-                    let nudge = "⚠ CAPTURE GUARD: You have read files but NOT written anything yet. \
-                                 You MUST write() to the capture folder AND distill card BEFORE deleting. \
-                                 Do NOT delete or answer until you have written.";
-                    eprintln!("  📝 Capture-write guard at step {}", step);
-                    msgs.push(Message::user(nudge));
-                }
-            }
-        }
-
-        // Capture-delete nudge: at 30%+ of steps, if task involves inbox capture
-        // and inbox files were read but not deleted, strongly remind to delete
-        // (lowered from 50% — agent often finishes writes by step 6-8, needs delete reminder earlier)
-        if step >= (self.max_steps * 3 / 10)
-            && self.capture_delete_nudge_sent.load(Ordering::SeqCst) == 0
-        {
-            // Check if messages mention inbox/capture (instruction or pre-grounding hints)
-            // Only trigger capture-delete nudge for explicit capture/distill workflows,
-            // NOT for generic "process the inbox" tasks (e.g. resend invoice — t19).
-            // Filter to user messages only — system prompt always contains these words in examples.
-            let has_inbox_context = msgs.iter().any(|m| {
-                m.role == Role::User && {
-                    let txt = m.content.to_lowercase();
-                    txt.contains("capture") || txt.contains("distill")
-                }
-            });
-            // Check if action ledger shows inbox reads (output contains "inbox" paths)
-            let ledger = self.action_ledger.lock().unwrap();
-            let has_inbox_read = ledger.iter().any(|e| e.contains("inbox"));
-            let has_inbox_delete = ledger.iter().any(|e| e.contains("delete") && e.contains("inbox"));
-            drop(ledger);
-
-            if has_inbox_context && has_inbox_read && !has_inbox_delete {
-                // Only set flag when we actually inject the nudge
-                self.capture_delete_nudge_sent.store(1, Ordering::SeqCst);
-                // In OTP mode, remind to delete docs/channels/otp.txt instead of inbox files
-                let nudge = if self.otp_mode.load(Ordering::SeqCst) == 1 {
-                    "⚠ URGENT: After processing OTP inbox, DELETE docs/channels/otp.txt — \
-                     do NOT delete the inbox file itself. Use delete('docs/channels/otp.txt') now."
-                } else {
-                    "⚠ URGENT: You have read inbox files but NOT deleted them. \
-                     You MUST delete ALL processed inbox files (from 00_inbox/) BEFORE calling answer(). \
-                     Use delete() on each inbox file now."
-                };
-                eprintln!("  🗑️ Capture-delete nudge at step {}/{}", step, self.max_steps);
-                msgs.push(Message::user(nudge));
+        if let Some(ref wf) = self.workflow {
+            for nudge in wf.lock().unwrap().advance_step() {
+                eprintln!("  📌 Workflow: {}", &nudge[..nudge.len().min(80)]);
+                msgs.push(Message::user(&nudge));
             }
         }
 
@@ -638,13 +544,13 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         };
         ctx.observe(summary);
 
-        // Track reads-since-last-write (for write-nudge)
-        // Only write-class tools reset the counter; search/find/list/tree do NOT
-        if matches!(tool_name, "read") {
-            self.consecutive_reads.fetch_add(1, Ordering::SeqCst);
-        }
-        if matches!(tool_name, "write" | "delete" | "move_file" | "answer") {
-            self.consecutive_reads.store(0, Ordering::SeqCst);
+        // Track tool actions in workflow state machine
+        if let Some(ref wf) = self.workflow {
+            let path = output.lines().next().unwrap_or("")
+                .replace("$ cat ", "").replace("$ ls ", "")
+                .replace("Written to ", "").replace("Deleted ", "")
+                .trim().to_string();
+            wf.lock().unwrap().post_action(tool_name, &path);
         }
 
         // Post-read security check: detect structural injection signals
@@ -830,48 +736,7 @@ mod tests {
         assert!(names.contains(&"delete"), "analyze step 1+ must have delete");
     }
 
-    #[test]
-    fn consecutive_reads_counter() {
-        use sgr_agent::context::AgentContext;
-        let agent = Pac1Agent::with_config(
-            DummyClient, "test".to_string(), 20, "explicit",
-        );
-        let mut ctx = AgentContext::new();
-        ctx.iteration = 1;
-
-        // reads increment counter
-        agent.after_action(&mut ctx, "read", "$ cat file.md\ncontent");
-        agent.after_action(&mut ctx, "read", "$ cat file2.md\ncontent");
-        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 2);
-
-        // search does NOT reset counter (reads-since-last-write, not consecutive reads)
-        agent.after_action(&mut ctx, "search", "found 3 results");
-        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 2, "search must not reset reads counter");
-
-        // find does NOT reset counter
-        agent.after_action(&mut ctx, "find", "contacts/john.md");
-        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 2, "find must not reset reads counter");
-
-        // write resets counter
-        agent.after_action(&mut ctx, "write", "OK");
-        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 0);
-
-        // delete also resets
-        agent.after_action(&mut ctx, "read", "$ cat x.md\ndata");
-        agent.after_action(&mut ctx, "read", "$ cat y.md\ndata");
-        agent.after_action(&mut ctx, "delete", "OK");
-        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 0);
-
-        // move_file resets counter
-        agent.after_action(&mut ctx, "read", "$ cat a.md\ndata");
-        agent.after_action(&mut ctx, "move_file", "OK");
-        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 0, "move_file must reset reads counter");
-
-        // answer resets counter
-        agent.after_action(&mut ctx, "read", "$ cat b.md\ndata");
-        agent.after_action(&mut ctx, "answer", "OUTCOME_OK");
-        assert_eq!(agent.consecutive_reads.load(Ordering::SeqCst), 0, "answer must reset reads counter");
-    }
+    // consecutive_reads_counter test removed — tracking moved to WorkflowState (workflow.rs)
 
     /// Dummy LlmClient for unit tests that don't need LLM calls.
     struct DummyClient;
