@@ -477,11 +477,21 @@ async fn verify_and_submit(
 fn apply_override_policy(
     proposed_outcome: &str,
     verifier_outcome: &str,
-    _verifier_confidence: f64,
+    verifier_confidence: f64,
 ) -> Option<String> {
-    // v0.3.1: warn-only mode — verifier logs but never overrides.
-    // 6:1 wrong:correct override ratio in v0.3.0 benchmark.
-    // Re-enable when verifier accuracy > 80% on 40+ task benchmark.
+    // Never override when agent chose DENIED_SECURITY — trust agent security decisions
+    if proposed_outcome == "OUTCOME_DENIED_SECURITY" {
+        return None;
+    }
+
+    // Selective security override (v0.4): when verifier detects injection the agent missed.
+    // Agent said OK but verifier says DENIED_SECURITY with high confidence → override.
+    // This catches prompt injection the agent failed to recognize (e.g. t09 "clipboard relay").
+    if verifier_outcome == "OUTCOME_DENIED_SECURITY" && verifier_confidence >= 0.95 {
+        return Some("OUTCOME_DENIED_SECURITY".to_string());
+    }
+
+    // All other disagreements: warn-only (6:1 wrong:correct ratio for non-security overrides)
     if proposed_outcome != verifier_outcome {
         eprintln!(
             "  ℹ Verifier disagrees: proposed={} verifier={} (warn-only, no override)",
@@ -696,25 +706,44 @@ mod tests {
     }
 
     #[test]
-    fn override_warn_only_never_overrides() {
-        // v0.3.1: warn-only mode — verifier never overrides regardless of confidence
+    fn override_warn_only_for_non_security() {
+        // Non-security disagreements: still warn-only (6:1 wrong:correct ratio)
         let result = apply_override_policy(
             "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.9,
         );
-        assert!(result.is_none(), "Warn-only: high confidence disagree = no override");
+        assert!(result.is_none(), "Non-security disagree = no override");
 
         let result = apply_override_policy(
             "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.6,
         );
-        assert!(result.is_none(), "Warn-only: low confidence disagree = no override");
+        assert!(result.is_none(), "Low confidence disagree = no override");
     }
 
     #[test]
-    fn override_never_overrides_security() {
+    fn override_never_overrides_agent_denied() {
         let result = apply_override_policy(
             "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99,
         );
-        assert!(result.is_none(), "DENIED_SECURITY is never overridden");
+        assert!(result.is_none(), "Agent's DENIED_SECURITY is never overridden");
+    }
+
+    #[test]
+    fn override_security_high_confidence() {
+        // Verifier detects injection agent missed → override
+        let result = apply_override_policy(
+            "OUTCOME_OK", "OUTCOME_DENIED_SECURITY", 0.99,
+        );
+        assert_eq!(result.as_deref(), Some("OUTCOME_DENIED_SECURITY"),
+            "High-confidence security detection overrides agent OK");
+    }
+
+    #[test]
+    fn override_security_low_confidence_no_override() {
+        // Low confidence security detection → warn only
+        let result = apply_override_policy(
+            "OUTCOME_OK", "OUTCOME_DENIED_SECURITY", 0.80,
+        );
+        assert!(result.is_none(), "Low confidence security = no override");
     }
 
     // ─── build_execution_summary ────────────────────────────────────────
