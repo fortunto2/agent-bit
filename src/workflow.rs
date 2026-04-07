@@ -143,6 +143,19 @@ impl WorkflowState {
             }
         }
 
+        // Non-capture inbox: BLOCK deleting inbox files
+        // (only capture/distill tasks should delete inbox source)
+        if tool == "delete" && !self.is_capture && self.intent == "intent_inbox" {
+            let norm_lower = path.trim_start_matches('/').to_lowercase();
+            if norm_lower.contains("inbox/") {
+                return Guard::Block(
+                    "⛔ Inbox delete skipped — task did not ask for deletion. \
+                     Your work is done. Call answer(OUTCOME_OK) now."
+                        .into(),
+                );
+            }
+        }
+
         Guard::Allow
     }
 
