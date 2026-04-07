@@ -336,6 +336,7 @@ pub(crate) async fn run_agent(
     };
     let instruction_label = classified.instruction_label.clone();
     let instruction_intent = classified.intent.clone();
+    let intent_confidence = classified.intent_confidence;
 
     // ── Context assembly (tree, agents.md, CRM schema) ──────────────
     let tree_out = pcm.tree("/", 2).await.unwrap_or_else(|e| format!("(error: {})", e));
@@ -608,8 +609,9 @@ pub(crate) async fn run_agent(
 
     // ── Planning phase: decompose task into steps ─────────────────────
     // Skip planning for data queries — planner hallucinates wrong targets (t16, t34)
-    let plan = if instruction_intent == "intent_query" {
-        eprintln!("  ⏭ Skipping planning: data-query task");
+    // Only skip when confidence is high enough (>0.25) — low confidence means random classification
+    let plan = if instruction_intent == "intent_query" && intent_confidence > 0.25 {
+        eprintln!("  ⏭ Skipping planning: data-query task (conf={:.2})", intent_confidence);
         None
     } else {
         run_planning_phase(
