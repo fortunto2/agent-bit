@@ -324,8 +324,8 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         }
 
         // Capture-write guard: if capture/distill task has inbox reads but NO writes yet,
-        // inject strong reminder to write BEFORE deleting. Fires every step until a write occurs.
-        // This prevents the 3-step failure mode: read → delete → answer (score 0).
+        // inject escalating reminder. Escalates urgency based on read count.
+        // This prevents the read-loop failure mode: 15 reads → auto-answer (score 0).
         {
             let has_capture_context = msgs.iter().any(|m| {
                 m.role == Role::User && {
@@ -335,15 +335,74 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             });
             if has_capture_context {
                 let ledger = self.action_ledger.lock().unwrap();
-                let has_any_read = ledger.iter().any(|e| e.contains("read"));
+                let read_count = ledger.iter().filter(|e| e.contains("read")).count();
                 let has_any_write = ledger.iter().any(|e| e.contains("write"));
                 drop(ledger);
-                if has_any_read && !has_any_write {
-                    let nudge = "⚠ CAPTURE GUARD: You have read files but NOT written anything yet. \
-                                 You MUST write() to the capture folder AND distill card BEFORE deleting. \
-                                 Do NOT delete or answer until you have written.";
-                    eprintln!("  📝 Capture-write guard at step {}", step);
-                    msgs.push(Message::user(nudge));
+                if read_count > 0 && !has_any_write {
+                    let remaining = self.max_steps.saturating_sub(step);
+                    let nudge = if read_count >= 4 {
+                        format!(
+                            "🚨 CRITICAL: {} reads, ZERO writes, only {} steps left!\n\
+                             The system will auto-answer soon — you will score 0.\n\
+                             YOUR NEXT TOOL CALL MUST BE write().\n\
+                             Write the inbox content to 01_capture/ folder NOW.\n\
+                             Then: write card → write thread → delete inbox → answer.\n\
+                             STOP READING FILES. You already have everything.",
+                            read_count, remaining
+                        )
+                    } else if read_count >= 2 {
+                        format!(
+                            "⚠ CAPTURE GUARD: {} reads, 0 writes. {} steps remaining.\n\
+                             You MUST write() to capture folder NOW.\n\
+                             Do NOT read contacts or accounts — they are pre-loaded.",
+                            read_count, remaining
+                        )
+                    } else {
+                        "⚠ CAPTURE GUARD: You have read files but NOT written anything yet. \
+                         Start writing to capture folder NOW.".to_string()
+                    };
+                    eprintln!("  📝 Capture-write guard at step {} ({} reads, 0 writes, {} remaining)", step, read_count, remaining);
+                    msgs.push(Message::user(&nudge));
+                }
+            }
+        }
+
+        // Thread completion guard: if capture/distill task has card written but no thread write,
+        // remind agent to update thread before deleting.
+        {
+            let has_capture_context = msgs.iter().any(|m| {
+                m.role == Role::User && {
+                    let txt = m.content.to_lowercase();
+                    txt.contains("capture") || txt.contains("distill")
+                }
+            });
+            if has_capture_context {
+                let ledger = self.action_ledger.lock().unwrap();
+                let has_card_write = ledger.iter().any(|e| e.contains("write") && e.contains("cards"));
+                let has_thread_write = ledger.iter().any(|e| e.contains("write") && e.contains("threads"));
+                let has_inbox_delete = ledger.iter().any(|e| e.contains("delete") && e.contains("inbox"));
+                drop(ledger);
+                if has_card_write && !has_thread_write && !has_inbox_delete {
+                    // Extract the card filename from ledger for a specific instruction
+                    let card_path = {
+                        let l = self.action_ledger.lock().unwrap();
+                        l.iter()
+                            .find(|e| e.contains("write") && e.contains("cards"))
+                            .and_then(|e| e.split("cards/").nth(1))
+                            .map(|s| s.split(')').next().unwrap_or(s).to_string())
+                            .unwrap_or_default()
+                    };
+                    let nudge = format!(
+                        "⚠ THREAD REQUIRED: You wrote the card but NOT the thread.\n\
+                         1. list() 02_distill/threads/ to find a matching thread\n\
+                         2. If found: read() it, then write() with new entry appended\n\
+                         3. If no match: CREATE new thread file in 02_distill/threads/\n\
+                         The entry MUST include a link: [Card](../cards/{})\n\
+                         Do NOT delete inbox or answer until thread is written.",
+                        if card_path.is_empty() { "{filename}".to_string() } else { card_path }
+                    );
+                    eprintln!("  📄 Thread completion guard at step {}", step);
+                    msgs.push(Message::user(&nudge));
                 }
             }
         }

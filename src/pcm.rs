@@ -23,6 +23,8 @@ pub struct PcmClient {
     /// Read cache — keyed by path. Invalidated by write/delete to same path.
     /// Single owner: PcmClient. All tools share via Arc<PcmClient>.
     read_cache: Mutex<std::collections::HashMap<String, String>>,
+    /// Track write paths — for capture-distill inbox delete guard.
+    write_paths: Mutex<Vec<String>>,
 }
 
 impl PcmClient {
@@ -35,6 +37,7 @@ impl PcmClient {
             proposed_answer: Mutex::new(None),
             recent_reads: Mutex::new(Vec::new()),
             read_cache: Mutex::new(std::collections::HashMap::new()),
+            write_paths: Mutex::new(Vec::new()),
         }
     }
 
@@ -115,6 +118,10 @@ impl PcmClient {
         self.inner.write(proto::WriteRequest {
             path: path.into(), content: content.into(), start_line, end_line, ..Default::default()
         }).await.map_err(|e| Self::err("Write", e))?;
+        // Track write paths for capture-distill guard
+        if let Ok(mut writes) = self.write_paths.lock() {
+            writes.push(path.trim_start_matches('/').to_string());
+        }
         // Invalidate read cache — file content changed
         if let Ok(mut cache) = self.read_cache.lock() {
             cache.remove(path.trim_start_matches('/'));
@@ -126,10 +133,26 @@ impl PcmClient {
         if let Some(reason) = crate::policy::check_write(path) {
             anyhow::bail!("BLOCKED: '{}' is protected ({}) — cannot delete", path, reason);
         }
+        // Capture-distill guard: block inbox file delete if no capture/distill writes yet.
+        // Returns a tool error (not a hard block) so agent can retry after writing.
+        let norm = path.trim_start_matches('/');
+        if norm.starts_with("00_inbox/") {
+            let writes = self.write_paths.lock().unwrap_or_else(|e| e.into_inner());
+            let has_capture_write = writes.iter().any(|w| w.starts_with("01_capture/"));
+            let has_distill_write = writes.iter().any(|w| w.starts_with("02_distill/"));
+            drop(writes);
+            if !has_capture_write || !has_distill_write {
+                eprintln!("  🛡️ Inbox delete blocked: capture={} distill={}", has_capture_write, has_distill_write);
+                anyhow::bail!(
+                    "Cannot delete inbox file yet — you must write to 01_capture/ AND 02_distill/ first. \
+                     Capture-distill workflow: write capture → write card → write thread → THEN delete inbox."
+                );
+            }
+        }
         self.inner.delete(proto::DeleteRequest { path: path.into(), ..Default::default() })
             .await.map_err(|e| Self::err("Delete", e))?;
         if let Ok(mut cache) = self.read_cache.lock() {
-            cache.remove(path.trim_start_matches('/'));
+            cache.remove(norm);
         }
         Ok(())
     }
