@@ -631,13 +631,36 @@ pub(crate) async fn run_agent(
         ));
     } else if instruction_intent == "intent_inbox" {
         let n = ready.inbox_files.len();
-        if has_otp {
-            // OTP mode: don't tell agent to delete inbox files — OTP hint already handles deletion guidance
+        let instr_lower = ready.instruction.to_lowercase();
+
+        // Capture/distill takes priority over generic inbox processing
+        if instr_lower.contains("capture") || instr_lower.contains("distill") {
+                // Resolve capture folder from instruction using fuzzy match against tree
+                let capture_target = resolve_capture_folder(&ready.instruction, &tree_out);
+                let msg = if let Some((source, capture_path, card_path)) = capture_target {
+                    format!(
+                        "CAPTURE-DISTILL paths resolved:\n\
+                         write(\"{}\") → write(\"{}\") → update thread in 02_distill/threads/ → delete(\"{}\") → answer(OK)\n\
+                         Thread update REQUIRED (read 02_distill/AGENTS.md for rules).",
+                        capture_path, card_path, source
+                    )
+                } else {
+                    "CAPTURE-DISTILL WORKFLOW:\n\
+                     1. READ inbox file (already loaded above — use it)\n\
+                     2. WRITE to capture folder (01_capture/{folder}/{same filename})\n\
+                     3. WRITE distill card to 02_distill/cards/{same filename}\n\
+                     4. DELETE original inbox file\n\
+                     5. answer(OUTCOME_OK)\n\
+                     WRONG: read → delete → answer (you SKIPPED writes!)\n\
+                     Write BEFORE deleting.".to_string()
+                };
+                messages.push(Message::user(&msg));
+        } else if has_otp {
             if n > 2 {
                 messages.push(Message::user(&format!(
                     "INBOX PROCESSING ({} messages already shown above — do NOT re-read them): \
                      Act on each message directly from context. For each: process the request, then answer. \
-                     Skip messages that need no CRM action. Include account file paths in answer() refs.",
+                     Skip messages that need no CRM action.",
                     n
                 )));
             }
@@ -645,25 +668,9 @@ pub(crate) async fn run_agent(
             messages.push(Message::user(&format!(
                 "INBOX PROCESSING ({} messages already shown above — do NOT re-read them): \
                  Act on each message directly from context. For each: search account → write/update → delete inbox file. \
-                 Skip messages that need no CRM action. Include account file paths in answer() refs.",
+                 Skip messages that need no CRM action.",
                 n
             )));
-        } else {
-            // Only push delete reminder when instruction explicitly involves capture/distill/delete workflow.
-            // For "process the inbox" tasks that respond to requests (resend invoice, etc.), do NOT force deletion.
-            let instr_lower = ready.instruction.to_lowercase();
-            if instr_lower.contains("capture") || instr_lower.contains("distill") || (instr_lower.contains("delete") && instr_lower.contains("inbox")) {
-                messages.push(Message::user(
-                    "CAPTURE-DISTILL WORKFLOW (follow ALL steps in order):\n\
-                     1. READ the inbox file (already loaded above — use it)\n\
-                     2. WRITE to capture folder (01_capture/{folder from instruction}/{same filename})\n\
-                     3. WRITE distill card to 02_distill/cards/{same filename}\n\
-                     4. DELETE the original inbox file from 00_inbox/\n\
-                     5. answer() with OUTCOME_OK\n\
-                     WRONG: read → delete → answer (score 0 — you SKIPPED the writes!)\n\
-                     You MUST write BEFORE deleting. Deletion without prior writes = FAIL."
-                ));
-            }
         }
     }
 
@@ -887,6 +894,50 @@ pub(crate) fn build_execution_summary(history: &str, max_lines: usize) -> String
         .collect();
     let start = relevant.len().saturating_sub(max_lines);
     relevant[start..].join("\n")
+}
+
+/// Resolve capture folder from instruction + tree.
+/// Extracts source file, matches folder name (with typo tolerance via strsim),
+/// returns (source_path, capture_path, card_path).
+fn resolve_capture_folder(instruction: &str, tree: &str) -> Option<(String, String, String)> {
+    // Extract source file from instruction (look for 00_inbox/... path)
+    let source = instruction.split_whitespace()
+        .find(|w| w.contains("00_inbox/") || w.contains("inbox/"))
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '_' && c != '-' && c != '.'))
+        .map(String::from)?;
+
+    let filename = source.rsplit('/').next()?;
+
+    // Extract quoted folder name from instruction (e.g., 'influental')
+    let folder_name = instruction.split('\'')
+        .nth(1)
+        .or_else(|| instruction.split('"').nth(1))?;
+
+    // Find matching subfolder in tree under 01_capture/ using strsim
+    let capture_dirs: Vec<&str> = tree.lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.contains('.'))  // folders only
+        .collect();
+
+    let mut best_match = String::new();
+    let mut best_score = 0.0f64;
+    for dir in &capture_dirs {
+        let sim = strsim::normalized_levenshtein(&folder_name.to_lowercase(), &dir.to_lowercase());
+        if sim > best_score {
+            best_score = sim;
+            best_match = dir.to_string();
+        }
+    }
+
+    if best_score < 0.5 {
+        return None; // no good match
+    }
+
+    let capture_path = format!("01_capture/{}/{}", best_match.trim_end_matches('/'), filename);
+    let card_path = format!("02_distill/cards/{}", filename);
+
+    eprintln!("  📍 Capture resolved: '{}' → '{}' (sim={:.2})", folder_name, best_match, best_score);
+    Some((source, capture_path, card_path))
 }
 
 #[cfg(test)]
