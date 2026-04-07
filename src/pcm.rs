@@ -170,6 +170,19 @@ impl PcmClient {
         for m in &v.matches {
             out.push_str(&format!("{}:{}:{}\n", m.path, m.line, m.line_text));
         }
+        // Track search result paths for auto-refs (accounts, contacts, invoices)
+        if let Ok(mut reads) = self.recent_reads.lock() {
+            for m in &v.matches {
+                let p = m.path.trim_start_matches('/').to_string();
+                if (p.starts_with("accounts/") || p.starts_with("contacts/") || p.starts_with("my-invoices/"))
+                    && !p.contains("README")
+                    && !reads.contains(&p)
+                {
+                    reads.push(p);
+                    if reads.len() > 20 { reads.remove(0); }
+                }
+            }
+        }
         Ok(out)
     }
 
