@@ -578,10 +578,13 @@ pub(crate) async fn run_agent(
 
     let crm_graph = Arc::new(ready.crm_graph);
 
+    // Extract write completion hooks from AGENTS.MD workflow rules
+    let write_hooks = extract_write_hooks(&agents_md);
+
     // Build tool registry with OutcomeValidator (passed in from main.rs for score-gated learning)
     let registry = ToolRegistry::new()
         .register(tools::ReadTool(pcm.clone()))
-        .register(tools::WriteTool(pcm.clone()))
+        .register(tools::WriteTool::with_hooks(pcm.clone(), write_hooks))
         .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
         .register(tools::FindTool(pcm.clone()))
         .register(tools::ListTool(pcm.clone()))
@@ -894,6 +897,68 @@ pub(crate) fn build_execution_summary(history: &str, max_lines: usize) -> String
         .collect();
     let start = relevant.len().saturating_sub(max_lines);
     relevant[start..].join("\n")
+}
+
+/// Extract write completion hooks from AGENTS.MD content.
+/// Parses rules like "When adding a card under /02_distill/cards/, also update threads"
+/// into structured WriteHook instances for WriteTool.
+fn extract_write_hooks(agents_md: &str) -> Vec<tools::WriteHook> {
+    let mut hooks = Vec::new();
+    let lower = agents_md.to_lowercase();
+
+    // Pattern: "when adding/writing to {path}, also {action} in {target}"
+    // Look for sentences with "adding" + path references
+    for line in agents_md.lines() {
+        let ll = line.to_lowercase();
+        if (ll.contains("when adding") || ll.contains("when writing") || ll.contains("after writing"))
+            && ll.contains("also")
+        {
+            // Extract source path (in markdown links or plain text)
+            if let Some(source) = extract_path_ref(line) {
+                if let Some(action_part) = line.split("also").nth(1) {
+                    if let Some(target) = extract_path_ref(action_part) {
+                        let next_step = action_part.trim().trim_start_matches(',').trim().to_string();
+                        hooks.push(tools::WriteHook {
+                            path_contains: source.trim_matches('/').to_lowercase(),
+                            exclude_contains: vec!["_template".to_string(), "_card-template".to_string()],
+                            next_step: format!("NEXT: {} (from AGENTS.MD rules)", next_step),
+                        });
+                        eprintln!("  📎 Write hook: {} → {}", source, target);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: if AGENTS.MD mentions cards + threads pattern but we didn't parse it
+    if hooks.is_empty() && lower.contains("card") && lower.contains("thread") && lower.contains("distill") {
+        hooks.push(tools::WriteHook {
+            path_contains: "distill/cards/".to_string(),
+            exclude_contains: vec!["_template".to_string()],
+            next_step: "NEXT: update matching thread in 02_distill/threads/ (append card link).".to_string(),
+        });
+        eprintln!("  📎 Write hook (fallback): distill/cards → threads");
+    }
+
+    hooks
+}
+
+/// Extract first path-like reference from text (markdown link or /path/).
+fn extract_path_ref(text: &str) -> Option<String> {
+    // Markdown link: [text](/path/)
+    if let Some(start) = text.find("](/") {
+        if let Some(end) = text[start+2..].find(')') {
+            return Some(text[start+2..start+2+end].to_string());
+        }
+    }
+    // Plain path: /something/something/
+    for word in text.split_whitespace() {
+        let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '_' && c != '-' && c != '.');
+        if clean.contains('/') && clean.len() > 3 {
+            return Some(clean.to_string());
+        }
+    }
+    None
 }
 
 /// Resolve capture folder from instruction + tree.
