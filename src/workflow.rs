@@ -54,6 +54,8 @@ pub struct WorkflowState {
     hooks: hooks::SharedHookRegistry,
     /// Whether instruction mentions capture/distill
     is_capture: bool,
+    /// Whether instruction explicitly mentions delete/remove
+    allows_delete: bool,
 }
 
 impl WorkflowState {
@@ -62,6 +64,11 @@ impl WorkflowState {
         let is_capture = (instr_lower.contains("capture") || instr_lower.contains("distill"))
             && !instr_lower.contains("delete all")
             && !instr_lower.contains("remove all");
+        // Instruction explicitly allows deletion
+        let allows_delete = intent == "intent_delete"
+            || instr_lower.contains("delete")
+            || instr_lower.contains("remove")
+            || is_capture; // capture/distill implies delete source
 
         Self {
             phase: Phase::Reading,
@@ -73,6 +80,7 @@ impl WorkflowState {
             delete_paths: Vec::new(),
             hooks,
             is_capture,
+            allows_delete,
         }
     }
 
@@ -143,17 +151,13 @@ impl WorkflowState {
             }
         }
 
-        // Non-capture inbox: BLOCK deleting inbox files
-        // (only capture/distill tasks should delete inbox source)
-        if tool == "delete" && !self.is_capture && self.intent == "intent_inbox" {
-            let norm_lower = path.trim_start_matches('/').to_lowercase();
-            if norm_lower.contains("inbox/") {
-                return Guard::Block(
-                    "⛔ Inbox delete skipped — task did not ask for deletion. \
-                     Your work is done. Call answer(OUTCOME_OK) now."
-                        .into(),
-                );
-            }
+        // Universal delete guard: only allow delete if instruction explicitly mentions it
+        if tool == "delete" && !self.allows_delete {
+            return Guard::Block(
+                "⛔ Delete skipped — task did not ask for deletion. \
+                 Your work is done. Call answer(OUTCOME_OK) now."
+                    .into(),
+            );
         }
 
         Guard::Allow
