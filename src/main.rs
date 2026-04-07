@@ -37,6 +37,7 @@ mod scanner;
 #[allow(dead_code)]
 mod pac1_sgr;
 mod tools;
+mod workflow;
 
 #[derive(Parser)]
 #[command(name = "pac1-agent", about = "BitGN PAC1 Challenge Agent (Rust + sgr-agent)")]
