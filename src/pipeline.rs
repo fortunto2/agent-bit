@@ -412,7 +412,7 @@ pub fn assess_security(
     }
 
     // Signal 6: Content targets protected system files (policy guard)
-    if crate::policy::content_targets_protected(content) {
+    if crate::policy::scan_content(content) {
         return make_block("OUTCOME_DENIED_SECURITY",
             "Blocked: inbox requests deletion/modification of protected system files".into(), "security");
     }
