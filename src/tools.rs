@@ -132,27 +132,13 @@ impl Tool for ReadTool {
 
 // ─── write ───────────────────────────────────────────────────────────────────
 
-/// Write completion hook: after writing to matching path, append next-step hint.
-#[derive(Clone)]
-pub struct WriteHook {
-    /// Path prefix to match (e.g., "02_distill/cards/")
-    pub path_contains: String,
-    /// Paths to exclude from matching (e.g., templates)
-    pub exclude_contains: Vec<String>,
-    /// Message to append to tool output
-    pub next_step: String,
-}
-
 pub struct WriteTool {
     pub pcm: Arc<PcmClient>,
-    pub hooks: Vec<WriteHook>,
+    pub hooks: crate::hooks::SharedHookRegistry,
 }
 
 impl WriteTool {
-    pub fn new(pcm: Arc<PcmClient>) -> Self {
-        Self { pcm, hooks: Vec::new() }
-    }
-    pub fn with_hooks(pcm: Arc<PcmClient>, hooks: Vec<WriteHook>) -> Self {
+    pub fn new(pcm: Arc<PcmClient>, hooks: crate::hooks::SharedHookRegistry) -> Self {
         Self { pcm, hooks }
     }
 }
@@ -207,15 +193,9 @@ impl Tool for WriteTool {
             format!("Written to {}", a.path)
         };
 
-        // Completion hooks — data-driven next-step hints
-        let norm = a.path.trim_start_matches('/').to_lowercase();
-        for hook in &self.hooks {
-            if norm.contains(&hook.path_contains)
-                && !hook.exclude_contains.iter().any(|ex| norm.contains(ex))
-            {
-                msg.push_str(&format!("\n📌 {}", hook.next_step));
-                break;
-            }
+        // Completion hooks — data-driven from AGENTS.MD
+        for hook_msg in self.hooks.check("write", &a.path) {
+            msg.push_str(&format!("\n{}", hook_msg));
         }
 
         Ok(ToolOutput::text(msg))
