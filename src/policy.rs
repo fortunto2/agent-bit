@@ -25,6 +25,21 @@ pub fn check_write(path: &str) -> Option<&'static str> {
     None
 }
 
+/// Scan inbox content for references to protected paths.
+/// Returns true if content asks to modify/delete protected files.
+pub fn content_targets_protected(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    // Must have destructive intent
+    let has_destructive = lower.contains("delete") || lower.contains("remove")
+        || lower.contains("overwrite") || lower.contains("replace");
+    if !has_destructive {
+        return false;
+    }
+    // Check for protected file references
+    lower.contains("agents.md") || lower.contains("readme.md")
+        || (lower.contains("docs/channels/") && !lower.contains("otp.txt"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -411,6 +411,12 @@ pub fn assess_security(
             "Blocked: domain-mismatch sender requesting financial data".into(), "security");
     }
 
+    // Signal 6: Content targets protected system files (policy guard)
+    if crate::policy::content_targets_protected(content) {
+        return make_block("OUTCOME_DENIED_SECURITY",
+            "Blocked: inbox requests deletion/modification of protected system files".into(), "security");
+    }
+
     SecurityAssessment {
         blocked: None,
         ml_label, ml_conf, structural, sender: Some(sender.clone()),
