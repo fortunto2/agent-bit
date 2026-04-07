@@ -237,14 +237,14 @@ async fn main() -> Result<()> {
             eprintln!("  Trial: {}", trial.trial_id);
             eprintln!("  📋 Log: {}", log_url);
 
-            // Save log URL into dump dir for offline access
-            if let Ok(dump_dir) = std::env::var("DUMP_TRIAL") {
-                let _ = std::fs::create_dir_all(&dump_dir);
-                let _ = std::fs::write(
-                    format!("{}/bitgn_log.url", dump_dir),
-                    format!("{}\n", log_url),
-                );
-            }
+            // Auto-create dump dir if DUMP_TRIAL set, or auto-generate for single-task runs
+            let dump_dir = std::env::var("DUMP_TRIAL").ok().unwrap_or_else(|| {
+                format!("benchmarks/tasks/{}/{}", task_id, trial.trial_id)
+            });
+            let _ = std::fs::create_dir_all(&dump_dir);
+            let _ = std::fs::write(format!("{}/bitgn_log.url", dump_dir), format!("{}\n", log_url));
+            // SAFETY: single-threaded env var set for child code in same task
+            unsafe { std::env::set_var("DUMP_TRIAL", &dump_dir); }
 
             let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
             let (last_msg, history) = run_trial(
