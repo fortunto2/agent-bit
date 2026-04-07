@@ -140,12 +140,12 @@ impl WorkflowState {
             }
         }
 
-        // Capture workflow: block delete before write
+        // Capture workflow: BLOCK delete before write
         if tool == "delete" && self.is_capture && self.phase == Phase::Reading {
             if self.write_paths.is_empty() {
-                return Guard::Warn(
-                    "⚠ CAPTURE GUARD: You are deleting without writing first. \
-                     In capture/distill tasks, you MUST write() before delete()."
+                return Guard::Block(
+                    "⛔ BLOCKED: You must write() capture file and distill card BEFORE deleting. \
+                     Write to 01_capture/ and 02_distill/cards/ first."
                         .into(),
                 );
             }
@@ -239,11 +239,11 @@ mod tests {
     }
 
     #[test]
-    fn capture_task_warns_delete_before_write() {
+    fn capture_task_blocks_delete_before_write() {
         let wf = WorkflowState::new("intent_inbox", 20, empty_hooks(), "capture into 'influential' folder");
         assert!(wf.is_capture);
         let guard = wf.pre_action("delete", "00_inbox/article.md");
-        assert!(matches!(guard, Guard::Warn(_)));
+        assert!(matches!(guard, Guard::Block(_)));
     }
 
     #[test]
