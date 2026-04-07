@@ -690,6 +690,11 @@ pub(crate) async fn run_agent(
         max_steps
     };
 
+    // Update workflow with scaled max_steps
+    if effective_max_steps != max_steps {
+        workflow.lock().unwrap().set_max_steps(effective_max_steps);
+    }
+
     // ── SGR Mode: pure single-call loop (4x faster on weak models) ────
     if sgr_mode {
         let sgr_llm = sgr_agent::llm::Llm::new(&config);

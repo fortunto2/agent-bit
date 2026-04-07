@@ -76,6 +76,11 @@ impl WorkflowState {
         }
     }
 
+    /// Update max_steps (e.g., after multi-inbox scaling).
+    pub fn set_max_steps(&mut self, max_steps: usize) {
+        self.max_steps = max_steps;
+    }
+
     /// Advance step counter. Returns messages to inject (budget nudges etc).
     pub fn advance_step(&mut self) -> Vec<String> {
         self.step += 1;
