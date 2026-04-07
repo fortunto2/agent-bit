@@ -132,7 +132,30 @@ impl Tool for ReadTool {
 
 // ─── write ───────────────────────────────────────────────────────────────────
 
-pub struct WriteTool(pub Arc<PcmClient>);
+/// Write completion hook: after writing to matching path, append next-step hint.
+#[derive(Clone)]
+pub struct WriteHook {
+    /// Path prefix to match (e.g., "02_distill/cards/")
+    pub path_contains: String,
+    /// Paths to exclude from matching (e.g., templates)
+    pub exclude_contains: Vec<String>,
+    /// Message to append to tool output
+    pub next_step: String,
+}
+
+pub struct WriteTool {
+    pub pcm: Arc<PcmClient>,
+    pub hooks: Vec<WriteHook>,
+}
+
+impl WriteTool {
+    pub fn new(pcm: Arc<PcmClient>) -> Self {
+        Self { pcm, hooks: Vec::new() }
+    }
+    pub fn with_hooks(pcm: Arc<PcmClient>, hooks: Vec<WriteHook>) -> Self {
+        Self { pcm, hooks }
+    }
+}
 
 #[derive(Deserialize, JsonSchema)]
 struct WriteArgs {
@@ -175,14 +198,26 @@ impl Tool for WriteTool {
             }
         }
 
-        self.0.write(&a.path, &a.content, a.start_line, a.end_line).await.map_err(pcm_err)?;
-        let msg = if a.start_line > 0 && a.end_line > 0 {
+        self.pcm.write(&a.path, &a.content, a.start_line, a.end_line).await.map_err(pcm_err)?;
+        let mut msg = if a.start_line > 0 && a.end_line > 0 {
             format!("Replaced lines {}-{} in {}", a.start_line, a.end_line, a.path)
         } else if a.start_line > 0 {
             format!("Replaced from line {} in {}", a.start_line, a.path)
         } else {
             format!("Written to {}", a.path)
         };
+
+        // Completion hooks — data-driven next-step hints
+        let norm = a.path.trim_start_matches('/').to_lowercase();
+        for hook in &self.hooks {
+            if norm.contains(&hook.path_contains)
+                && !hook.exclude_contains.iter().any(|ex| norm.contains(ex))
+            {
+                msg.push_str(&format!("\n📌 {}", hook.next_step));
+                break;
+            }
+        }
+
         Ok(ToolOutput::text(msg))
     }
 }
