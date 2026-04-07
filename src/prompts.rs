@@ -284,18 +284,13 @@ EXAMPLE — Capture from inbox (distill + delete source):
   delete({\"path\": \"inbox/msg.md\"})
   answer({\"message\": \"Captured info from inbox and deleted source\", \"outcome\": \"OUTCOME_OK\"})
 
-EXAMPLE — Distill: capture + card + thread + delete inbox:
+EXAMPLE — Distill: create card from capture source AND delete inbox:
   read({\"path\": \"00_inbox/2026-03-01__article-title.md\"}) → [inbox content to process]
-  list({\"path\": \"01_capture/\"}) → find correct capture subfolder
-  write({\"path\": \"01_capture/influential/2026-03-01__article-title.md\", \"content\": \"{...raw captured content}\"})
   read({\"path\": \"02_distill/cards/_card-template.md\"}) → [template]
   write({\"path\": \"02_distill/cards/2026-03-01__article-title.md\", \"content\": \"{...card from template + source}\"})
-  list({\"path\": \"02_distill/threads/\"}) → find matching thread
-  read({\"path\": \"02_distill/threads/relevant-thread.md\"}) → [existing thread]
-  write({\"path\": \"02_distill/threads/relevant-thread.md\", \"content\": \"{...existing + new entry with link: [Card](../cards/2026-03-01__article-title.md)}\"})
   delete({\"path\": \"00_inbox/2026-03-01__article-title.md\"})
-  answer({\"message\": \"Captured, created card, updated thread with card link, deleted inbox\", \"outcome\": \"OUTCOME_OK\"})
-  IMPORTANT: Keep EXACT source filename for cards. Find existing capture subfolder (instruction may have typo). ALWAYS update thread to link to card — required. Delete inbox LAST (after all writes).
+  answer({\"message\": \"Created card and deleted inbox source\", \"outcome\": \"OUTCOME_OK\"})
+  IMPORTANT: Keep the EXACT source filename when creating the card. Do NOT rename. ALWAYS delete the inbox file after processing.
 
 EXAMPLE — Update thread file (append to editable section):
   read({\"path\": \"threads/project.md\"}) → [existing thread with AGENT_EDITABLE sections]
