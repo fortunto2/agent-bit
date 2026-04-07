@@ -76,7 +76,7 @@ preflight:
 
 # Solo-dev pipeline (autonomous agent working on plans)
 solo-dev:
-	bash ~/startups/solopreneur/solo-factory/scripts/solo-dev.sh agent-bit rust --from build
+	bash ~/startups/solopreneur/solo-factory/scripts/solo-dev.sh agent-bit rust --from build --no-dashboard
 
 # Release build
 release-build:
