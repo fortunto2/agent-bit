@@ -39,6 +39,7 @@ pub enum Guard {
     /// Action blocked — return this message to agent instead of executing.
     Block(String),
     /// Action allowed, but inject warning message after.
+    #[allow(dead_code)]
     Warn(String),
 }
 
@@ -190,9 +191,9 @@ impl WorkflowState {
             }
             "delete" => {
                 self.delete_paths.push(norm.clone());
-                if self.phase == Phase::Acting {
-                    self.phase = Phase::Cleanup;
-                } else if self.intent == "intent_delete" && self.phase == Phase::Reading {
+                if self.phase == Phase::Acting
+                    || (self.intent == "intent_delete" && self.phase == Phase::Reading)
+                {
                     self.phase = Phase::Cleanup;
                 }
             }
@@ -208,6 +209,7 @@ impl WorkflowState {
     }
 
     /// Summary for logging.
+    #[allow(dead_code)]
     pub fn summary(&self) -> String {
         format!(
             "phase={:?} reads={} writes={} deletes={} step={}/{}",

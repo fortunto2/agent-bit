@@ -112,6 +112,7 @@ impl std::fmt::Debug for SecurityChecked {
 pub struct Ready {
     pub instruction: String,
     pub intent: String,
+    #[allow(dead_code)]
     pub intent_confidence: f32,
     #[allow(dead_code)]
     pub instruction_label: String,

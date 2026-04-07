@@ -739,6 +739,7 @@ mod tests {
     // consecutive_reads_counter test removed — tracking moved to WorkflowState (workflow.rs)
 
     /// Dummy LlmClient for unit tests that don't need LLM calls.
+    #[allow(dead_code)]
     struct DummyClient;
 
     #[async_trait::async_trait]
