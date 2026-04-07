@@ -155,6 +155,8 @@ pub struct Pac1SgrAgent {
     pub system_prompt: String,
     pub intent: String,
     step_count: AtomicU32,
+    /// Data-driven write completion hooks (parsed from AGENTS.MD)
+    pub write_hooks: Vec<crate::tools::WriteHook>,
 }
 
 impl Pac1SgrAgent {
@@ -162,7 +164,12 @@ impl Pac1SgrAgent {
         pcm: Arc<PcmClient>, llm: sgr_agent::llm::Llm,
         system_prompt: String, intent: String,
     ) -> Self {
-        Self { pcm, llm, system_prompt, intent, step_count: AtomicU32::new(0) }
+        Self { pcm, llm, system_prompt, intent, step_count: AtomicU32::new(0), write_hooks: Vec::new() }
+    }
+
+    pub fn with_hooks(mut self, hooks: Vec<crate::tools::WriteHook>) -> Self {
+        self.write_hooks = hooks;
+        self
     }
 
     fn tool_names(&self) -> Vec<&str> {
@@ -298,6 +305,22 @@ impl SgrAgent for Pac1SgrAgent {
             };
             Ok(ActionResult { output, done })
         }
+    }
+
+    fn after_execute(&self, action: &Action, _result: &ActionResult) -> Vec<String> {
+        // Check write hooks — data-driven from AGENTS.MD
+        if let Action::Write { path, .. } = action {
+            let norm = path.trim_start_matches('/').to_lowercase();
+            for hook in &self.write_hooks {
+                if norm.contains(&hook.path_contains)
+                    && !hook.exclude_contains.iter().any(|ex| norm.contains(ex))
+                {
+                    eprintln!("    📌 Hook fired: {}", hook.next_step);
+                    return vec![format!("📌 {}", hook.next_step)];
+                }
+            }
+        }
+        Vec::new()
     }
 
     fn action_signature(action: &Action) -> String { action.signature() }
