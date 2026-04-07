@@ -579,7 +579,7 @@ pub(crate) async fn run_agent(
     let crm_graph = Arc::new(ready.crm_graph);
 
     // Extract tool hooks from AGENTS.MD workflow rules
-    let hook_registry = std::sync::Arc::new(crate::hooks::HookRegistry::from_agents_md(&agents_md));
+    let hook_registry = std::sync::Arc::new(crate::hooks::from_agents_md(&agents_md));
 
     // Build tool registry with OutcomeValidator (passed in from main.rs for score-gated learning)
     let registry = ToolRegistry::new()
