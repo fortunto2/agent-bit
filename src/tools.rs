@@ -182,7 +182,7 @@ impl Tool for WriteTool {
     fn description(&self) -> &str { "Write content to a file. Without start_line/end_line: overwrites entire file. With start_line and end_line: replaces only those lines (like sed). Example: start_line=5, end_line=7 replaces lines 5-7 with content. Use read with number=true first to see line numbers. Outbox emails: ALWAYS read outbox/README.MD first for required JSON format, include sent:false, read outbox/seq.json for next ID." }
     fn parameters_schema(&self) -> Value { json_schema_for::<WriteArgs>() }
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
-        let a: WriteArgs = parse_args(&args)?;
+        let mut a: WriteArgs = parse_args(&args)?;
 
         // Workflow pre_action guard (policy + capture-write)
         let guard = self.workflow.as_ref().map(|wf| wf.lock().unwrap().pre_action("write", &a.path));
@@ -190,13 +190,29 @@ impl Tool for WriteTool {
             return Ok(ToolOutput::text(msg));
         }
 
-        // Outbox validation: if writing JSON to outbox/, check required fields
+        // Outbox validation: if writing JSON to outbox/, validate + auto-fix
         if a.path.contains("outbox/") && !a.path.contains("seq.json") && !a.path.contains("README") {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&a.content) {
-                if json.get("sent").is_none() {
-                    return Ok(ToolOutput::text(
-                        "⚠ VALIDATION: Outbox email JSON missing 'sent' field. Add \"sent\": false. Read outbox/README.MD for format.".to_string()
-                    ));
+            match serde_json::from_str::<serde_json::Value>(&a.content) {
+                Ok(json) => {
+                    if json.get("sent").is_none() {
+                        return Ok(ToolOutput::text(
+                            "⚠ VALIDATION: Outbox email JSON missing 'sent' field. Add \"sent\": false. Read outbox/README.MD for format.".to_string()
+                        ));
+                    }
+                }
+                Err(_) => {
+                    // Auto-fix: escape newlines in JSON strings and retry
+                    let fixed = a.content.replace('\n', "\\n").replace('\r', "\\r");
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&fixed) {
+                        // Re-serialize properly
+                        let proper = serde_json::to_string_pretty(&json).unwrap_or(fixed);
+                        a = WriteArgs { path: a.path, content: proper, start_line: a.start_line, end_line: a.end_line };
+                        eprintln!("    🔧 Auto-fixed JSON newlines in {}", a.path);
+                    } else {
+                        return Ok(ToolOutput::text(
+                            "⚠ VALIDATION: Invalid JSON in outbox file. Check for unescaped newlines in string values. Use \\n instead of literal newlines.".to_string()
+                        ));
+                    }
                 }
             }
         }
