@@ -579,12 +579,12 @@ pub(crate) async fn run_agent(
     let crm_graph = Arc::new(ready.crm_graph);
 
     // Extract write completion hooks from AGENTS.MD workflow rules
-    let write_hooks = extract_write_hooks(&agents_md);
+    let write_hooks: Vec<tools::WriteHook> = extract_write_hooks(&agents_md);
 
     // Build tool registry with OutcomeValidator (passed in from main.rs for score-gated learning)
     let registry = ToolRegistry::new()
         .register(tools::ReadTool(pcm.clone()))
-        .register(tools::WriteTool::with_hooks(pcm.clone(), write_hooks))
+        .register(tools::WriteTool::with_hooks(pcm.clone(), write_hooks.clone()))
         .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
         .register(tools::FindTool(pcm.clone()))
         .register(tools::ListTool(pcm.clone()))
@@ -691,7 +691,7 @@ pub(crate) async fn run_agent(
         let sgr_llm = sgr_agent::llm::Llm::new(&config);
         let sgr_agent = crate::pac1_sgr::Pac1SgrAgent::new(
             pcm.clone(), sgr_llm, system_prompt.clone(), instruction_intent.clone(),
-        );
+        ).with_hooks(write_hooks.clone());
         let sgr_config = sgr_agent::app_loop::LoopConfig {
             max_steps: effective_max_steps,
             loop_abort_threshold: 6,
