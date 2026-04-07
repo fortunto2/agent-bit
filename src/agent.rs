@@ -323,17 +323,15 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             msgs.push(Message::user(&nudge));
         }
 
-        // Capture-write guard: if capture/distill task has inbox reads but NO writes yet,
-        // inject strong reminder to write BEFORE deleting. Fires every step until a write occurs.
-        // This prevents the 3-step failure mode: read → delete → answer (score 0).
+        // Capture-write guard: if INSTRUCTION mentions capture/distill AND has reads but no writes,
+        // inject reminder. Only checks first user message (instruction), not AGENTS.MD or pregrounding.
         {
-            let has_capture_context = msgs.iter().any(|m| {
-                m.role == Role::User && {
+            let instruction_has_capture = msgs.first()
+                .is_some_and(|m| m.role == Role::User && {
                     let txt = m.content.to_lowercase();
-                    txt.contains("capture") || txt.contains("distill")
-                }
-            });
-            if has_capture_context {
+                    (txt.contains("capture") || txt.contains("distill")) && !txt.contains("delete all") && !txt.contains("remove all")
+                });
+            if instruction_has_capture {
                 let ledger = self.action_ledger.lock().unwrap();
                 let has_any_read = ledger.iter().any(|e| e.contains("read"));
                 let has_any_write = ledger.iter().any(|e| e.contains("write"));
