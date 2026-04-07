@@ -71,6 +71,7 @@ pub struct New {
 pub struct Classified {
     pub instruction: String,
     pub intent: String,
+    pub intent_confidence: f32,
     pub instruction_label: String,
 }
 
@@ -78,6 +79,7 @@ pub struct Classified {
 pub struct InboxScanned {
     pub instruction: String,
     pub intent: String,
+    pub intent_confidence: f32,
     pub instruction_label: String,
     pub inbox_files: Vec<InboxFile>,
     pub crm_graph: CrmGraph,
@@ -93,6 +95,7 @@ impl std::fmt::Debug for InboxScanned {
 pub struct SecurityChecked {
     pub instruction: String,
     pub intent: String,
+    pub intent_confidence: f32,
     pub instruction_label: String,
     pub inbox_files: Vec<InboxFile>,
     pub crm_graph: CrmGraph,
@@ -109,6 +112,7 @@ impl std::fmt::Debug for SecurityChecked {
 pub struct Ready {
     pub instruction: String,
     pub intent: String,
+    pub intent_confidence: f32,
     #[allow(dead_code)]
     pub instruction_label: String,
     pub inbox_files: Vec<InboxFile>,
@@ -207,25 +211,26 @@ impl New {
         }
 
         // ML intent classification
-        let intent = {
+        let (intent, intent_confidence) = {
             let mut guard = shared_clf.lock().unwrap();
             if let Some(clf) = guard.as_mut() {
                 match clf.classify_intent(&self.instruction) {
                     Ok(scores) if !scores.is_empty() => {
                         let (label, conf) = &scores[0];
                         eprintln!("  [STAGE:classify] Instruction intent: {} ({:.2})", label, conf);
-                        label.clone()
+                        (label.clone(), *conf)
                     }
-                    _ => String::new(),
+                    _ => (String::new(), 0.0),
                 }
             } else {
-                String::new()
+                (String::new(), 0.0)
             }
         };
 
         Ok(Classified {
             instruction: self.instruction,
             intent,
+            intent_confidence,
             instruction_label,
         })
     }
@@ -253,6 +258,7 @@ impl Classified {
             return Ok(InboxScanned {
                 instruction: self.instruction,
                 intent: self.intent,
+                intent_confidence: self.intent_confidence,
                 instruction_label: self.instruction_label,
                 inbox_files,
                 crm_graph,
@@ -298,6 +304,7 @@ impl Classified {
         Ok(InboxScanned {
             instruction: self.instruction,
             intent: self.intent,
+            intent_confidence: self.intent_confidence,
             instruction_label: self.instruction_label,
             inbox_files,
             crm_graph,
@@ -319,6 +326,7 @@ impl InboxScanned {
         Ok(SecurityChecked {
             instruction: self.instruction,
             intent: self.intent,
+            intent_confidence: self.intent_confidence,
             instruction_label: self.instruction_label,
             inbox_files: self.inbox_files,
             crm_graph: self.crm_graph,
@@ -334,6 +342,7 @@ impl SecurityChecked {
         Ready {
             instruction: self.instruction,
             intent: self.intent,
+            intent_confidence: self.intent_confidence,
             instruction_label: self.instruction_label,
             inbox_files: self.inbox_files,
             crm_graph: self.crm_graph,
@@ -528,6 +537,7 @@ mod tests {
         let scanned = InboxScanned {
             instruction: "test".into(),
             intent: "intent_inbox".into(),
+            intent_confidence: 0.5,
             instruction_label: "crm".into(),
             inbox_files: vec![InboxFile {
                 path: "inbox/msg.txt".into(),
@@ -548,6 +558,7 @@ mod tests {
         let scanned = InboxScanned {
             instruction: "test".into(),
             intent: "intent_inbox".into(),
+            intent_confidence: 0.5,
             instruction_label: "crm".into(),
             inbox_files: vec![InboxFile {
                 path: "inbox/evil.txt".into(),
