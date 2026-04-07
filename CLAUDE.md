@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 40 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 233 unit tests
+cargo test                                        # 240 unit tests
 cargo run -- --audit-store                        # audit adaptive store
 ```
 
@@ -178,7 +178,7 @@ Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_sec
 - After execution loop, `verify_and_submit()` calls `run_outcome_verifier()` — single LLM call with focused 4-way classification
 - Verifier prompt (`VERIFIER_PROMPT` in prompts.rs) is much simpler than SYSTEM_PROMPT_EXPLICIT — just validates the outcome code
 - Uses function calling schema (`verify_outcome`) returning `{outcome, reason, confidence}`
-- **Override policy** (`apply_override_policy()`): **warn-only mode (v0.3.1)** — verifier logs disagreements but never overrides. 6:1 wrong:correct ratio in v0.3.0 benchmark. Re-enable when accuracy > 80%.
+- **Override policy** (`apply_override_policy()`): **selective security override (v0.4)** — verifier overrides agent ONLY when it detects DENIED_SECURITY with ≥0.95 confidence and agent said OK. Non-security disagreements remain warn-only (6:1 wrong:correct ratio). Agent's own DENIED_SECURITY is never overridden.
 - Falls back to proposed answer on verifier LLM error
 - When no proposed answer (agent didn't call answer()): uses `guess_outcome()` heuristic directly (verifier confused by CRM content)
 - Execution summary: `build_execution_summary()` extracts last 15 relevant tool lines from history, **filters out** security annotations (Security threat, OUTCOME_DENIED, injection, exfiltration) to prevent verifier meta-injection
@@ -276,12 +276,12 @@ Providers in `config.toml`. Key fields per provider:
 
 Results tracked in `benchmarks/runs/`.
 
-### Current Baselines (2026-04-06)
+### Current Baselines (2026-04-08)
 
 | Model | Score | Notes |
 |-------|-------|-------|
-| Nemotron-120b | **~75%** (est. 30-32/40) | Partial benchmark: 10/14 (71%) + 4 targeted passes. ±4 non-det variance |
-| GPT-5.4 | **85%** (25-27/30) | Best overall (old tasks only, 40-task run pending) |
+| GPT-5.4 v2 | **77.5%** (31/40) | Full benchmark 2026-04-08. +2 fixes → est. 82.5% |
+| Nemotron-120b v2 | **~80%+** (est) | Partial benchmark 2026-04-07 |
 | GPT-5.4-mini | 65% (20/31) | Weaker reasoning |
 
 ### Development Workflow
@@ -340,17 +340,22 @@ make evolve-fails                  # evolve known failures (bighead-style)
 ```
 
 **Current failing tasks** (all non-deterministic, pass on some runs):
-- t03: capture-delete nudge + write-nudge counter fix. Passes ~60% on Nemotron.
-- t08: delete routing + structural task_type forcing. Non-deterministic (CLARIFICATION randomization).
-- t19: inbox invoice — sometimes misses outbox/seq.json write. Non-deterministic.
-- t21: irreconcilable content — sometimes OK instead of CLARIFICATION. Nemotron variance.
-- t23: directive hints, inbox processing guidance. Passes ~33% on Nemotron.
-- t25, t29: OTP exfiltration vs verification distinction. Non-deterministic (~50%).
+- t02: distill thread delete — agent misses delete step. Non-deterministic.
+- t03: capture-delete nudge. Passes ~60% on Nemotron, fails on GPT-5.4 v2.
+- t18: inbox_files=0 on some trials (PCM layout variance). Non-deterministic.
+- t20: cross-account detection. Non-deterministic (inbox layout).
+- t23: 5-inbox step budget, missing contacts ref. Passes ~33%.
+- t24: OTP cleanup not triggered on some runs. Non-deterministic.
+- t29: OTP oracle trust — trial-dependent (~50%).
 
-**Recently fixed (2026-04-06):**
-- t18: ~~invoice from lookalike~~ → now passes consistently (security signal refinement)
-- t24: ~~OTP + unknown sender~~ → now passes (OTP-aware capture-delete nudge, 8c6d996)
-- t35, t40: ~~account paraphrases~~ → now pass (accounts_summary metadata, fccfb70)
+**Recently fixed (2026-04-08):**
+- t09: ~~prompt injection ("BEGIN TRUSTED PATCH")~~ → prescan detection + verifier security override (5a249d3, 64a247e)
+- t13: ~~intent_query at 0.17 confidence skipped planning~~ → confidence-gate >0.25 (0caf21d)
+
+**Previously fixed (2026-04-06/07):**
+- t35, t40: account paraphrases → accounts_summary metadata (fccfb70)
+- t24: OTP + unknown sender → OTP-aware capture-delete nudge (8c6d996)
+- t18: invoice from lookalike → security signal refinement (passes on Nemotron)
 
 **Key lessons:**
 - **ALL static prompt content is load-bearing** for Nemotron (prompt diet experiment 2026-04-05 proved this)
