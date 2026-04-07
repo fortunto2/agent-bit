@@ -27,13 +27,13 @@ pub fn check_write(path: &str) -> Option<&'static str> {
     let basename = lower.rsplit('/').next().unwrap_or(&lower);
 
     // Protected basenames (any directory)
-    if PROTECTED_BASENAMES.iter().any(|p| basename == *p) {
+    if PROTECTED_BASENAMES.contains(&basename) {
         return Some("system file");
     }
 
     // Policy directories (protected except ephemeral files)
     for dir in POLICY_DIRS {
-        if lower.starts_with(dir) && !EPHEMERAL.iter().any(|e| basename == *e) {
+        if lower.starts_with(dir) && !EPHEMERAL.contains(&basename) {
             return Some("policy file");
         }
     }
