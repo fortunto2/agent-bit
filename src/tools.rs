@@ -98,7 +98,16 @@ impl Tool for ListTool {
 
 // ─── read ────────────────────────────────────────────────────────────────────
 
-pub struct ReadTool(pub Arc<PcmClient>);
+pub struct ReadTool {
+    pub pcm: Arc<PcmClient>,
+    pub workflow: Option<crate::workflow::SharedWorkflowState>,
+}
+
+impl ReadTool {
+    pub fn new(pcm: Arc<PcmClient>, workflow: Option<crate::workflow::SharedWorkflowState>) -> Self {
+        Self { pcm, workflow }
+    }
+}
 
 #[derive(Deserialize, JsonSchema)]
 struct ReadArgs {
@@ -125,8 +134,17 @@ impl Tool for ReadTool {
     }
     async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
         let a: ReadArgs = parse_args(&args)?;
-        // Cache lives in PcmClient — shared across all tools, invalidated by write/delete
-        self.0.read(&a.path, a.number, a.start_line, a.end_line).await.map(|c| ToolOutput::text(guard_content(c))).map_err(pcm_err)
+        let result = self.pcm.read(&a.path, a.number, a.start_line, a.end_line).await.map_err(pcm_err)?;
+        let mut output = guard_content(result);
+
+        // Workflow post_action for read tracking
+        if let Some(ref wf) = self.workflow {
+            for msg in wf.lock().unwrap().post_action("read", &a.path) {
+                output.push_str(&format!("\n{}", msg));
+            }
+        }
+
+        Ok(ToolOutput::text(output))
     }
 }
 

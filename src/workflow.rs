@@ -150,11 +150,19 @@ impl WorkflowState {
     pub fn post_action(&mut self, tool: &str, path: &str) -> Vec<String> {
         let norm = path.trim_start_matches('/').to_string();
 
-        // Track action
+        let mut msgs = Vec::new();
+
+        // Track action + efficiency hints
         match tool {
             "read" | "search" | "find" | "list" | "tree" => {
                 if !self.read_paths.contains(&norm) {
                     self.read_paths.push(norm.clone());
+                }
+                // Warn about reading files that are already pre-loaded in context
+                if self.read_paths.len() > 5 && self.phase == Phase::Reading && self.write_paths.is_empty() {
+                    if self.read_paths.len() == 6 {
+                        msgs.push("⚠ You have read 6+ files without acting. Contacts and accounts are ALREADY in context above. Use search() instead of reading every file. Start writing NOW.".into());
+                    }
                 }
             }
             "write" => {
@@ -178,7 +186,8 @@ impl WorkflowState {
         }
 
         // Check tool hooks
-        self.hooks.check(tool, path)
+        msgs.extend(self.hooks.check(tool, path));
+        msgs
     }
 
     /// Summary for logging.
