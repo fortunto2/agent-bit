@@ -11,7 +11,7 @@ cargo run -- --provider nemotron --task t16      # single task
 cargo run -- --provider nemotron                 # all 40 tasks
 cargo run -- --provider nemotron --parallel 3    # parallel execution
 cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 211 unit tests
+cargo test                                        # 233 unit tests
 cargo run -- --audit-store                        # audit adaptive store
 ```
 
@@ -20,19 +20,57 @@ cargo run -- --audit-store                        # audit adaptive store
 ```
 src/pipeline.rs      -- enum state machine (New→Classified→InboxScanned→SecurityChecked→Ready)
 src/main.rs          -- CLI, orchestration, verify_and_submit, guess_outcome
-src/prompts.rs       -- system prompts, planning prompt, dynamic examples
+src/prompts.rs       -- system prompts (V2 annotation-driven + explicit decision tree), dynamic examples
 src/scanner.rs       -- security scanning, inbox classification, domain matching
 src/pregrounding.rs  -- context assembly, planning, hints, agent execution (uses pipeline states)
-src/agent.rs         -- Pac1Agent (Router + Structured CoT reasoning)
+src/agent.rs         -- Pac1Agent (Router + Structured CoT reasoning, two-phase FC)
+src/pac1_sgr.rs      -- Pac1SgrAgent (pure SGR mode, single LLM call per step, experimental)
 src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
-src/pcm.rs           -- PcmRuntime client (11 file-system RPCs + ProposedAnswer)
+src/pcm.rs           -- PcmRuntime client (11 file-system RPCs + read cache + ProposedAnswer)
 src/tools.rs         -- 11 Tool implementations + security guard + OutcomeValidator
-src/config.rs        -- Provider config with prompt_mode, temperature, planning_temperature
+src/hooks.rs         -- HookRegistry: data-driven tool completion hooks from AGENTS.MD
+src/policy.rs        -- File access policy: structural guards for protected paths
+src/config.rs        -- Provider config with prompt_mode, temperature, sgr_mode
 src/classifier.rs    -- ONNX classifier (security + intent) + NliClassifier (NLI zero-shot) + OutcomeValidator (adaptive kNN)
 src/crm_graph.rs     -- petgraph CRM knowledge graph (contacts, accounts, sender trust)
 ```
 
 Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep).
+
+### Tool Completion Hooks (src/hooks.rs)
+
+Data-driven workflow guidance. Parsed from AGENTS.MD at trial start:
+- `HookRegistry::from_agents_md(content)` extracts hooks from natural language rules
+- Pattern: "When adding to {path}, also {action}" → ToolHook {write, path, message}
+- Pattern: "Keep files in {path} immutable" → ToolHook {write, path, warning}
+- `check(tool_name, path) → Vec<String>` — returns messages to inject
+
+Delivery points (both coexist):
+1. **WriteTool**: augments own output (immediate, same LLM call)
+2. **Pac1SgrAgent::after_execute**: injects session message (next LLM call)
+3. **sgr-agent::app_loop**: `after_execute` hook on SgrAgent trait (framework-level)
+
+### File Access Policy (src/policy.rs)
+
+Structural guards — PcmClient blocks before RPC, tools can't bypass:
+- `check_write(path)` → blocks write/delete to protected files
+- `scan_content(content)` → pipeline detects inbox targeting protected files (Signal 6)
+- Protected: AGENTS.MD, README.md, channel policy files (except otp.txt)
+- Constants: `PROTECTED_BASENAMES`, `POLICY_DIRS`, `EPHEMERAL` — one line to add new paths
+
+### Prompt Modes (src/prompts.rs)
+
+Two prompt modes, switchable per provider via `prompt_mode` in config.toml:
+- **`"v2"`** (default for Nemotron): annotation-driven, no decision tree. Pipeline annotations = law.
+- **`"explicit"`** (default for GPT-5.4): numbered decision tree, more flexible.
+V2 outperforms explicit on Nemotron (82.5% vs 75%) because model can't ignore annotations.
+
+### Read Cache (src/pcm.rs)
+
+In-memory cache in PcmClient — shared across all tools via Arc:
+- `read()` caches full-file reads by normalized path
+- `write()`/`delete()` invalidate cache for same path
+- Per-trial lifetime — no stale data between trials
 
 ## Key Crates — USE THESE, don't reinvent
 
