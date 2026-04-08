@@ -92,7 +92,7 @@ impl PcmClient {
             let p = norm.to_string();
             if !reads.contains(&p) {
                 reads.push(p);
-                if reads.len() > 20 { reads.remove(0); }
+                if reads.len() > 50 { reads.remove(0); }
             }
         }
         if is_cacheable {
@@ -179,7 +179,7 @@ impl PcmClient {
                     && !reads.contains(&p)
                 {
                     reads.push(p);
-                    if reads.len() > 20 { reads.remove(0); }
+                    if reads.len() > 50 { reads.remove(0); }
                 }
             }
         }
