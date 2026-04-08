@@ -94,6 +94,11 @@ impl WorkflowState {
         }
     }
 
+    /// Whether agent has written any files.
+    pub fn has_writes(&self) -> bool {
+        !self.write_paths.is_empty()
+    }
+
     /// Update max_steps (e.g., after multi-inbox scaling).
     pub fn set_max_steps(&mut self, max_steps: usize) {
         self.max_steps = max_steps;

@@ -78,6 +78,12 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
     }
 }
 
+/// Phase-aware tool filtering placeholder — currently no-op.
+/// Tool hiding approach tested but caused model confusion when answer() disappeared.
+fn filter_tools_by_workflow(defs: Vec<ToolDef>, _workflow: &Option<crate::workflow::SharedWorkflowState>) -> Vec<ToolDef> {
+    defs
+}
+
 /// Structural task-type forcing from ML intent classification.
 /// Maps intent_* labels to task_type when classification is unambiguous.
 /// Called with the result of `classify_intent()` from pregrounding.
@@ -482,7 +488,8 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         let step = self.step_count.fetch_add(1, Ordering::SeqCst);
         let filtered = filter_tools_for_task(&task_type, step, tools.to_defs());
 
-        let defs = if filtered.is_empty() { tools.to_defs() } else { filtered };
+        let phase_filtered = filter_tools_by_workflow(filtered, &self.workflow);
+        let defs = if phase_filtered.is_empty() { tools.to_defs() } else { phase_filtered };
 
         let (tool_calls, new_response_id) = self
             .client
