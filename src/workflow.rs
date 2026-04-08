@@ -57,6 +57,8 @@ pub struct WorkflowState {
     is_capture: bool,
     /// Whether instruction explicitly mentions delete/remove
     allows_delete: bool,
+    /// Verification-only mode — ZERO file changes allowed (OTP oracle)
+    pub verification_only: bool,
 }
 
 impl WorkflowState {
@@ -85,6 +87,7 @@ impl WorkflowState {
             hooks,
             is_capture,
             allows_delete,
+            verification_only: false,
         }
     }
 
@@ -132,6 +135,15 @@ impl WorkflowState {
 
     /// Pre-action guard: check before tool executes.
     pub fn pre_action(&self, tool: &str, path: &str) -> Guard {
+        // Verification-only mode: ZERO file changes (OTP oracle)
+        if self.verification_only && (tool == "write" || tool == "delete") {
+            return Guard::Block(
+                "⛔ Verification-only mode: ZERO file changes allowed. \
+                 Just answer() with 'correct' or 'incorrect'."
+                    .into(),
+            );
+        }
+
         // Policy check (protected files)
         if tool == "write" || tool == "delete" {
             if let Some(reason) = crate::policy::check_write(path) {

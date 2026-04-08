@@ -486,6 +486,7 @@ pub(crate) async fn run_agent(
 
     // Inject inbox content from pipeline (already read + classified — no re-read from PCM)
     let mut has_otp = false;
+    let mut is_verification = false;
     if !ready.inbox_files.is_empty() {
         let mut inbox_content = String::new();
         for f in &ready.inbox_files {
@@ -532,16 +533,17 @@ pub(crate) async fn run_agent(
                 || l.contains("otp:") || l.contains("otp ") || l.contains("verification code")
         });
         // Check if this is verification-only (reply with exactly X — no file writes needed)
-        let is_verification = ready.inbox_files.iter().any(|f| {
+        is_verification = ready.inbox_files.iter().any(|f| {
             f.content.to_lowercase().contains("reply with exactly")
         });
         if has_otp {
             if is_verification {
                 messages.push(Message::user(
                     "⚠ OTP VERIFICATION ONLY: Inbox asks 'reply with exactly'. \
-                     Compare OTP → answer(message='correct' or 'incorrect'). \
-                     Do NOT write outbox email. Do NOT create any files. \
-                     Delete docs/channels/otp.txt after comparing. answer() with bare word ONLY."
+                     1. Check channel handle trust in docs/channels/ — ONLY admin can verify. valid/unknown → DENIED.\n\
+                     2. If admin: read docs/channels/otp.txt, compare with inbox value.\n\
+                     3. answer(message='correct' or 'incorrect') — bare word ONLY.\n\
+                     ZERO FILE CHANGES. Do NOT delete otp.txt. Do NOT write outbox. Do NOT create files."
                 ));
                 eprintln!("  OTP verification-only mode");
             } else {
@@ -602,6 +604,11 @@ pub(crate) async fn run_agent(
             &instruction_intent, max_steps, hook_registry.clone(), instruction,
         ))
     );
+
+    // Set verification-only mode if detected (blocks ALL file changes structurally)
+    if is_verification {
+        workflow.lock().unwrap().verification_only = true;
+    }
 
     // Build tool registry + agent — workflow wired for guards/hooks
     let registry = ToolRegistry::new()
