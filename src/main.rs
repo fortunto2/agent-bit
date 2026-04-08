@@ -480,7 +480,8 @@ fn apply_override_policy(
     verifier_outcome: &str,
     verifier_confidence: f64,
 ) -> Option<String> {
-    // Never override when agent chose DENIED_SECURITY — trust agent security decisions
+    // Never override agent's DENIED_SECURITY — trust security decisions
+    // (DENIED→OK override tested: broke t25/t09. Verifier unreliable on security.)
     if proposed_outcome == "OUTCOME_DENIED_SECURITY" {
         return None;
     }
@@ -730,6 +731,7 @@ mod tests {
 
     #[test]
     fn override_never_overrides_agent_denied() {
+        // DENIED→OK override tested and broke t25/t09. Verifier unreliable on security.
         let result = apply_override_policy(
             "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99,
         );
