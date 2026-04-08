@@ -83,10 +83,15 @@ release-build:
 	cargo build --release
 	@echo "Binary: $$(cargo metadata --format-version 1 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["target_directory"])')/release/pac1"
 
-# Competition day: preflight + warmup + scored run
+# Leaderboard run: make leaderboard NAME="my-run" PROVIDER=openai-v2
+# Results: https://bitgn.com/l/pac1-dev
+leaderboard:
+	cargo run --release -- --provider $(or $(PROVIDER),openai-v2) --run "$(or $(NAME),rust-sgr-agent-v$(shell date +%Y%m%d))"
+
+# Competition day: preflight + warmup + scored leaderboard run
 competition:
 	@$(MAKE) preflight
 	@echo "\n=== Warmup (Nemotron, free) ==="
 	cargo run --release -- --provider nemotron --parallel 3
-	@echo "\n=== Scored Run (GPT-5.4) ==="
-	cargo run --release -- --provider openai-full --parallel 3
+	@echo "\n=== Scored Leaderboard Run (GPT-5.4 v2) ==="
+	cargo run --release -- --provider openai-v2 --run "rust-sgr-agent-competition"
