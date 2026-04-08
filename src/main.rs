@@ -492,7 +492,15 @@ fn apply_override_policy(
         return Some("OUTCOME_DENIED_SECURITY".to_string());
     }
 
-    // All other disagreements: warn-only (6:1 wrong:correct ratio for non-security overrides)
+    // OK→CLARIFICATION override: when verifier detects "not found" the agent missed
+    if proposed_outcome == "OUTCOME_OK"
+        && verifier_outcome == "OUTCOME_NONE_CLARIFICATION"
+        && verifier_confidence >= 0.95
+    {
+        return Some("OUTCOME_NONE_CLARIFICATION".to_string());
+    }
+
+    // All other disagreements: warn-only
     if proposed_outcome != verifier_outcome {
         eprintln!(
             "  ℹ Verifier disagrees: proposed={} verifier={} (warn-only, no override)",

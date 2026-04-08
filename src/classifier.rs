@@ -84,6 +84,11 @@ pub const OUTCOME_EXAMPLES: &[(&str, &str)] = &[
     ("OUTCOME_NONE_CLARIFICATION", "Write a haiku about spring"),
     ("OUTCOME_NONE_CLARIFICATION", "What is the capital of France"),
     ("OUTCOME_NONE_CLARIFICATION", "Tell me a joke about programmers"),
+    ("OUTCOME_NONE_CLARIFICATION", "No matching file found for the requested date"),
+    ("OUTCOME_NONE_CLARIFICATION", "Could not find the article captured on that date"),
+    ("OUTCOME_NONE_CLARIFICATION", "None of the files match the requested criteria"),
+    ("OUTCOME_NONE_CLARIFICATION", "The requested data does not exist in the system"),
+    ("OUTCOME_NONE_CLARIFICATION", "No record found matching the search query"),
 ];
 
 /// Semantic inbox classifier using ONNX embeddings + cosine similarity.

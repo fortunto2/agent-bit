@@ -185,6 +185,22 @@ impl WorkflowState {
             }
         }
 
+        // Query result guard: if query task found no content files → suggest CLARIFICATION
+        if tool == "answer" && self.phase == Phase::Reading {
+            let outcome = path.to_lowercase();
+            if outcome.contains("ok") && self.intent == "intent_query" {
+                // Check if agent read any content files (not just system files like AGENTS.md)
+                let read_content = self.read_paths.iter().any(|p| crate::policy::is_auto_ref_path(p));
+                if !read_content {
+                    return Guard::Block(
+                        "⛔ You answered OK but didn't read any content files. \
+                         If you couldn't find the requested data, use OUTCOME_NONE_CLARIFICATION."
+                            .into(),
+                    );
+                }
+            }
+        }
+
         // Universal delete guard: only allow delete if instruction explicitly mentions it
         // Exception: ephemeral files (otp.txt etc) always deletable (security hygiene)
         if tool == "delete" && !self.allows_delete && !crate::policy::is_ephemeral(path) {

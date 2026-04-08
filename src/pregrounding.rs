@@ -678,6 +678,18 @@ pub(crate) async fn run_agent(
 
     messages.push(Message::user(instruction));
 
+    // Captured article lookup: guide to search 01_capture/, not inbox
+    let instr_lower_hint = ready.instruction.to_lowercase();
+    if instr_lower_hint.contains("captured") || instr_lower_hint.contains("capture") {
+        if !instr_lower_hint.contains("distill") && !instr_lower_hint.contains("inbox") {
+            messages.push(Message::user(
+                "LOOKUP HINT: 'captured' articles are in 01_capture/ folder (NOT inbox). \
+                 Use list(01_capture/influential) to find files by date in filename. \
+                 If no matching file found → OUTCOME_NONE_CLARIFICATION (not OK, not UNSUPPORTED)."
+            ));
+        }
+    }
+
     // Intent-based pre-grounding hints (ML classifier replaces substring heuristics)
     if instruction_intent == "intent_query" {
         messages.push(Message::user(
