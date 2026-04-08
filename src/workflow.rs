@@ -69,6 +69,9 @@ impl WorkflowState {
         let allows_delete = intent == "intent_delete"
             || instr_lower.contains("delete")
             || instr_lower.contains("remove")
+            || instr_lower.contains("discard")
+            || instr_lower.contains("clean up")
+            || instr_lower.contains("clean out")
             || is_capture; // capture/distill implies delete source
 
         Self {
