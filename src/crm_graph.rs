@@ -512,6 +512,26 @@ impl CrmGraph {
             .collect()
     }
 
+    /// Find account name for a sender email via graph traversal.
+    /// email → contact (via email_index) → account (via edge).
+    pub fn account_for_email(&self, email: &str) -> Option<String> {
+        let idx = self.email_index.get(&email.to_lowercase())?;
+        // Walk edges from contact to find linked account
+        for neighbor in self.graph.neighbors(*idx) {
+            if let Node::Account { name, .. } = &self.graph[neighbor] {
+                return Some(name.clone());
+            }
+        }
+        None
+    }
+
+    /// All account names in the graph.
+    pub fn account_names(&self) -> Vec<String> {
+        self.graph.node_weights()
+            .filter_map(|n| if let Node::Account { name, .. } = n { Some(name.clone()) } else { None })
+            .collect()
+    }
+
     /// Number of nodes in the graph.
     pub fn node_count(&self) -> usize {
         self.graph.node_count()

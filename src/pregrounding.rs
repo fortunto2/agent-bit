@@ -522,6 +522,27 @@ pub(crate) async fn run_agent(
             } else if f.security.sender.as_ref().is_some_and(|s| s.trust == crate::crm_graph::SenderTrust::Known) {
                 inbox_content.push_str("[✓ TRUSTED: sender email verified in CRM. This is a KNOWN contact — process normally, do NOT deny.]\n");
             }
+            // Cross-account detection via CRM graph (checklist #4: graph query)
+            if f.security.sender.as_ref().is_some_and(|s| s.trust == crate::crm_graph::SenderTrust::Known) {
+                if let Some(sender_email) = crate::scanner::extract_sender_email(&f.content) {
+                    if let Some(sender_account) = ready.crm_graph.account_for_email(&sender_email) {
+                        let body_lower = f.content.to_lowercase();
+                        for acct_name in ready.crm_graph.account_names() {
+                            let acct_lower = acct_name.to_lowercase();
+                            if acct_lower != sender_account.to_lowercase()
+                                && body_lower.contains(&acct_lower)
+                            {
+                                inbox_content.push_str(&format!(
+                                    "[⚠ CROSS-ACCOUNT: sender from '{}' asks about '{}'. → OUTCOME_NONE_CLARIFICATION]\n",
+                                    sender_account, acct_name
+                                ));
+                                eprintln!("  ⚠ Cross-account: {} → {}", sender_account, acct_name);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
             // Channel trust annotation (from policy — single source of truth)
             if let Some(handle) = extract_channel_handle(&f.content) {
                 match channel_trust.check(&handle) {
