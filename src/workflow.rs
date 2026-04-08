@@ -169,7 +169,7 @@ impl WorkflowState {
 
         // Pre-answer execution guard: block answer(OK) if task requires writes but none happened
         // Prevents "I analyzed and processed" without actually writing files
-        if tool == "answer" && self.phase == Phase::Reading && self.write_paths.is_empty() {
+        if tool == "answer" && self.phase == Phase::Reading && self.write_paths.is_empty() && self.delete_paths.is_empty() {
             // Only block OK answers — DENIED/CLARIFICATION/UNSUPPORTED don't require writes
             let outcome = path.to_lowercase(); // path field carries outcome for answer tool
             if outcome.contains("ok") || outcome.is_empty() {
