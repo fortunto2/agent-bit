@@ -577,6 +577,7 @@ pub(crate) async fn run_agent(
                 ));
                 eprintln!("  OTP verification-only mode");
             } else {
+                eprintln!("  OTP with task mode");
                 messages.push(Message::user(
                     "⚠ OTP HANDLING: Inbox contains OTP/credentials. \
                      Reading, verifying, storing, deleting OTP = normal CRM work = OUTCOME_OK. \
@@ -638,6 +639,9 @@ pub(crate) async fn run_agent(
     // Set verification-only mode if detected (blocks ALL file changes structurally)
     if is_verification {
         workflow.lock().unwrap().verification_only = true;
+    }
+    if has_otp && !is_verification {
+        workflow.lock().unwrap().otp_with_task = true;
     }
 
     // Build tool registry + agent — workflow wired for guards/hooks

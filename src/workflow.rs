@@ -59,6 +59,8 @@ pub struct WorkflowState {
     allows_delete: bool,
     /// Verification-only mode — ZERO file changes allowed (OTP oracle)
     pub verification_only: bool,
+    /// OTP with additional task (write email etc) — DENIED not allowed (OTP proves auth)
+    pub otp_with_task: bool,
 }
 
 impl WorkflowState {
@@ -88,6 +90,7 @@ impl WorkflowState {
             is_capture,
             allows_delete,
             verification_only: false,
+            otp_with_task: false,
         }
     }
 
@@ -182,6 +185,18 @@ impl WorkflowState {
                             .into(),
                     );
                 }
+            }
+        }
+
+        // OTP with task guard: block DENIED when OTP proves authorization
+        if tool == "answer" && self.otp_with_task {
+            let outcome = path.to_lowercase();
+            if outcome.contains("denied") {
+                return Guard::Block(
+                    "⛔ OTP matched → sender is authorized. Do NOT deny. \
+                     Process the requested task (write email, etc) and answer OK."
+                        .into(),
+                );
             }
         }
 
