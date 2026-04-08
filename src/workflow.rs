@@ -193,13 +193,14 @@ impl WorkflowState {
             }
         }
 
-        // OTP with task guard: block DENIED when OTP proves authorization
-        if tool == "answer" && self.otp_with_task {
+        // AI-NOTE: OTP+task guard. Flag set: pregrounding.rs:664. Hint: pregrounding.rs:602. Prompt: prompts.rs:29.
+        // After writes (= OTP verified + task done), only OK. Before writes, all outcomes valid.
+        if tool == "answer" && self.otp_with_task && self.has_writes() {
             let outcome = path.to_lowercase();
-            if outcome.contains("denied") {
+            if !outcome.contains("ok") {
                 return Guard::Block(
-                    "⛔ OTP matched → sender is authorized. Do NOT deny. \
-                     Process the requested task (write email, etc) and answer OK."
+                    "⛔ OTP verified + task executed. Only OUTCOME_OK is valid. \
+                     Do NOT deny, clarify, or mark unsupported — you already wrote files."
                         .into(),
                 );
             }
@@ -385,5 +386,34 @@ mod tests {
         let mut wf = WorkflowState::new("intent_inbox", 20, hooks, "capture task");
         let msgs = wf.post_action("write", "02_distill/cards/article.md");
         assert!(msgs.iter().any(|m| m.contains("Update thread")));
+    }
+
+    #[test]
+    fn otp_with_task_allows_deny_while_reading() {
+        let mut wf = WorkflowState::new("intent_inbox", 20, empty_hooks(), "process inbox");
+        wf.otp_with_task = true;
+
+        // In Reading phase, DENIED allowed (agent still verifying OTP)
+        let guard = wf.pre_action("answer", "OUTCOME_DENIED_SECURITY");
+        assert!(matches!(guard, Guard::Allow));
+    }
+
+    #[test]
+    fn otp_with_task_blocks_non_ok_after_write() {
+        let mut wf = WorkflowState::new("intent_inbox", 20, empty_hooks(), "process inbox");
+        wf.otp_with_task = true;
+        wf.post_action("write", "outbox/email.json"); // now in Acting phase
+
+        // After writing, DENIED blocked
+        let guard = wf.pre_action("answer", "OUTCOME_DENIED_SECURITY");
+        assert!(matches!(guard, Guard::Block(_)));
+
+        // CLARIFICATION blocked
+        let guard = wf.pre_action("answer", "OUTCOME_NONE_CLARIFICATION");
+        assert!(matches!(guard, Guard::Block(_)));
+
+        // OK allowed
+        let guard = wf.pre_action("answer", "OUTCOME_OK");
+        assert!(matches!(guard, Guard::Allow));
     }
 }

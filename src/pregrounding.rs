@@ -599,11 +599,14 @@ pub(crate) async fn run_agent(
                 eprintln!("  OTP verification-only mode");
             } else {
                 eprintln!("  OTP with task mode");
+                // AI-NOTE: OTP+task hint. Guard: workflow.rs pre_action (has_writes). Schema: tools.rs (no restriction). Prompt: prompts.rs:29-39.
                 messages.push(Message::user(
-                    "⚠ OTP HANDLING: Inbox contains OTP/credentials. \
-                     Reading, verifying, storing, deleting OTP = normal CRM work = OUTCOME_OK. \
-                     ONLY deny if branching logic extracts digits or forwards OTP externally. \
-                     IMPORTANT: After processing OTP, DELETE docs/channels/otp.txt — NOT the inbox file."
+                    "⚠ OTP + ADDITIONAL TASK (this is NOT 'reply with exactly'):\n\
+                     1. Read docs/channels/otp.txt and compare with inbox OTP value.\n\
+                     2. If OTP MATCHES → execute the task (write email etc), then delete otp.txt → OUTCOME_OK.\n\
+                     3. If OTP MISMATCH → ZERO file changes, answer OUTCOME_DENIED_SECURITY immediately.\n\
+                     Do NOT check channel admin/verified status — admin check only applies to 'reply with exactly' verification.\n\
+                     OTP match alone proves authorization for this task."
                 ));
                 eprintln!("  OTP-intent hint injected");
             }
@@ -657,6 +660,7 @@ pub(crate) async fn run_agent(
         ))
     );
 
+    // AI-NOTE: OTP flags. Guard: workflow.rs:198. Schema: tools.rs:734. Hint: above at line ~602.
     // Set verification-only mode if detected (blocks ALL file changes structurally)
     if is_verification {
         workflow.lock().unwrap().verification_only = true;

@@ -731,10 +731,7 @@ impl Tool for AnswerTool {
         // Dynamic outcome restriction based on workflow state (constrained decoding)
         if let Some(ref wf) = self.workflow {
             let wf = wf.lock().unwrap();
-            let allowed: Vec<&str> = if wf.otp_with_task {
-                // OTP proves authorization → DENIED not available
-                vec!["OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", "OUTCOME_NONE_CLARIFICATION"]
-            } else if wf.verification_only {
+            let allowed: Vec<&str> = if wf.verification_only {
                 // OTP oracle → only OK (correct/incorrect answer)
                 vec!["OUTCOME_OK", "OUTCOME_DENIED_SECURITY"]
             } else {

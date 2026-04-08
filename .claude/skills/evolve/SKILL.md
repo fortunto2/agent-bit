@@ -68,21 +68,25 @@ answer() tool → OUTCOME_OK / OUTCOME_DENIED_SECURITY / OUTCOME_NONE_CLARIFICAT
 | Structural signals | `src/main.rs` `structural_injection_score()` | Pattern detection (imperatives, system refs, base64, unicode) | Missing signal categories |
 | CRM graph | `src/crm_graph.rs` | Sender trust via email domain → contacts/accounts | Wrong trust level for scenario |
 | Classification ensemble | `src/main.rs` `semantic_classify_inbox_file()` | Combines ML + structural + sender trust → recommendation | Wrong recommendation text |
-| System prompt | `src/main.rs` `SYSTEM_PROMPT_EXPLICIT/STANDARD` | Decision tree, examples, guidance for LLM | Model makes wrong decision despite correct classification |
+| System prompt | `src/prompts.rs` `SYSTEM_PROMPT_V2/EXPLICIT` | V2: annotation-driven. Explicit: decision tree | Model ignores annotations or skips steps |
+| Tool hooks | `src/hooks.rs` | HookRegistry: data-driven completion hooks from AGENTS.MD | Agent skips workflow steps (e.g., writes card but not thread) |
+| File policy | `src/policy.rs` | PcmClient blocks write/delete to protected paths | Agent tries to modify system files |
 | Reasoning schema | `src/agent.rs` | CoT fields: task_type, security_assessment, known_facts, plan | Model skips security assessment |
-| Tool descriptions | `src/tools.rs` | Tool docs that guide model behavior | Model misuses tool or picks wrong outcome |
+| Tool descriptions | `src/tools.rs` | Tool docs + hook-augmented output | Model misuses tool or misses next step |
 
 ### Intervention Hierarchy (prefer higher = less invasive)
 
-1. **Prompt wording** — rephrase decision tree step, add example, clarify distinction
-2. **Classification recommendation** — change recommendation text in `semantic_classify_inbox_file()`
-3. **Ensemble weights/thresholds** — adjust 0.7/0.3 ML/structural weights, confidence thresholds
-4. **Sender trust logic** — add new trust check in CRM graph (e.g., Unknown + financial = flag)
-5. **Structural signal** — add new signal category to `structural_injection_score()`
-6. **Reasoning schema** — add field or enum value to CoT schema
-7. **Tool description** — change tool docs to hint at correct behavior
+1. **Tool completion hook** — add hook to `src/hooks.rs` HookRegistry (data-driven, parsed from AGENTS.MD)
+2. **Prompt example** — add to `examples_for_class()` in `src/prompts.rs` (per classifier label)
+3. **Pipeline annotation** — inject pre-grounding message (e.g., [✓ TRUSTED], capture paths)
+4. **Classification recommendation** — change recommendation text in `semantic_classify_inbox_file()`
+5. **File policy** — add protected path to `src/policy.rs` constants
+6. **Pipeline signal** — add new signal to `assess_security()` in `src/pipeline.rs`
+7. **Sender trust logic** — add new trust check in CRM graph
+8. **Reasoning schema** — add field or enum value to CoT schema
 
-NEVER: hardcoded keyword lists, pre-scan blocks, task-ID checks, bypassing the LLM.
+**Prefer hooks over prompt changes** — Nemotron ignores long prompts but follows tool output.
+NEVER: hardcoded keyword lists, task-ID checks, bypassing the LLM.
 
 ## Diagnostic Method
 
