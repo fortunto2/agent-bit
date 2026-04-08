@@ -156,7 +156,8 @@ impl WorkflowState {
         }
 
         // Universal delete guard: only allow delete if instruction explicitly mentions it
-        if tool == "delete" && !self.allows_delete {
+        // Exception: ephemeral files (otp.txt etc) always deletable (security hygiene)
+        if tool == "delete" && !self.allows_delete && !crate::policy::is_ephemeral(path) {
             return Guard::Block(
                 "⛔ Delete skipped — task did not ask for deletion. \
                  Your work is done. Call answer(OUTCOME_OK) now."

@@ -15,8 +15,17 @@ const PROTECTED_BASENAMES: &[&str] = &["agents.md", "readme.md"];
 /// Files here are protected EXCEPT ephemeral ones (otp.txt).
 const POLICY_DIRS: &[&str] = &["docs/channels/"];
 
-/// Ephemeral files within policy dirs — allowed to write/delete.
+/// Ephemeral files — always allowed to delete regardless of workflow guards.
+/// These are cleanup/hygiene files, not content.
 const EPHEMERAL: &[&str] = &["otp.txt"];
+
+/// Check if a path is ephemeral (cleanup file, always deletable).
+/// Used by workflow to exempt security hygiene deletes from allows_delete guard.
+pub fn is_ephemeral(path: &str) -> bool {
+    let basename = path.trim_start_matches('/')
+        .rsplit('/').next().unwrap_or(path).to_lowercase();
+    EPHEMERAL.contains(&basename.as_str())
+}
 
 /// Check if a path is protected from modification (write/delete).
 /// Called by PcmClient before every write/delete RPC.
