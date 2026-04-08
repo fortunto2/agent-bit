@@ -770,8 +770,7 @@ impl Tool for AnswerTool {
             if a.outcome == "OUTCOME_OK" {
                 // Add recent reads (accounts, contacts, invoices) not already in refs
                 for p in reads.iter() {
-                    if (p.starts_with("accounts/") || p.starts_with("contacts/") || p.starts_with("my-invoices/"))
-                        && !p.contains("README") && !merged.contains(p)
+                    if crate::policy::is_auto_ref_path(p) && !merged.contains(p)
                     {
                         merged.push(p.clone());
                     }

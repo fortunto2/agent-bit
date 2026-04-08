@@ -72,6 +72,18 @@ pub fn scan_content(content: &str) -> bool {
         })
 }
 
+// ── Auto-Ref Paths ──────────────────────────────────────────────────────
+
+/// Directories whose files should be included in answer auto-refs.
+/// Single source of truth — used by AnswerTool and PcmClient search tracking.
+const AUTO_REF_DIRS: &[&str] = &["accounts/", "contacts/", "my-invoices/", "01_capture/", "02_distill/"];
+
+/// Check if a path should be included in answer auto-refs.
+pub fn is_auto_ref_path(path: &str) -> bool {
+    let norm = path.trim_start_matches('/');
+    AUTO_REF_DIRS.iter().any(|d| norm.starts_with(d)) && !norm.contains("README")
+}
+
 // ── Channel Trust ───────────────────────────────────────────────────────
 
 /// Channel handle trust level — parsed from docs/channels/*.txt files.

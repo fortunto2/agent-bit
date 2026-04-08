@@ -174,9 +174,7 @@ impl PcmClient {
         if let Ok(mut reads) = self.recent_reads.lock() {
             for m in &v.matches {
                 let p = m.path.trim_start_matches('/').to_string();
-                if (p.starts_with("accounts/") || p.starts_with("contacts/") || p.starts_with("my-invoices/"))
-                    && !p.contains("README")
-                    && !reads.contains(&p)
+                if crate::policy::is_auto_ref_path(&p) && !reads.contains(&p)
                 {
                     reads.push(p);
                     if reads.len() > 50 { reads.remove(0); }
