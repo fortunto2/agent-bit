@@ -651,7 +651,7 @@ pub(crate) async fn run_agent(
         .register(tools::DeleteTool::new(pcm.clone(), Some(workflow.clone())))
         .register(tools::MkDirTool(pcm.clone()))
         .register(tools::MoveTool(pcm.clone()))
-        .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone()))
+        .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone(), Some(workflow.clone())))
         .register(tools::ContextTool(pcm.clone()));
 
     let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, Some(workflow.clone()));

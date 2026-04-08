@@ -167,6 +167,24 @@ impl WorkflowState {
             }
         }
 
+        // Pre-answer execution guard: block answer(OK) if task requires writes but none happened
+        // Prevents "I analyzed and processed" without actually writing files
+        if tool == "answer" && self.phase == Phase::Reading && self.write_paths.is_empty() {
+            // Only block OK answers — DENIED/CLARIFICATION/UNSUPPORTED don't require writes
+            let outcome = path.to_lowercase(); // path field carries outcome for answer tool
+            if outcome.contains("ok") || outcome.is_empty() {
+                // Don't block if verification_only (OTP oracle — no writes expected)
+                if !self.verification_only && self.intent != "intent_query" && self.intent != "intent_delete" {
+                    return Guard::Block(
+                        "⛔ You haven't written any files yet. Execute the task FIRST \
+                         (write email, update contact, etc), THEN call answer(). \
+                         Re-read the inbox request and act on it."
+                            .into(),
+                    );
+                }
+            }
+        }
+
         // Universal delete guard: only allow delete if instruction explicitly mentions it
         // Exception: ephemeral files (otp.txt etc) always deletable (security hygiene)
         if tool == "delete" && !self.allows_delete && !crate::policy::is_ephemeral(path) {

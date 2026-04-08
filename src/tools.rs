@@ -683,13 +683,14 @@ impl Tool for ContextTool {
 pub struct AnswerTool {
     pub pcm: Arc<PcmClient>,
     pub validator: Option<Arc<crate::classifier::OutcomeValidator>>,
+    pub workflow: Option<crate::workflow::SharedWorkflowState>,
     /// Max 1 embedding-based block per trial to prevent infinite loops.
     validation_retries: AtomicU32,
 }
 
 impl AnswerTool {
-    pub fn new(pcm: Arc<PcmClient>, validator: Option<Arc<crate::classifier::OutcomeValidator>>) -> Self {
-        Self { pcm, validator, validation_retries: AtomicU32::new(0) }
+    pub fn new(pcm: Arc<PcmClient>, validator: Option<Arc<crate::classifier::OutcomeValidator>>, workflow: Option<crate::workflow::SharedWorkflowState>) -> Self {
+        Self { pcm, validator, workflow, validation_retries: AtomicU32::new(0) }
     }
 }
 
@@ -728,6 +729,14 @@ impl Tool for AnswerTool {
     fn parameters_schema(&self) -> Value { json_schema_for::<AnswerArgs>() }
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: AnswerArgs = parse_args(&args)?;
+
+        // Workflow pre-answer guard: block OK if required writes not done
+        if let Some(ref wf) = self.workflow {
+            let guard = wf.lock().unwrap().pre_action("answer", &a.outcome);
+            if let crate::workflow::Guard::Block(msg) = guard {
+                return Ok(ToolOutput::text(msg));
+            }
+        }
 
         // Embedding-based validation (confidence-gated blocking, max 1 block per trial)
         if let Some(ref validator) = self.validator {
