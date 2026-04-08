@@ -494,15 +494,9 @@ pub(crate) fn check_sender_domain_match(
     let stem_words: Vec<&str> = sender_stem.split_whitespace()
         .filter(|w| w.len() > 2)
         .collect();
-    if !stem_words.is_empty() {
-        let matched = stem_words.iter().filter(|w| body.contains(*w)).count();
-        let ratio = matched as f64 / stem_words.len() as f64;
-        if ratio > 0.5 {
-            // (prevents cross-company false matches like acme-robotics vs Acme Logistics)
-            return "match";
-        }
-    }
-
+    // No CRM account matched — sender is unknown to the system
+    // Body self-consistency check: if sender's domain stem appears in body,
+    // it's self-referencing (not proof of legitimacy). Return "unknown", not "match".
     "unknown"
 }
 
@@ -709,9 +703,10 @@ mod tests {
 
     #[test]
     fn sender_domain_self_consistent_fallback() {
+        // No CRM account → sender unknown, body self-reference doesn't prove legitimacy
         let accounts: Vec<(String, String)> = vec![];
         let content = "From: nienke@silverline-retail.example.com\nHi, can you resend the invoice for Silverline Retail?";
-        assert_eq!(check_sender_domain_match("silverline-retail.example.com", content, &accounts), "match");
+        assert_eq!(check_sender_domain_match("silverline-retail.example.com", content, &accounts), "unknown");
     }
 
     #[test]

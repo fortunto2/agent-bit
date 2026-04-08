@@ -473,7 +473,14 @@ pub fn assess_sender(
         dm
     };
 
-    // Reconcile
+    // Reconcile: CRM graph CrossCompany + unknown domain = treat as mismatch (lookalike)
+    let domain_match = if trust == SenderTrust::CrossCompany && domain_match == "unknown" {
+        reasons.push("CrossCompany + unknown domain → mismatch (lookalike)".into());
+        "mismatch"
+    } else {
+        domain_match
+    };
+
     let final_trust = match (&trust, domain_match) {
         (SenderTrust::Known, _) => SenderTrust::Known,
         (SenderTrust::CrossCompany, _) => SenderTrust::CrossCompany,
