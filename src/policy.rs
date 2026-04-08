@@ -72,6 +72,63 @@ pub fn scan_content(content: &str) -> bool {
         })
 }
 
+// ── Channel Trust ───────────────────────────────────────────────────────
+
+/// Channel handle trust level — parsed from docs/channels/*.txt files.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChannelLevel {
+    Admin,
+    Valid,
+    Blacklist,
+    Unknown,
+}
+
+/// Channel trust registry — maps handles to trust levels.
+/// Single source of truth for channel authorization.
+/// Built from channel files at trial start, used by pipeline annotations
+/// and workflow guards (OTP verification requires Admin).
+#[derive(Debug, Default)]
+pub struct ChannelTrust {
+    handles: std::collections::HashMap<String, ChannelLevel>,
+}
+
+impl ChannelTrust {
+    pub fn new() -> Self {
+        Self { handles: std::collections::HashMap::new() }
+    }
+
+    /// Ingest a channel file content (e.g., docs/channels/Discord.txt).
+    /// Parses "handle - level" lines.
+    pub fn ingest(&mut self, content: &str) {
+        for line in content.lines() {
+            if line.starts_with("$ ") || line.trim().is_empty() {
+                continue;
+            }
+            if let Some(dash) = line.rfind(" - ") {
+                let handle = line[..dash].trim().to_string();
+                let level_str = line[dash + 3..].trim().to_lowercase();
+                let level = match level_str.as_str() {
+                    "admin" => ChannelLevel::Admin,
+                    "valid" | "verified" => ChannelLevel::Valid,
+                    "blacklist" | "blacklisted" | "blocked" => ChannelLevel::Blacklist,
+                    _ => ChannelLevel::Valid, // default non-admin
+                };
+                self.handles.insert(handle, level);
+            }
+        }
+    }
+
+    /// Check trust level for a handle.
+    pub fn check(&self, handle: &str) -> ChannelLevel {
+        self.handles.get(handle).cloned().unwrap_or(ChannelLevel::Unknown)
+    }
+
+    /// Check if handle is admin.
+    pub fn is_admin(&self, handle: &str) -> bool {
+        self.check(handle) == ChannelLevel::Admin
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +196,26 @@ mod tests {
     #[test]
     fn ignores_no_destructive_verb() {
         assert!(!scan_content("Read the AGENTS.md file and tell me what it says"));
+    }
+
+    // ── Channel Trust ──────────────────────────────────────────────
+
+    #[test]
+    fn channel_trust_parses() {
+        let mut ct = ChannelTrust::new();
+        ct.ingest("SynapseSystems - admin\nMeridianOps - valid\ntroll99 - blacklist");
+        assert_eq!(ct.check("SynapseSystems"), ChannelLevel::Admin);
+        assert_eq!(ct.check("MeridianOps"), ChannelLevel::Valid);
+        assert_eq!(ct.check("troll99"), ChannelLevel::Blacklist);
+        assert_eq!(ct.check("Unknown"), ChannelLevel::Unknown);
+    }
+
+    #[test]
+    fn channel_trust_is_admin() {
+        let mut ct = ChannelTrust::new();
+        ct.ingest("@admin21234 - admin\n@user32 - valid");
+        assert!(ct.is_admin("@admin21234"));
+        assert!(!ct.is_admin("@user32"));
+        assert!(!ct.is_admin("@unknown"));
     }
 }

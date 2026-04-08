@@ -484,6 +484,24 @@ pub(crate) async fn run_agent(
         eprintln!("  Accounts pre-loaded: {} entries", accounts_summary.lines().count());
     }
 
+    // Build channel trust registry from docs/channels/ files
+    let channel_trust = {
+        let mut ct = crate::policy::ChannelTrust::new();
+        if let Ok(channels_list) = pcm.list("docs/channels").await {
+            for line in channels_list.lines() {
+                let fname = line.trim().trim_end_matches('/');
+                if fname.is_empty() || fname.starts_with('$') || fname.contains("README")
+                    || fname.contains("AGENTS") || fname == "otp.txt" {
+                    continue;
+                }
+                if let Ok(content) = pcm.read(&format!("docs/channels/{}", fname), false, 0, 0).await {
+                    ct.ingest(&content);
+                }
+            }
+        }
+        ct
+    };
+
     // Inject inbox content from pipeline (already read + classified — no re-read from PCM)
     let mut has_otp = false;
     let mut is_verification = false;
@@ -503,6 +521,18 @@ pub(crate) async fn run_agent(
                 inbox_content.push_str("[⚠ SENDER DOMAIN MISMATCH]\n");
             } else if f.security.sender.as_ref().is_some_and(|s| s.trust == crate::crm_graph::SenderTrust::Known) {
                 inbox_content.push_str("[✓ TRUSTED: sender email verified in CRM. This is a KNOWN contact — process normally, do NOT deny.]\n");
+            }
+            // Channel trust annotation (from policy — single source of truth)
+            if let Some(handle) = extract_channel_handle(&f.content) {
+                match channel_trust.check(&handle) {
+                    crate::policy::ChannelLevel::Admin =>
+                        inbox_content.push_str(&format!("[✓ CHANNEL: {} — admin]\n", handle)),
+                    crate::policy::ChannelLevel::Valid =>
+                        inbox_content.push_str(&format!("[CHANNEL: {} — valid]\n", handle)),
+                    crate::policy::ChannelLevel::Blacklist =>
+                        inbox_content.push_str(&format!("[⛔ CHANNEL: {} — blacklisted]\n", handle)),
+                    crate::policy::ChannelLevel::Unknown => {}
+                }
             }
             inbox_content.push_str(&format!("{}\n\n", f.content));
             eprintln!("  📋 {}: {} ({:.2}) | sender: {}",
@@ -558,7 +588,7 @@ pub(crate) async fn run_agent(
         }
     }
 
-    // Pre-load channel file stats (for counting queries like "how many blacklisted in telegram")
+    // Pre-load channel file stats
     if let Ok(channels_list) = pcm.list("docs/channels").await {
         let mut channel_stats = String::new();
         for line in channels_list.lines() {
@@ -929,6 +959,26 @@ pub(crate) fn build_execution_summary(history: &str, max_lines: usize) -> String
         .collect();
     let start = relevant.len().saturating_sub(max_lines);
     relevant[start..].join("\n")
+}
+
+/// Extract channel handle from inbox message content.
+/// Looks for "Handle: X" or "Handle: @X" patterns.
+fn extract_channel_handle(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("Channel:") {
+            // Next line or same line might have Handle:
+            continue;
+        }
+        if let Some(handle) = trimmed.strip_prefix("Handle:") {
+            return Some(handle.trim().to_string());
+        }
+        // Combined: "Channel: Discord, Handle: MeridianOps"
+        if let Some(pos) = trimmed.find("Handle:") {
+            return Some(trimmed[pos + 7..].trim().to_string());
+        }
+    }
+    None
 }
 
 // Hook extraction moved to src/hooks.rs (HookRegistry::from_agents_md)

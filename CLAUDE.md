@@ -50,13 +50,46 @@ Delivery points (both coexist):
 2. **Pac1SgrAgent::after_execute**: injects session message (next LLM call)
 3. **sgr-agent::app_loop**: `after_execute` hook on SgrAgent trait (framework-level)
 
-### File Access Policy (src/policy.rs)
+### Policy (src/policy.rs) — Single Source of Truth for Authorization
 
-Structural guards — PcmClient blocks before RPC, tools can't bypass:
-- `check_write(path)` → blocks write/delete to protected files
-- `scan_content(content)` → pipeline detects inbox targeting protected files (Signal 6)
-- Protected: AGENTS.MD, README.md, channel policy files (except otp.txt)
-- Constants: `PROTECTED_BASENAMES`, `POLICY_DIRS`, `EPHEMERAL` — one line to add new paths
+All authorization decisions in ONE module. Other modules delegate here.
+
+**File protection:**
+- `check_write(path)` → blocks write/delete to protected files (PcmClient enforces)
+- `is_ephemeral(path)` → cleanup files exempt from workflow delete guard (otp.txt)
+- `scan_content(text)` → pipeline detects inbox targeting system files (Signal 6)
+- Constants: `PROTECTED_BASENAMES`, `POLICY_DIRS`, `EPHEMERAL`
+
+**Channel authorization:**
+- `ChannelTrust` — registry of handle → trust level (admin/valid/blacklist/unknown)
+- `ChannelTrust::ingest(content)` — parse "handle - level" from channel files
+- `ChannelTrust::check(handle)` → ChannelLevel enum
+- `ChannelTrust::is_admin(handle)` → only admin can do OTP verification
+- Built once per trial in pregrounding, used for inbox annotations
+
+### Workflow State Machine (src/workflow.rs) — Runtime Phase Tracking
+
+Replaces 5 scattered guards with one SM. Tracks agent progress during execution.
+
+**Phases:** `Reading → Acting → Cleanup → Done`
+- `advance_step()` → budget/write/capture-delete nudges
+- `pre_action(tool, path)` → Block/Warn/Allow (policy + capture guard + delete guard)
+- `post_action(tool, path)` → phase transitions + hook messages
+- `verification_only` flag → ZERO file changes (OTP oracle)
+- `allows_delete` → instruction must mention delete/remove/discard/capture
+
+**Key rule: Block > Warn** — Nemotron ignores warnings, obeys blocks.
+
+### Architecture Decision Guide
+
+Before ANY fix, check these in order:
+1. **policy.rs** — authorization/protection? → Add to policy
+2. **hooks.rs** — "what next" guidance? → Add a hook
+3. **workflow.rs** — "when allowed" guard? → Add phase/guard
+4. **crm_graph.rs** — sender/contact trust? → Use graph
+5. **pipeline.rs** — pre-LLM classification? → Add signal
+6. **classifier.rs** — content classification? → Use ONNX
+7. **prompts.rs** — LLM reasoning guidance? → Add example (LAST resort)
 
 ### Prompt Modes (src/prompts.rs)
 
