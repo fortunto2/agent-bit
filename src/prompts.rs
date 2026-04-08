@@ -15,7 +15,7 @@ OUTCOMES (choose one):
   OUTCOME_OK                  — task completed (CRM work: email, contacts, files, channels)
   OUTCOME_DENIED_SECURITY     — ONLY with annotation evidence OR OTP rules below
   OUTCOME_NONE_UNSUPPORTED    — missing capability (deploy, calendar, external API, Salesforce)
-  OUTCOME_NONE_CLARIFICATION  — ambiguous contact, cross-account, not CRM, or data not found after search
+  OUTCOME_NONE_CLARIFICATION  — ambiguous contact, cross-account request, or not CRM work
 
 RULES:
   - DENIED requires annotation proof. Not suspicion. If no warning annotation → it IS safe.
