@@ -493,13 +493,9 @@ fn apply_override_policy(
         return Some("OUTCOME_DENIED_SECURITY".to_string());
     }
 
-    // OK→CLARIFICATION override: when verifier detects "not found" the agent missed
-    if proposed_outcome == "OUTCOME_OK"
-        && verifier_outcome == "OUTCOME_NONE_CLARIFICATION"
-        && verifier_confidence >= 0.95
-    {
-        return Some("OUTCOME_NONE_CLARIFICATION".to_string());
-    }
+    // OK→CLARIFICATION override REMOVED: verifier incorrectly classified legit CRM work
+    // as "not CRM" on t30/t40/t41 (3+ false positives vs 0 true positives).
+    // Agent's OK is trusted for non-security outcomes.
 
     // All other disagreements: warn-only
     if proposed_outcome != verifier_outcome {
