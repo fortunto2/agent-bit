@@ -129,9 +129,9 @@ impl HarnessClient {
         })
     }
 
-    pub async fn start_run(&self, benchmark_id: &str, name: &str) -> Result<StartRunResponse> {
+    pub async fn start_run(&self, benchmark_id: &str, name: &str, api_key: &str) -> Result<StartRunResponse> {
         let r = self.inner.start_run(proto::StartRunRequest {
-            benchmark_id: benchmark_id.into(), name: name.into(), ..Default::default()
+            benchmark_id: benchmark_id.into(), name: name.into(), api_key: api_key.into(), ..Default::default()
         }).await.map_err(|e| Self::err("StartRun", e))?;
         let v = r.view();
         Ok(StartRunResponse {

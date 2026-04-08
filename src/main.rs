@@ -319,8 +319,9 @@ async fn run_leaderboard(
         anyhow::bail!("--api-key or BITGN_API_KEY required for leaderboard mode");
     }
 
+    let api_key = cli.api_key.as_deref().unwrap();
     eprintln!("[pac1] Starting leaderboard run: {}", run_name);
-    let run = harness.start_run(benchmark, run_name).await?;
+    let run = harness.start_run(benchmark, run_name, api_key).await?;
     eprintln!("[pac1] Run {} — {} trials", run.run_id, run.trial_ids.len());
 
     let shared_clf: SharedClassifier = Arc::new(
