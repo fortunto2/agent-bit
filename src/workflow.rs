@@ -71,6 +71,7 @@ impl WorkflowState {
             && !instr_lower.contains("remove all");
         // Instruction explicitly allows deletion
         let allows_delete = intent == "intent_delete"
+            || intent == "intent_inbox" // inbox processing implies delete source after processing
             || instr_lower.contains("delete")
             || instr_lower.contains("remove")
             || instr_lower.contains("discard")

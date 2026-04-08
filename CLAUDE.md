@@ -89,7 +89,9 @@ Before ANY fix, check these in order:
 4. **crm_graph.rs** — sender/contact trust? → Use graph
 5. **pipeline.rs** — pre-LLM classification? → Add signal
 6. **classifier.rs** — content classification? → Use ONNX
-7. **prompts.rs** — LLM reasoning guidance? → Add example (LAST resort)
+7. **prompts.rs** — LLM reasoning guidance? → Check `examples_for_class()` first (per-label examples), then decision tree (LAST resort)
+
+**Step 7 checklist**: when fixing LLM behavior, ALWAYS check `examples_for_class()` in prompts.rs — it injects per-classifier-label examples. Adding an example for the relevant class (crm/credential/injection/etc) is less invasive than editing the decision tree.
 
 ### Prompt Modes (src/prompts.rs)
 

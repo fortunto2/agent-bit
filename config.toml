@@ -29,9 +29,12 @@ api_key_env = "CF_AI_API_KEY"
 model = "workers-ai/@cf/moonshotai/kimi-k2.5"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key_env = "CF_AI_API_KEY"
+temperature = 0.1
+planning_temperature = 0.4
 
 [providers.kimi-gateway.headers]
 cf-aig-request-timeout = "300000"
+x-session-affinity = "pac1-agent"
 
 [providers.llama]
 model = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
