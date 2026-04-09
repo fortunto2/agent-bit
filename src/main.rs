@@ -386,11 +386,21 @@ async fn run_leaderboard(
         let result = harness.end_trial(&trial.trial_id).await?;
         if let Some(score) = result.score {
             eprintln!("  {} Score: {:.2}", trial.task_id, score);
-            // Save score to dump for dashboard
+            // Save score + structured diagnosis for fast debugging
             let _ = std::fs::write(
                 format!("{}/score.txt", dump_dir),
                 format!("{:.2}\n{}\n", score, result.score_detail.join("\n")),
             );
+            // Append score details to pipeline.txt for unified diagnosis
+            let _ = std::fs::OpenOptions::new().append(true).open(format!("{}/pipeline.txt", dump_dir))
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    writeln!(f, "\nscore: {:.2}", score)?;
+                    writeln!(f, "tool_calls: {}", tool_calls)?;
+                    writeln!(f, "retry: {}", should_retry)?;
+                    for d in &result.score_detail { writeln!(f, "detail: {}", d)?; }
+                    Ok(())
+                });
             // Score-gated learning: only learn from confirmed correct answers
             if score >= 1.0 {
                 if let Some(ref v) = outcome_validator {

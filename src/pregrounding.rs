@@ -509,10 +509,25 @@ pub(crate) async fn run_agent(
                 format!("{}{}", header, f.content),
             );
         }
-        // Pipeline context
+        // Pipeline context + diagnosis (what was classified, how)
+        let per_inbox: Vec<String> = ready.inbox_files.iter().enumerate().map(|(i, f)| {
+            let sender = f.security.sender.as_ref().map(|s| format!("{}", s.trust)).unwrap_or_else(|| "?".into());
+            format!("  [{}] {} ({:.2}) sender={} {}", i, f.security.ml_label, f.security.ml_conf, sender, f.path)
+        }).collect();
         let _ = std::fs::write(format!("{}/pipeline.txt", dump_dir), format!(
-            "instruction: {}\nintent: {}\nlabel: {}\ninbox_files: {}\n",
-            ready.instruction, ready.intent, ready.instruction_label, ready.inbox_files.len(),
+            "instruction: {}\n\
+             intent: {} ({:.2})\n\
+             label: {}\n\
+             inbox_files: {}\n\
+             crm_nodes: {}\n\
+             \n\
+             per_inbox:\n{}\n",
+            ready.instruction,
+            ready.intent, intent_confidence,
+            ready.instruction_label,
+            ready.inbox_files.len(),
+            ready.crm_graph.node_count(),
+            per_inbox.join("\n"),
         ));
         eprintln!("  📁 Trial data dumped to {}", dump_dir);
     }
