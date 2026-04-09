@@ -598,6 +598,12 @@ impl CrmGraph {
         let scores = self.similarity_scores(&body_emb);
         let sender_lower = sender_account.to_lowercase();
 
+        // Log all scores for diagnostics
+        let top3: Vec<String> = scores.iter().take(3)
+            .map(|(n, s)| format!("{}={:.3}", n, s))
+            .collect();
+        eprintln!("  📊 Account similarity: [{}]", top3.join(", "));
+
         // Find sender's own score and best non-sender score
         let sender_sim = scores.iter()
             .find(|(n, _)| n.to_lowercase() == sender_lower)
@@ -607,9 +613,10 @@ impl CrmGraph {
             .find(|(n, _)| n.to_lowercase() != sender_lower);
 
         if let Some((other_name, other_sim)) = best_other {
-            // Cross-account: other account is MORE similar to the body than sender's own account
-            // AND similarity is meaningful (> 0.4)
-            if *other_sim > sender_sim && *other_sim > 0.4 {
+            eprintln!("  📊 Cross-check: sender '{}' sim={:.3}, best other '{}' sim={:.3}",
+                sender_account, sender_sim, other_name, other_sim);
+            // Cross-account: other account is MORE similar to the body than sender's own
+            if *other_sim > sender_sim && *other_sim > 0.3 {
                 return Some((other_name.clone(), *other_sim));
             }
         }
