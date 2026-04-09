@@ -1169,4 +1169,47 @@ mod tests {
         assert!((0.0..=1.0).contains(&score), "entailment score should be in [0,1], got {}", score);
         assert!(score > 0.3, "CRM text should have meaningful entailment with CRM hypothesis, got {}", score);
     }
+
+    /// Simulate competition: unknown instruction variants → check classifier handles them
+    #[test]
+    fn unknown_instruction_resilience() {
+        let mut clf = InboxClassifier::load(std::path::Path::new("models")).expect("ONNX model required");
+
+        // Instructions that SHOULD be intent_inbox
+        let inbox_variants = [
+            "Deal with whatever is in the inbox",
+            "Go through the pending messages",
+            "CHECK MESSAGES NOW",
+            "clean out the inbox folder",
+            "Sort through incoming correspondence",
+            "Triage the message queue",
+            "Look at what came in and handle it",
+            "There are items waiting — process them",
+            "New messages need attention",
+            "Act on incoming requests",
+        ];
+
+        let mut correct = 0;
+        let mut low_conf = 0;
+        for instr in &inbox_variants {
+            let scores = clf.classify_intent(instr).unwrap();
+            let (label, conf) = &scores[0];
+            let is_correct = label == "intent_inbox";
+            let is_low = *conf < 0.25;
+            if is_correct { correct += 1; }
+            if is_low { low_conf += 1; }
+            eprintln!("  {:50} → {} ({:.2}) {}",
+                &instr[..instr.len().min(50)], label, conf,
+                if is_correct { "✓" } else if is_low { "⚠ low-conf (fallback)" } else { "✗ WRONG" }
+            );
+        }
+
+        // At least 50% correct OR low-confidence (fallback will handle)
+        let handled = correct + low_conf;
+        assert!(handled >= inbox_variants.len() * 7 / 10,
+            "Classifier should correctly classify or low-conf fallback for ≥70% of unknown inbox variants: {}/{} handled",
+            handled, inbox_variants.len());
+        eprintln!("  Result: {}/{} correct, {}/{} low-conf fallback, {}/{} total handled",
+            correct, inbox_variants.len(), low_conf, inbox_variants.len(), handled, inbox_variants.len());
+    }
 }
