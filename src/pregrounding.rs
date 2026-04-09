@@ -516,23 +516,23 @@ pub(crate) async fn run_agent(
     } else {
         prompts::SYSTEM_PROMPT_EXPLICIT
     };
-    // Dynamic example injection based on classifier output
-    // Override: intent_query with non_work label should use CRM examples (e.g. "which article did I capture?")
+    // Skill-based prompt injection (replaces examples_for_class)
+    let skill_registry = crate::skills::load(std::path::Path::new("."));
     let effective_label = if ready.intent == "intent_query" && instruction_label == "non_work" {
-        eprintln!("  ↳ Example override: non_work → crm (intent_query)");
+        eprintln!("  ↳ Skill override: non_work → crm (intent_query)");
         "crm"
     } else {
         &instruction_label
     };
-    let examples = prompts::examples_for_class(effective_label);
+    let skill_body = crate::skills::select_body(&skill_registry, effective_label, &instruction_intent, instruction);
     let hint = std::env::var("HINT").unwrap_or_default();
     let mut system_prompt = template
         .replace("{agents_md}", if agents_md.is_empty() { "" } else { &agents_md })
-        .replace("{examples}", examples);
+        .replace("{examples}", skill_body);
     if !hint.is_empty() {
         system_prompt.push_str(&format!("\n\n{}", hint));
     }
-    eprintln!("  Prompt: {} bytes (examples for: {})", system_prompt.len(), instruction_label);
+    eprintln!("  Prompt: {} bytes (skill: {})", system_prompt.len(), effective_label);
 
     let config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
     let llm = Llm::new(&config);
