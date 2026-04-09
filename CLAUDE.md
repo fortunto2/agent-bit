@@ -468,19 +468,44 @@ make task T=tXX PROVIDER=gemma4         # cross-validate on Gemma 4 (FREE, faste
 make task T=tXX PROVIDER=openai-full    # ONLY for final validation (costs money)
 ```
 
-**Trial logs & PCM data dump:**
+**Trial dumps** (auto-saved for ALL runs — single + parallel):
 ```
-benchmarks/tasks/{task}/{provider}_{timestamp}/
-├── run.log          # full agent log (steps, tool calls, score)
+benchmarks/tasks/{task}/{trial_id}/
+├── instruction.txt  # raw instruction (saved before prescan)
+├── pipeline.txt     # DIAGNOSIS: intent, label, per-inbox classification, score, tool_calls
+├── score.txt        # final score + score_detail
+├── run.log          # full agent log (if single-task run)
 ├── tree.txt         # PCM filesystem tree
 ├── agents.md        # AGENTS.MD content
 ├── contacts.txt     # pre-loaded contacts summary
 ├── accounts.txt     # pre-loaded accounts summary
 ├── inbox_00_*.txt   # raw inbox files + classification headers
-├── pipeline.txt     # instruction, intent, label, inbox count
-└── bitgn_log.url    # BitGN runtime log URL (open in browser)
+└── bitgn_log.url    # BitGN runtime log URL (press 'o' in dashboard)
 ```
-`make task` auto-dumps via DUMP_TRIAL env. `make full` does not (parallel). `benchmarks/tasks/` is gitignored.
+
+**Debugging a failing task — checklist:**
+1. `cargo run --bin pac1-dash` → find task in heatmap, press `o` to open BitGN log
+2. Read `pipeline.txt` — check these fields:
+   - `intent:` — wrong intent? (e.g. intent_delete instead of intent_inbox) → retrain classifier
+   - `label:` — wrong ML label? → check classifier thresholds
+   - `per_inbox:` — wrong sender trust? → check CRM graph
+   - `score:` + `detail:` — what harness expected vs got
+   - `tool_calls:` — 0 = agent never started, 1 = just answered, 3+ = investigated
+3. If prescan blocked → check `instruction.txt` for false positive patterns
+4. If wrong skill selected → check `🎯 Skill:` in logs, adjust triggers/keywords
+5. If correct skill but wrong action → check workflow phase, outbox limit, delete guard
+6. If all correct but wrong outcome → check verifier override, confidence reflection
+
+**Quick diagnosis table:**
+| pipeline.txt shows | Root cause | Fix location |
+|---|---|---|
+| `intent: intent_delete` for capture task | ML classifier misclassification | `scripts/export_model.py` training examples |
+| `label: injection` for legit content | ML security false positive | classifier thresholds |
+| `sender: UNKNOWN` for known contact | CRM graph ingestion issue | `crm_graph.rs` |
+| `tool_calls: 0` | Prescan blocked or agent loop error | `scanner.rs` prescan or `agent.rs` |
+| `score: 0` + `detail: expected OK got DENIED` | False security alert | `guard_content` or override policy |
+| `score: 0` + `detail: unexpected file write` | Agent over-processed | workflow guards or skill |
+| `score: 0` + `detail: missing file write` | Agent skipped step | skill guidance or pre-execute |
 
 **Debugging a failing task — MANDATORY workflow:**
 1. `cargo run -- --list` — read the **hint** (e.g. "invoice from lookalike", "unknown discord + valid OTP"). Hint tells you what the harness expects.
