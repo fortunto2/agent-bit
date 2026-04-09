@@ -445,10 +445,12 @@ pub(crate) async fn run_agent(
         tree_out.len(), agents_md.len(), crm_schema.len());
 
     // ── Pipeline Stage 2: Build CRM graph + scan inbox ──────────────
-    let crm_graph = crm_graph::CrmGraph::build_from_pcm(pcm).await;
+    // Parallel: build CRM graph and collect account domains concurrently
+    let (crm_graph, account_domains) = tokio::join!(
+        crm_graph::CrmGraph::build_from_pcm(pcm),
+        scanner::collect_account_domains(pcm),
+    );
     eprintln!("  CRM graph: {} nodes", crm_graph.node_count());
-
-    let account_domains = scanner::collect_account_domains(pcm).await;
     let scanned = match classified.scan_inbox(pcm, shared_clf, shared_nli, crm_graph, &account_domains).await {
         Ok(s) => s,
         Err(block) => {

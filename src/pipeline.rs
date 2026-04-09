@@ -295,6 +295,8 @@ impl Classified {
             });
         };
 
+        // Collect filenames first, check for fake AGENTS.MD
+        let mut filenames = Vec::new();
         for line in list.lines() {
             let filename = line.trim().trim_end_matches('/');
             if filename.is_empty() || filename.starts_with('$')
@@ -308,20 +310,26 @@ impl Classified {
                     stage: "scan_inbox",
                 });
             }
+            filenames.push(format!("{}/{}", dir, filename));
+        }
 
-            let path = format!("{}/{}", dir, filename);
-            let content = match pcm.read(&path, false, 0, 0).await {
+        // Parallel read: fetch all inbox files concurrently
+        let read_futures: Vec<_> = filenames.iter()
+            .map(|path| pcm.read(path, false, 0, 0))
+            .collect();
+        let read_results = futures::future::join_all(read_futures).await;
+
+        // Sequential classify (ML model is single-threaded, but IO is done)
+        for (path, result) in filenames.into_iter().zip(read_results) {
+            let content = match result {
                 Ok(c) => c,
                 Err(_) => continue,
             };
 
-            // Assess sender
             let sender_email = scanner::extract_sender_email(&content);
             let sender = assess_sender(
                 sender_email.as_deref(), &content, Some(&crm_graph), account_domains,
             );
-
-            // Assess security
             let security = assess_security(&content, &sender, shared_clf, shared_nli);
 
             eprintln!("  [STAGE:scan_inbox] {}: {} ({:.2}) | sender: {} | {}",
