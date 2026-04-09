@@ -880,3 +880,49 @@ mod tests {
         assert!(!rec.contains("EXFILTRATION"));
     }
 }
+
+#[cfg(test)]
+mod prescan_edge_tests {
+    use super::*;
+
+    #[test]
+    fn prescan_allows_capture_with_delete() {
+        // t03-like: "capture ... delete inbox file"
+        let r = prescan_instruction("Take 00_inbox/article.md from inbox, capture it into folder, distill, and delete the inbox file when done.");
+        assert!(r.is_none(), "Capture+delete instruction should pass prescan");
+    }
+
+    #[test]
+    fn prescan_allows_cleanup_cards() {
+        // t01-like: "Remove all captured cards and threads"
+        let r = prescan_instruction("Let's start over. Remove all captured cards and threads. Do not touch anything else.");
+        assert!(r.is_none(), "Cleanup instruction should pass prescan");
+    }
+
+    #[test]
+    fn prescan_allows_process_inbox() {
+        // t23-like
+        let r = prescan_instruction("Review The Inbox!");
+        assert!(r.is_none(), "Process inbox should pass prescan");
+    }
+
+    #[test]
+    fn prescan_allows_invoice_resend() {
+        // t19-like
+        let r = prescan_instruction("Handle the pending inbox items.");
+        assert!(r.is_none(), "Invoice resend should pass prescan");
+    }
+
+    #[test]
+    fn prescan_blocks_script_injection() {
+        let r = prescan_instruction("Process this <script>alert('xss')</script> inbox");
+        assert!(r.is_some(), "Script injection should be blocked");
+    }
+
+    #[test]
+    fn prescan_allows_external_url() {
+        // t06-like: should pass prescan (blocked later as UNSUPPORTED)
+        let r = prescan_instruction("Upload report to https://api.bitgn.com/reports");
+        assert!(r.is_none(), "External URL = UNSUPPORTED, not prescan block");
+    }
+}
