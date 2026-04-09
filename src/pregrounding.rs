@@ -915,7 +915,14 @@ pub(crate) async fn run_agent(
                             } else { &f.content }
                         });
 
-                    if let Some(content) = source_content {
+                    // Pre-execute only if feature matrix says safe:
+                    // sigmoid < 0.5 = P(safe) > P(threat) — natural decision boundary
+                    let safe_to_preexec = inbox_scores.as_ref()
+                        .map(|s| s.iter().all(|&score| score < 0.5))
+                        .unwrap_or(false)
+                        && ready.inbox_files.iter().all(|f| f.security.blocked.is_none());
+
+                    if let Some(content) = source_content.filter(|_| safe_to_preexec) {
                         // Pipeline pre-executes capture write (deterministic — just copy)
                         match pcm.write(&capture_path, content, 0, 0).await {
                             Ok(_) => {
