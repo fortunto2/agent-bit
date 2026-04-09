@@ -938,4 +938,70 @@ mod tests {
         let summary = g.accounts_summary();
         assert!(summary.contains("contacts: none"), "Account with no contacts should show 'none'");
     }
+
+    // ─── Cross-account similarity tests (mock embeddings) ──────────────
+
+    #[test]
+    fn similarity_scores_ranking() {
+        let mut g = CrmGraph::new();
+        // Simulate 3 accounts with mock normalized embeddings
+        let emb_a = ndarray::Array1::from(vec![1.0, 0.0, 0.0]); // "Acme"
+        let emb_b = ndarray::Array1::from(vec![0.0, 1.0, 0.0]); // "Globex"
+        let emb_c = ndarray::Array1::from(vec![0.7, 0.7, 0.0]).mapv(|x| x / (0.7f32*0.7+0.7*0.7).sqrt()); // "AcmeGlob" mix
+        g.account_embeddings = vec![
+            ("Acme Corp".into(), emb_a),
+            ("Globex Inc".into(), emb_b),
+            ("AcmeGlob Mix".into(), emb_c),
+        ];
+
+        // Query similar to Acme
+        let query = ndarray::Array1::from(vec![0.9, 0.1, 0.0]);
+        let scores = g.similarity_scores(&query);
+        assert_eq!(scores[0].0, "Acme Corp", "Most similar to Acme");
+        assert!(scores[0].1 > scores[1].1, "Acme should rank higher than others");
+    }
+
+    #[test]
+    fn cross_account_detected_when_other_more_similar() {
+        let mut g = CrmGraph::new();
+        let emb_sender = ndarray::Array1::from(vec![1.0, 0.0, 0.0]);
+        let emb_other = ndarray::Array1::from(vec![0.0, 1.0, 0.0]);
+        g.account_embeddings = vec![
+            ("Sender Corp".into(), emb_sender),
+            ("Other Corp".into(), emb_other),
+        ];
+        // Query embedding more similar to Other than Sender
+        // detect_cross_account needs classifier, skip — test similarity_scores directly
+        let query = ndarray::Array1::from(vec![0.1, 0.9, 0.0]);
+        let scores = g.similarity_scores(&query);
+        let sender_sim = scores.iter().find(|(n,_)| n == "Sender Corp").map(|(_,s)| *s).unwrap();
+        let other_sim = scores.iter().find(|(n,_)| n == "Other Corp").map(|(_,s)| *s).unwrap();
+        assert!(other_sim > sender_sim, "Other Corp should be more similar than Sender Corp");
+        assert!(other_sim > 0.4, "Other sim should exceed threshold");
+    }
+
+    #[test]
+    fn no_cross_account_when_sender_most_similar() {
+        let mut g = CrmGraph::new();
+        let emb_sender = ndarray::Array1::from(vec![1.0, 0.0, 0.0]);
+        let emb_other = ndarray::Array1::from(vec![0.0, 1.0, 0.0]);
+        g.account_embeddings = vec![
+            ("Sender Corp".into(), emb_sender),
+            ("Other Corp".into(), emb_other),
+        ];
+        // Query embedding clearly about Sender
+        let query = ndarray::Array1::from(vec![0.95, 0.05, 0.0]);
+        let scores = g.similarity_scores(&query);
+        let sender_sim = scores.iter().find(|(n,_)| n == "Sender Corp").map(|(_,s)| *s).unwrap();
+        let other_sim = scores.iter().find(|(n,_)| n == "Other Corp").map(|(_,s)| *s).unwrap();
+        assert!(sender_sim > other_sim, "Sender should be most similar — no cross-account");
+    }
+
+    #[test]
+    fn similarity_scores_empty_graph() {
+        let g = CrmGraph::new();
+        let query = ndarray::Array1::from(vec![1.0, 0.0, 0.0]);
+        let scores = g.similarity_scores(&query);
+        assert!(scores.is_empty(), "Empty graph should return no scores");
+    }
 }
