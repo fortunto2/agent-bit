@@ -626,7 +626,7 @@ pub(crate) async fn run_agent(
     // Feature matrix: batch-score all inbox messages for threat/priority
     let inbox_scores = if !ready.inbox_files.is_empty() {
         let fm = crate::feature_matrix::InboxFeatureMatrix::from_inbox_files(
-            &ready.inbox_files, &ready.crm_graph, shared_clf,
+            &ready.inbox_files, &ready.crm_graph, shared_clf, &channel_trust,
         );
         let scores = fm.score_all(&crate::feature_matrix::threat_weights());
         fm.log_summary();
@@ -1181,7 +1181,7 @@ pub(crate) fn build_execution_summary(history: &str, max_lines: usize) -> String
 
 /// Extract channel handle from inbox message content.
 /// Looks for "Handle: X" or "Handle: @X" patterns.
-fn extract_channel_handle(content: &str) -> Option<String> {
+pub(crate) fn extract_channel_handle(content: &str) -> Option<String> {
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(_rest) = trimmed.strip_prefix("Channel:") {

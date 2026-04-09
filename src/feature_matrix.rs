@@ -13,6 +13,11 @@
 
 use ndarray::{Array1, Array2, Axis};
 
+/// Sigmoid activation: σ(z) = 1 / (1 + exp(-z)). Maps any real → (0, 1).
+fn sigmoid(z: f32) -> f32 {
+    1.0 / (1.0 + (-z).exp())
+}
+
 /// Feature names — central registry (like video-analyzer COLUMN_NAMES).
 pub const FEATURE_NAMES: &[&str] = &[
     "ml_confidence",      // ML classifier confidence for top label
@@ -26,9 +31,10 @@ pub const FEATURE_NAMES: &[&str] = &[
     "cross_account_sim",  // best non-sender account similarity [0..1]
     "nli_injection",      // NLI entailment score for injection hypothesis
     "nli_credential",     // NLI entailment score for credential hypothesis
+    "channel_trust",      // 1.0=admin, 0.7=valid, 0.0=unknown, -1.0=blacklist
 ];
 
-pub const N_FEATURES: usize = 11;
+pub const N_FEATURES: usize = 12;
 
 /// Feature matrix: (n_messages, N_FEATURES).
 pub struct InboxFeatureMatrix {
@@ -67,12 +73,13 @@ impl Weights {
 /// Threat detection weights — high score = likely attack.
 pub fn threat_weights() -> Weights {
     Weights::from_named(&[
-        ("structural_score", 0.25),
+        ("structural_score", 0.20),
         ("nli_injection", 0.20),
-        ("domain_match", -0.20),  // mismatch (0.0) increases threat
-        ("sender_trust", -0.15),  // unknown (0.0) increases threat
+        ("domain_match", -0.15),     // mismatch (0.0) increases threat
+        ("sender_trust", -0.15),     // unknown (0.0) increases threat
+        ("channel_trust", -0.15),    // admin (-1.0 * -0.15 = +0.15 safety) reduces threat
         ("has_url", 0.10),
-        ("sentence_length", -0.10),  // short sentences = more suspicious
+        ("sentence_length", -0.05),
     ])
 }
 
@@ -94,7 +101,7 @@ pub fn column_index(name: &str) -> Option<usize> {
 
 impl InboxFeatureMatrix {
     /// Build from pipeline SecurityAssessment data.
-    pub fn from_inbox_files(files: &[crate::pipeline::InboxFile], graph: &crate::crm_graph::CrmGraph, clf: &crate::scanner::SharedClassifier) -> Self {
+    pub fn from_inbox_files(files: &[crate::pipeline::InboxFile], graph: &crate::crm_graph::CrmGraph, clf: &crate::scanner::SharedClassifier, channel_trust: &crate::policy::ChannelTrust) -> Self {
         let n = files.len();
         let mut flat = Vec::with_capacity(n * N_FEATURES);
         let mut labels = Vec::with_capacity(n);
@@ -144,10 +151,20 @@ impl InboxFeatureMatrix {
                 .and_then(|s| s.iter().find(|(l,_)| l == "credential").map(|(_,v)| *v))
                 .unwrap_or(0.0);
 
+            // Channel trust from handle in content
+            let chan_trust = crate::pregrounding::extract_channel_handle(&f.content)
+                .map(|handle| match channel_trust.check(&handle) {
+                    crate::policy::ChannelLevel::Admin => 1.0f32,
+                    crate::policy::ChannelLevel::Valid => 0.7,
+                    crate::policy::ChannelLevel::Unknown => 0.0,
+                    crate::policy::ChannelLevel::Blacklist => -1.0,
+                })
+                .unwrap_or(0.0); // no channel handle = 0 (email, not channel)
+
             flat.extend_from_slice(&[
                 ml_conf, structural, sender_trust, domain_match,
                 has_otp, has_url, word_count, sentence_length,
-                cross_sim, nli_injection, nli_credential,
+                cross_sim, nli_injection, nli_credential, chan_trust,
             ]);
 
             labels.push(sec.ml_label.clone());
@@ -202,6 +219,7 @@ impl InboxFeatureMatrix {
     }
 
     /// Batch scoring: features × weights → score per message.
+    /// Batch scoring: features × weights → sigmoid → probability per message.
     pub fn score_all(&self, weights: &Weights) -> Array1<f32> {
         let w = Array1::from(weights.values.to_vec());
         let raw = if weights.normalize {
@@ -213,10 +231,10 @@ impl InboxFeatureMatrix {
             self.data.dot(&w) + weights.bias
         };
 
-        // Apply garbage mask
+        // Sigmoid activation: smooth S-curve probability [0..1]
         let mut scores = Array1::<f32>::zeros(self.n_messages());
         for i in 0..self.n_messages() {
-            scores[i] = if self.garbage_mask[i] { 0.0 } else { raw[i].clamp(0.0, 1.0) };
+            scores[i] = if self.garbage_mask[i] { 0.0 } else { sigmoid(raw[i]) };
         }
         scores
     }
@@ -366,8 +384,8 @@ mod tests {
     #[test]
     fn trap_domain_mismatch_scores_high_threat() {
         // Trap: KNOWN sender but domain MISMATCH (social engineering)
-        let legit = [0.4, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.0, 0.0, 0.0];
-        let attack = [0.4, 0.1, 1.0, 0.0, 0.0, 0.0, 0.3, 0.05, 0.0, 0.1, 0.0];
+        let legit = [0.4, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.0, 0.0, 0.0, 0.0];
+        let attack = [0.4, 0.1, 1.0, 0.0, 0.0, 0.0, 0.3, 0.05, 0.0, 0.1, 0.0, 0.0];
         //                              ^mismatch                      ^nli_inj
         let mat = matrix_from_rows(vec![legit, attack]);
         let scores = mat.score_all(&threat_weights());
@@ -377,8 +395,8 @@ mod tests {
     #[test]
     fn trap_unknown_sender_with_imperatives_high_threat() {
         // Trap: unknown sender + many imperative verbs = social engineering
-        let legit = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.2, 0.01, 0.0, 0.0, 0.0];
-        let trap =  [0.3, 0.2, 0.0, 0.5, 0.0, 0.0, 0.5, 0.15, 0.0, 0.05, 0.0];
+        let legit = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.2, 0.01, 0.0, 0.0, 0.0, 0.0];
+        let trap =  [0.3, 0.2, 0.0, 0.5, 0.0, 0.0, 0.5, 0.15, 0.0, 0.05, 0.0, 0.0];
         //               ^struct ^unknown                 ^imperatives
         let mat = matrix_from_rows(vec![legit, trap]);
         let scores = mat.score_all(&threat_weights());
@@ -388,8 +406,8 @@ mod tests {
     #[test]
     fn trap_cross_account_detected_by_weights() {
         // Trap: known sender asking about another account
-        let normal = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.0, 0.0, 0.0];
-        let cross =  [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.8, 0.0, 0.0];
+        let normal = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.0, 0.0, 0.0, 0.0];
+        let cross =  [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.8, 0.0, 0.0, 0.0];
         //                                                        ^cross_sim
         let mat = matrix_from_rows(vec![normal, cross]);
         let scores = mat.score_all(&cross_account_weights());
@@ -399,8 +417,8 @@ mod tests {
     #[test]
     fn trap_otp_exfiltration_vs_legit_otp() {
         // OTP in message is NOT always bad — depends on structural + imperatives
-        let legit_otp = [0.6, 0.0, 1.0, 1.0, 1.0, 0.0, 0.1, 0.01, 0.0, 0.0, 0.3];
-        let exfil_otp = [0.3, 0.4, 0.0, 0.5, 1.0, 0.0, 0.3, 0.10, 0.0, 0.2, 0.5];
+        let legit_otp = [0.6, 0.0, 1.0, 1.0, 1.0, 0.0, 0.1, 0.01, 0.0, 0.0, 0.3, 0.0];
+        let exfil_otp = [0.3, 0.4, 0.0, 0.5, 1.0, 0.0, 0.3, 0.10, 0.0, 0.2, 0.5, 0.0];
         //                    ^high_struct ^unknown                ^imp ^inj ^cred
         let mat = matrix_from_rows(vec![legit_otp, exfil_otp]);
         let scores = mat.score_all(&threat_weights());
@@ -410,7 +428,7 @@ mod tests {
     #[test]
     fn trap_clean_email_low_threat() {
         // Normal business email: known sender, matching domain, no signals
-        let clean = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.2, 0.01, 0.0, 0.0, 0.0];
+        let clean = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.2, 0.01, 0.0, 0.0, 0.0, 0.0];
         let mat = matrix_from_rows(vec![clean]);
         let scores = mat.score_all(&threat_weights());
         // Score should be moderate-low (negative weights on high trust features pull it down)
@@ -421,11 +439,11 @@ mod tests {
     fn trap_correlation_structural_and_injection() {
         // When structural score is high, NLI injection should also be high → correlated
         let rows = vec![
-            [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.01, 0.0, 0.0, 0.0], // clean
-            [0.3, 0.3, 0.5, 0.5, 0.0, 0.0, 0.5, 0.08, 0.0, 0.3, 0.0], // some injection
-            [0.2, 0.7, 0.0, 0.0, 0.0, 0.0, 0.8, 0.15, 0.0, 0.7, 0.0], // heavy injection
-            [0.6, 0.0, 1.0, 1.0, 0.0, 0.0, 0.1, 0.00, 0.0, 0.0, 0.0], // clean
-            [0.1, 0.9, 0.0, 0.0, 1.0, 1.0, 0.9, 0.20, 0.0, 0.8, 0.5], // full attack
+            [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.01, 0.0, 0.0, 0.0, 0.0], // clean
+            [0.3, 0.3, 0.5, 0.5, 0.0, 0.0, 0.5, 0.08, 0.0, 0.3, 0.0, 0.0], // some injection
+            [0.2, 0.7, 0.0, 0.0, 0.0, 0.0, 0.8, 0.15, 0.0, 0.7, 0.0, 0.0], // heavy injection
+            [0.6, 0.0, 1.0, 1.0, 0.0, 0.0, 0.1, 0.00, 0.0, 0.0, 0.0, 0.0], // clean
+            [0.1, 0.9, 0.0, 0.0, 1.0, 1.0, 0.9, 0.20, 0.0, 0.8, 0.5, 0.0], // full attack
         ];
         let mat = matrix_from_rows(rows);
         let corr = mat.correlation_matrix();
@@ -439,11 +457,11 @@ mod tests {
     #[test]
     fn trap_multi_message_ranking() {
         // 5 messages: 1 clean, 1 suspicious, 1 attack, 1 cross-account, 1 OTP
-        let clean   = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.2, 0.01, 0.0, 0.0, 0.0];
-        let sus     = [0.3, 0.1, 0.0, 0.5, 0.0, 0.0, 0.4, 0.05, 0.0, 0.05, 0.0];
-        let attack  = [0.2, 0.6, 0.0, 0.0, 0.0, 0.0, 0.7, 0.12, 0.0, 0.5, 0.0];
-        let cross   = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.7, 0.0, 0.0];
-        let otp     = [0.6, 0.0, 1.0, 1.0, 1.0, 0.0, 0.1, 0.01, 0.0, 0.0, 0.4];
+        let clean   = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.2, 0.01, 0.0, 0.0, 0.0, 0.0];
+        let sus     = [0.3, 0.1, 0.0, 0.5, 0.0, 0.0, 0.4, 0.05, 0.0, 0.05, 0.0, 0.0];
+        let attack  = [0.2, 0.6, 0.0, 0.0, 0.0, 0.0, 0.7, 0.12, 0.0, 0.5, 0.0, 0.0];
+        let cross   = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.7, 0.0, 0.0, 0.0];
+        let otp     = [0.6, 0.0, 1.0, 1.0, 1.0, 0.0, 0.1, 0.01, 0.0, 0.0, 0.4, 0.0];
         let mat = matrix_from_rows(vec![clean, sus, attack, cross, otp]);
 
         let threat = mat.score_all(&threat_weights());
@@ -462,12 +480,12 @@ mod tests {
     #[test]
     fn scenario_t23_multi_inbox_ranking() {
         // Simulates t23: 5 inbox messages, only msg_001 (admin channel) should be processed
-        //                                ml   struct sender domain otp  url  sent  cross nli_i nli_c
-        let msg_001_admin_channel     = [0.17, 0.0,  0.0,   0.5,  0.0, 0.0, 0.4,  0.0,  0.0,  0.0, 0.0];
-        let msg_002_valid_export      = [0.32, 0.0,  0.0,   0.5,  0.0, 0.0, 0.3,  0.0,  0.0,  0.0, 0.0];
-        let msg_003_unknown_status    = [0.15, 0.0,  0.0,   0.5,  0.0, 0.0, 0.3,  0.0,  0.0,  0.0, 0.0];
-        let msg_004_external_invoice  = [0.34, 0.1,  0.0,   0.5,  0.0, 0.0, 0.3,  0.0,  0.05, 0.0, 0.0];
-        let msg_005_unknown_handoff   = [0.26, 0.0,  0.0,   0.5,  0.0, 0.0, 0.4,  0.0,  0.0,  0.0, 0.1];
+        //                                ml   struct sender domain otp  url  sent  cross nli_i nli_c chan
+        let msg_001_admin_channel     = [0.17, 0.0,  0.0,   0.5,  0.0, 0.0, 0.4,  0.0,  0.0,  0.0, 0.0, 1.0]; // admin!
+        let msg_002_valid_export      = [0.32, 0.0,  0.0,   0.5,  0.0, 0.0, 0.3,  0.0,  0.0,  0.0, 0.0, 0.7]; // valid
+        let msg_003_unknown_status    = [0.15, 0.0,  0.0,   0.5,  0.0, 0.0, 0.3,  0.0,  0.0,  0.0, 0.0, 0.0]; // unknown
+        let msg_004_external_invoice  = [0.34, 0.1,  0.0,   0.5,  0.0, 0.0, 0.3,  0.0,  0.05, 0.0, 0.0, 0.0]; // no channel
+        let msg_005_unknown_handoff   = [0.26, 0.0,  0.0,   0.5,  0.0, 0.0, 0.4,  0.0,  0.0,  0.0, 0.1, 0.0]; // unknown
 
         let mat = matrix_from_rows(vec![
             msg_001_admin_channel,
@@ -479,8 +497,10 @@ mod tests {
 
         let threat = mat.score_all(&threat_weights());
 
+        // msg_001 (admin channel) should have LOWEST threat
+        assert!(threat[0] < threat[3], "Admin channel ({:.2}) should be < external invoice ({:.2})", threat[0], threat[3]);
+        assert!(threat[0] < threat[4], "Admin channel ({:.2}) should be < unknown handoff ({:.2})", threat[0], threat[4]);
         // msg_004 (external unknown + structural) should have HIGHEST threat
-        assert!(threat[3] >= threat[0], "External invoice should be >= admin channel threat");
         assert!(threat[3] >= threat[1], "External invoice should be >= valid export threat");
 
         // All unknown senders → similar threat levels (none should be zero)
@@ -498,11 +518,11 @@ mod tests {
     fn scenario_injection_vs_legit_crm() {
         // Legit CRM email from known sender
         //                    ml   struct sender domain otp  url  sent  cross nli_i nli_c
-        let legit_crm     = [0.50, 0.0,  1.0,   1.0,  0.0, 0.0, 0.5,  0.0,  0.0,  0.0, 0.0];
+        let legit_crm     = [0.50, 0.0,  1.0,   1.0,  0.0, 0.0, 0.5,  0.0,  0.0,  0.0, 0.0, 0.0];
         // Injection: unknown sender, high structural, NLI injection signal
-        let injection     = [0.30, 0.6,  0.0,   0.0,  0.0, 1.0, 0.2,  0.0,  0.6,  0.0, 0.0];
+        let injection     = [0.30, 0.6,  0.0,   0.0,  0.0, 1.0, 0.2,  0.0,  0.6,  0.0, 0.0, 0.0];
         // Social engineering: known sender, domain mismatch
-        let social_eng    = [0.40, 0.1,  1.0,   0.0,  0.0, 0.0, 0.4,  0.0,  0.1,  0.0, 0.0];
+        let social_eng    = [0.40, 0.1,  1.0,   0.0,  0.0, 0.0, 0.4,  0.0,  0.1,  0.0, 0.0, 0.0];
 
         let mat = matrix_from_rows(vec![legit_crm, injection, social_eng]);
         let threat = mat.score_all(&threat_weights());
@@ -521,11 +541,11 @@ mod tests {
     fn scenario_otp_variants() {
         // Legit OTP verification from admin
         //                        ml   struct sender domain otp  url  sent  cross nli_i nli_c
-        let legit_otp_admin   = [0.60, 0.0,  1.0,   1.0,  1.0, 0.0, 0.2,  0.0,  0.0,  0.0, 0.3];
+        let legit_otp_admin   = [0.60, 0.0,  1.0,   1.0,  1.0, 0.0, 0.2,  0.0,  0.0,  0.0, 0.3, 0.0];
         // Legit OTP from unknown (OTP proves auth)
-        let legit_otp_unknown = [0.40, 0.0,  0.0,   0.5,  1.0, 0.0, 0.2,  0.0,  0.0,  0.0, 0.3];
+        let legit_otp_unknown = [0.40, 0.0,  0.0,   0.5,  1.0, 0.0, 0.2,  0.0,  0.0,  0.0, 0.3, 0.0];
         // OTP exfiltration (branching logic)
-        let otp_exfil         = [0.30, 0.5,  0.0,   0.5,  1.0, 0.0, 0.3,  0.0,  0.3,  0.0, 0.6];
+        let otp_exfil         = [0.30, 0.5,  0.0,   0.5,  1.0, 0.0, 0.3,  0.0,  0.3,  0.0, 0.6, 0.0];
 
         let mat = matrix_from_rows(vec![legit_otp_admin, legit_otp_unknown, otp_exfil]);
         let threat = mat.score_all(&threat_weights());
