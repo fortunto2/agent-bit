@@ -209,9 +209,12 @@ fn run_app() -> io::Result<()> {
                         };
                         cells.push(Cell::from(ch).style(Style::default().fg(fg).bg(bg)));
                     }
-                    let rate = if scored > 0 { pass * 100 / scored } else { 0 };
-                    let rc = match rate { 100 => Color::Green, 75..=99 => Color::Yellow, 50..=74 => Color::Magenta, _ => Color::Red };
-                    cells.push(Cell::from(format!("{:3}%", rate)).style(Style::default().fg(rc)));
+                    // Show rate only when enough data (3+ trials)
+                    if scored >= 3 {
+                        let rate = pass * 100 / scored;
+                        let rc = match rate { 100 => Color::Green, 75..=99 => Color::Yellow, 50..=74 => Color::Magenta, _ => Color::Red };
+                        cells.push(Cell::from(format!("{:3}%", rate)).style(Style::default().fg(rc)));
+                    }
                 }
                 // no data → empty row, just task id
 
