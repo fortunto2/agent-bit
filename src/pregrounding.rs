@@ -904,22 +904,56 @@ pub(crate) async fn run_agent(
         if instr_lower.contains("capture") || instr_lower.contains("distill") {
                 // Resolve capture folder from instruction using fuzzy match against tree
                 let capture_target = resolve_capture_folder(&ready.instruction, &tree_out);
+                // Pre-build write payloads: inject inbox content + target paths
+                // Agent has everything it needs — just call write(), no re-read needed
                 let msg = if let Some((source, capture_path, card_path)) = capture_target {
-                    format!(
-                        "CAPTURE-DISTILL paths resolved:\n\
-                         write(\"{}\") → write(\"{}\") → update thread in 02_distill/threads/ → delete(\"{}\") → answer(OK)\n\
-                         Thread update REQUIRED (read 02_distill/AGENTS.md for rules).",
-                        capture_path, card_path, source
-                    )
+                    // Find source file content from pre-loaded inbox
+                    let source_content = ready.inbox_files.iter()
+                        .find(|f| source.contains(&f.path) || f.path.contains(&source))
+                        .map(|f| {
+                            // Strip PCM header "$ cat ..."
+                            let body = if f.content.starts_with("$ ") {
+                                f.content.find('\n').map(|i| &f.content[i+1..]).unwrap_or(&f.content)
+                            } else {
+                                &f.content
+                            };
+                            body.to_string()
+                        });
+
+                    if let Some(ref content) = source_content {
+                        let preview = &content[..content.len().min(200)];
+                        format!(
+                            "CAPTURE-DISTILL — READY TO EXECUTE (do NOT re-read, content is below):\n\
+                             \n\
+                             STEP 1: write(\"{}\", content=<INBOX CONTENT BELOW>)\n\
+                             STEP 2: write(\"{}\", content=<CARD from template + content below>)\n\
+                             STEP 3: read + update thread in 02_distill/threads/\n\
+                             STEP 4: delete(\"{}\")\n\
+                             STEP 5: answer(OUTCOME_OK)\n\
+                             \n\
+                             === INBOX CONTENT (use this for write, do NOT re-read) ===\n\
+                             {}\n\
+                             === END CONTENT ===\n\
+                             \n\
+                             You have the content. Call write() NOW. Do NOT call read() on the inbox file.",
+                            capture_path, card_path, source, preview
+                        )
+                    } else {
+                        format!(
+                            "CAPTURE-DISTILL paths resolved:\n\
+                             write(\"{}\") → write(\"{}\") → update thread → delete(\"{}\") → answer(OK)\n\
+                             Content is ALREADY in context above — use it directly.",
+                            capture_path, card_path, source
+                        )
+                    }
                 } else {
                     "CAPTURE-DISTILL WORKFLOW:\n\
-                     1. READ inbox file (already loaded above — use it)\n\
+                     1. Inbox content is ALREADY in context above — use it directly\n\
                      2. WRITE to capture folder (01_capture/{folder}/{same filename})\n\
                      3. WRITE distill card to 02_distill/cards/{same filename}\n\
                      4. DELETE original inbox file\n\
                      5. answer(OUTCOME_OK)\n\
-                     WRONG: read → delete → answer (you SKIPPED writes!)\n\
-                     Write BEFORE deleting.".to_string()
+                     Do NOT re-read inbox — content is above. Write IMMEDIATELY.".to_string()
                 };
                 messages.push(Message::user(&msg));
         } else if has_otp {
