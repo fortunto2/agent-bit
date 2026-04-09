@@ -275,25 +275,19 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         tools: &ToolRegistry,
         previous_response_id: Option<&str>,
     ) -> Result<(Decision, Option<String>), AgentError> {
-        // Prepare messages with plan compression:
-        // Keep system prompt + pre-grounding (first N user messages) + last 6 messages (rolling window)
-        // Action ledger (injected below) carries compressed full history
+        // Prepare messages — trim if context too large (keep pre-grounding head + recent tail)
+        // Similar to sgr-agent Compactor but without extra LLM call (zero latency)
         let mut msgs = Vec::with_capacity(messages.len() + 1);
         let has_system = messages.iter().any(|m| m.role == Role::System);
         if !has_system && !self.system_prompt.is_empty() {
             msgs.push(Message::system(&self.system_prompt));
         }
-        // Context window management: if too many messages, keep head (pre-grounding) + tail (recent)
-        let max_context_msgs = 40;
-        if messages.len() > max_context_msgs {
-            // Keep first 20 (system + pre-grounding + inbox) and last 20 (recent actions)
-            let head = 20;
-            let tail = max_context_msgs - head;
+        let max_msgs = 40; // ~8K tokens for Nemotron context
+        if messages.len() > max_msgs {
+            let head = max_msgs / 2;
+            let tail = max_msgs - head;
             msgs.extend_from_slice(&messages[..head]);
-            msgs.push(Message::user(&format!(
-                "[{} intermediate messages compressed — see action ledger below for full history]",
-                messages.len() - max_context_msgs
-            )));
+            msgs.push(Message::user("[... earlier steps compressed into action ledger below ...]"));
             msgs.extend_from_slice(&messages[messages.len() - tail..]);
         } else {
             msgs.extend_from_slice(messages);
