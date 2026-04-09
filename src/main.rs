@@ -106,7 +106,11 @@ async fn main() -> Result<()> {
 
     let cfg = config::Config::load(&cli.config)?;
     let provider_name = cli.provider.as_deref().unwrap_or(&cfg.llm.provider);
-    let (model, base_url, llm_api_key, extra_headers, prompt_mode, temperature, planning_temperature, sgr_mode) = cfg.resolve_provider(provider_name)?;
+    let (model, base_url, llm_api_key, extra_headers, prompt_mode, temperature, planning_temperature, sgr_mode, reasoning_effort) = cfg.resolve_provider(provider_name)?;
+    // Set reasoning_effort as env var for pregrounding::make_llm_config
+    if let Some(ref effort) = reasoning_effort {
+        unsafe { std::env::set_var("LLM_REASONING_EFFORT", effort); }
+    }
     if sgr_mode {
         eprintln!("[pac1] SGR mode: pure (single LLM call per step)");
     }

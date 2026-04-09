@@ -71,9 +71,8 @@ base_url = "https://api.deepinfra.com/v1/openai"
 api_key = "REDACTED_DEEPINFRA_KEY"
 temperature = 0.1
 planning_temperature = 0.2
-# Nemotron Super needs reasoning_effort=none for function calling
-# TODO: add reasoning_effort support to oxide client
-# Workaround: use tool_choice=required in agent config
+reasoning_effort = "none"  # Required for FC on reasoning models
+use_chat_api = true        # DeepInfra doesn't support Responses API
 
 [providers.nemotron-v2]
 model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"

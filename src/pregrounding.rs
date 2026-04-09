@@ -275,6 +275,7 @@ pub(crate) fn make_llm_config(
         let mut cfg = LlmConfig::endpoint(api_key, url, model).temperature(temperature as f64).max_tokens(4096);
         cfg.use_chat_api = true;
         cfg.extra_headers = extra_headers.to_vec();
+        cfg.reasoning_effort = std::env::var("LLM_REASONING_EFFORT").ok();
         cfg
     } else if !api_key.is_empty() {
         let mut cfg = LlmConfig::with_key(api_key, model).temperature(temperature as f64).max_tokens(4096);
