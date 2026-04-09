@@ -33,7 +33,9 @@ src/hooks.rs         -- HookRegistry: data-driven tool completion hooks from AGE
 src/policy.rs        -- File access policy: structural guards for protected paths
 src/config.rs        -- Provider config with prompt_mode, temperature, sgr_mode
 src/classifier.rs    -- ONNX classifier (security + intent) + NliClassifier (NLI zero-shot) + OutcomeValidator (adaptive kNN)
-src/crm_graph.rs     -- petgraph CRM knowledge graph (contacts, accounts, sender trust)
+src/crm_graph.rs     -- petgraph CRM knowledge graph (contacts, accounts, sender trust, ONNX embeddings)
+src/feature_matrix.rs -- 12-feature inbox scoring: sigmoid(features × weights), ridge regression calibration
+src/dashboard.rs     -- TUI dashboard (ratatui): heatmap + log viewer (cargo run --bin pac1-dash)
 ```
 
 Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep).
@@ -140,16 +142,42 @@ WORKFLOW:
 ### Architecture Decision Guide
 
 Before ANY fix, check these in order:
-1. **policy.rs** — authorization/protection? → Add to policy
+1. **policy.rs** — authorization/protection? → Add to policy (`is_word_match` for path guards)
 2. **hooks.rs** — "what next" guidance? → Add a hook
-3. **workflow.rs** — "when allowed" guard? → Add phase/guard
-4. **crm_graph.rs** — sender/contact trust? → Use graph
-5. **pipeline.rs** — pre-LLM classification? → Add signal
-6. **classifier.rs** — content classification? → Use ONNX
-7. **skills/** — LLM workflow guidance? → Edit skill .md file (hot-reload, no rebuild)
-8. **prompts.rs** — system prompt / decision tree → LAST resort
+3. **workflow.rs** — "when allowed" guard? → Add phase/guard (outbox limit, delete control)
+4. **feature_matrix.rs** — scoring/ranking decision? → Adjust weights or add feature
+5. **crm_graph.rs** — sender/contact/account trust? → Use graph + ONNX embeddings
+6. **pipeline.rs** — pre-LLM classification or pre-execution? → Add signal or pre-execute step
+7. **classifier.rs** — content classification? → Use ONNX (retrain via scripts/export_model.py)
+8. **skills/** — LLM workflow guidance? → Edit skill .md file (hot-reload, no rebuild)
+9. **prompts.rs** — system prompt / decision tree → LAST resort
 
 **Step 7 checklist**: when fixing LLM behavior, FIRST check if the right skill is selected (grep `🎯 Skill:` in logs). If wrong skill → adjust triggers/keywords. If right skill but wrong behavior → edit the skill's SKILL.md file. Adding a rule to a skill is less invasive than editing the system prompt decision tree.
+
+### Feature Matrix (src/feature_matrix.rs) — Batch Inbox Scoring
+
+12-feature vector per inbox message → sigmoid scoring → threat probability.
+Inspired by video-analyzer FeatureMatrix pattern.
+
+**Features:** ml_confidence, structural_score, sender_trust, domain_match, has_otp, has_url,
+word_count_norm, sentence_length, cross_account_sim, nli_injection, nli_credential, channel_trust.
+
+**Scoring:** `sigmoid(features × weights + bias)` → P(threat) ∈ (0,1).
+- `threat_weights()` — hand-tuned preset, validated by ridge regression (R²=0.999)
+- `cross_account_weights()` — cross-account detection preset
+- `calibrate_ridge()` — learn optimal weights from labeled data (Gauss-Seidel solver)
+
+**Pipeline integration:**
+- Computed after inbox scan, before agent execution
+- Threat scores injected in `[CLASSIFICATION]` header: `threat: HIGH (75%)`
+- **Decision gate:** `sigmoid < 0.5` = safe (P(safe) > P(threat)) — used for capture pre-execute
+- Correlation matrix available for feature importance analysis
+
+**CRM Graph embeddings** (crm_graph.rs):
+- `compute_account_embeddings()` — L2-normalized MiniLM per account signature
+- `similarity_scores(query)` — batch cosine similarity via dot product
+- `detect_cross_account()` — comparative: other_sim > sender_sim + 0.1 gap
+- `is_word_match()` — path-boundary protected file matcher (no substring false positives)
 
 ### Prompt Modes (src/prompts.rs)
 
