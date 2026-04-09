@@ -5,7 +5,7 @@
 
 use std::{io, collections::HashMap};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{self, Event, KeyCode, KeyModifiers, MouseEventKind, EnableMouseCapture, DisableMouseCapture},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     execute,
 };
@@ -124,7 +124,7 @@ fn colorize(line: &str) -> Style {
 fn run_app() -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let mut table_state = TableState::default();
@@ -254,7 +254,17 @@ fn run_app() -> io::Result<()> {
         })?;
 
         if event::poll(std::time::Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
+            let ev = event::read()?;
+            // Mouse scroll → log scroll
+            if let Event::Mouse(mouse) = &ev {
+                let max_scroll = log_total.saturating_sub(5);
+                match mouse.kind {
+                    MouseEventKind::ScrollDown => { log_scroll = (log_scroll + 3).min(max_scroll); }
+                    MouseEventKind::ScrollUp => { log_scroll = log_scroll.saturating_sub(3); }
+                    _ => {}
+                }
+            }
+            if let Event::Key(key) = ev {
                 let max_scroll = log_total.saturating_sub(5);
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
@@ -297,7 +307,7 @@ fn run_app() -> io::Result<()> {
     }
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     Ok(())
 }
 
