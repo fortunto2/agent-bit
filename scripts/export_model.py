@@ -84,7 +84,7 @@ INTENT_CLASSES = {
         "Remove all captured cards and threads from the distill folder",
         "Discard thread entirely, don't touch anything else",
         "Let's start over. Remove all captured cards and threads",
-        "Delete the file from inbox after processing",
+        # NOT: "Delete the file from inbox after processing" — that's capture workflow (intent_inbox)
         "Remove the contact record from the database",
         "Clean up old files and discard outdated entries",
         "Drop the duplicate account entry",
@@ -96,8 +96,7 @@ INTENT_CLASSES = {
         "Fix the purchase ID prefix regression and do cleanup",
         "Move the file to the outbox directory",
         "Modify the contact record with new phone number",
-        "Capture this snippet into a card",
-        "Distill the inbox article into a thread summary",
+        # NOT: "Capture" / "Distill" — moved to intent_inbox
     ],
     "intent_query": [
         "What is the email address of Heinrich Alina?",
@@ -125,6 +124,11 @@ INTENT_CLASSES = {
         "Review and process inbox queue",
         "Process the inbox queue",
         "Check the inbox and process messages",
+        "Capture this snippet into a card",
+        "Distill the inbox article into a thread summary",
+        "Take from inbox, capture it, distill, and delete the inbox file when done",
+        "Capture it into influential folder and delete the inbox file",
+        "Delete the inbox file after capturing and distilling",
     ],
     "intent_email": [
         "Send email to Blue Harbor Bank with subject Security review",
