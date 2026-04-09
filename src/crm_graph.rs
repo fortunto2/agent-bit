@@ -47,6 +47,20 @@ impl std::fmt::Display for SenderTrust {
 
 // ─── CRM Knowledge Graph ────────────────────────────────────────────────────
 
+/// Check if any significant word from account name appears in text (word-boundary safe).
+/// "Acme Logistics" in "invoice for the Acme brand" → true ("Acme" at word boundary)
+/// "AI" in "email to AI labs" → false (too short, < 4 chars)
+fn account_name_in_text(account_lower: &str, text_lower: &str) -> bool {
+    account_lower.split_whitespace()
+        .filter(|w| w.len() >= 4) // skip short words (AI, IT, US — too ambiguous)
+        .any(|word| {
+            // Word-boundary match: preceded by space, /, newline, or at start
+            text_lower.find(word).map_or(false, |pos| {
+                pos == 0 || !text_lower.as_bytes()[pos - 1].is_ascii_alphanumeric()
+            })
+        })
+}
+
 pub struct CrmGraph {
     graph: Graph<Node, Edge>,
     /// email (lowercase) → NodeIndex of Contact
@@ -615,19 +629,9 @@ impl CrmGraph {
         if let Some((other_name, other_sim)) = best_other {
             eprintln!("  📊 Cross-check: sender '{}' sim={:.3}, best other '{}' sim={:.3}",
                 sender_account, sender_sim, other_name, other_sim);
-            // Cross-account detection (two paths):
-            // 1. Embedding gap > 0.1: clear semantic difference
-            // 2. Account name appears in body but sender is different account:
-            //    "Acme" in body + sender=Helios → cross-account even with small gap
+            // Cross-account: embedding gap OR account name word-match in body
             let gap = *other_sim - sender_sim;
-            let name_in_body = {
-                let body_lower = body.to_lowercase();
-                let other_lower = other_name.to_lowercase();
-                // Check if first significant word of account name appears in body
-                other_lower.split_whitespace()
-                    .find(|w| w.len() > 3)
-                    .map_or(false, |word| body_lower.contains(word))
-            };
+            let name_in_body = account_name_in_text(&other_name.to_lowercase(), &body.to_lowercase());
             if *other_sim > 0.3 && (gap > 0.1 || (gap > 0.0 && name_in_body)) {
                 return Some((other_name.clone(), *other_sim));
             }
@@ -1083,6 +1087,26 @@ mod tests {
         // "target" in body (>3 chars) → name_in_body = true
         assert!(body_lower.contains("target"), "Target should appear in body");
         // gap = 0 but name_in_body → should detect (gap > 0.0 && name_in_body)
+    }
+
+    #[test]
+    #[test]
+    fn account_name_match_word_boundary() {
+        // Matches
+        assert!(account_name_in_text("acme logistics", "invoice for the acme brand"));
+        assert!(account_name_in_text("helios tax group", "send to helios division"));
+        assert!(account_name_in_text("greengrid energy", "the greengrid account"));
+        assert!(account_name_in_text("northstar forecasting", "data from northstar"));
+
+        // No match — short words skipped
+        assert!(!account_name_in_text("ai labs", "send email to someone"));  // "ai" too short
+        assert!(!account_name_in_text("us corp", "update us on status"));     // "us" too short
+
+        // No match — substring within another word
+        assert!(!account_name_in_text("acme logistics", "the macmechanics invoice")); // "acme" inside "macme..."
+
+        // Match at start
+        assert!(account_name_in_text("acme logistics", "acme is the target"));
     }
 
     #[test]
