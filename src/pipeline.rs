@@ -47,6 +47,8 @@ pub struct SecurityAssessment {
     pub structural: f32,
     pub sender: Option<SenderAssessment>,
     pub recommendation: String,
+    /// NLI scores per label (if NLI classifier was available).
+    pub nli_scores: Option<Vec<(String, f32)>>,
 }
 
 // ── Inbox File Assessment ───────────────────────────────────────────────
@@ -417,7 +419,7 @@ pub fn assess_security(
         SecurityAssessment {
             blocked: Some(BlockReason { outcome, message: message.clone(), stage }),
             ml_label: ml_label.clone(), ml_conf, structural, sender: Some(sender.clone()),
-            recommendation: message,
+            recommendation: message, nli_scores: None,
         }
     };
 
@@ -467,7 +469,7 @@ pub fn assess_security(
     SecurityAssessment {
         blocked: None,
         ml_label, ml_conf, structural, sender: Some(sender.clone()),
-        recommendation,
+        recommendation, nli_scores: None,
     }
 }
 
@@ -590,7 +592,7 @@ mod tests {
                 security: SecurityAssessment {
                     blocked: None,
                     ml_label: "crm".into(), ml_conf: 0.5, structural: 0.0, sender: None,
-                    recommendation: "Process normally.".into(),
+                    recommendation: "Process normally.".into(), nli_scores: None,
                 },
             }],
             crm_graph: CrmGraph::empty(),
@@ -615,7 +617,7 @@ mod tests {
                         stage: "security",
                     }),
                     ml_label: "injection".into(), ml_conf: 0.9, structural: 0.3, sender: None,
-                    recommendation: "injection".into(),
+                    recommendation: "injection".into(), nli_scores: None,
                 },
             }],
             crm_graph: CrmGraph::empty(),

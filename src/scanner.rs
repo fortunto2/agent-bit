@@ -156,6 +156,19 @@ pub(crate) fn extract_company_ref(text: &str) -> Option<String> {
     None
 }
 
+/// Fraction of imperative-style verbs in text (feature for threat scoring).
+pub(crate) fn imperative_ratio(text: &str) -> f32 {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() { return 0.0; }
+    let imperatives = ["send", "forward", "delete", "remove", "ignore", "override",
+        "bypass", "upload", "download", "execute", "run", "apply", "update",
+        "replace", "overwrite", "install", "deploy", "export", "relay"];
+    let count = words.iter()
+        .filter(|w| imperatives.iter().any(|imp| w.to_lowercase().starts_with(imp)))
+        .count();
+    count as f32 / words.len() as f32
+}
+
 // AI-NOTE: Cross-account paraphrase detection uses ONNX embeddings in crm_graph.rs.
 // CrmGraph::detect_cross_account() encodes inbox body + account signatures via MiniLM,
 // computes cosine similarity, and finds the best-matching non-sender account.

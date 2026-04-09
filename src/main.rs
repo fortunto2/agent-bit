@@ -36,6 +36,7 @@ mod prompts;
 mod scanner;
 #[allow(dead_code)]
 mod pac1_sgr;
+mod feature_matrix;
 mod skills;
 mod tools;
 mod workflow;
