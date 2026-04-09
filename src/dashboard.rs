@@ -41,18 +41,28 @@ fn parse_log_md_runs() -> Vec<RunData> {
             let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
             if cols.len() >= 6 {
                 let date = cols[1]; // "04-09"
-                let day = date.split('-').last().unwrap_or(date).trim_start_matches('0');
-                let score_pct = cols[4].split('(').next().unwrap_or("").trim();
+                let score_str = cols[4]; // "90.7% (39/43)"
+                // Extract total tasks from score: "90.7% (39/43)" → 43
+                let total_tasks: usize = score_str
+                    .split('/').last()
+                    .and_then(|s| s.trim_end_matches(')').trim().parse().ok())
+                    .unwrap_or(43);
                 let failures_str = cols[5];
                 let failures: Vec<&str> = failures_str.split(", ")
                     .filter(|s| s.starts_with('t'))
                     .map(|s| s.split_whitespace().next().unwrap_or(s))
                     .collect();
                 let mut tasks = HashMap::new();
-                for tid in TASK_IDS {
-                    tasks.insert(tid.to_string(), if failures.contains(tid) { 0.0 } else { 1.0 });
+                for (i, tid) in TASK_IDS.iter().enumerate() {
+                    // Only include tasks that existed in this run
+                    if i < total_tasks {
+                        tasks.insert(tid.to_string(), if failures.contains(tid) { 0.0 } else { 1.0 });
+                    }
+                    // else: no entry → will show as · (no data)
                 }
-                runs.push(RunData { label: format!("{}·{}", day, score_pct), tasks });
+                // Label: "4/9 90%" — compact date + score
+                let score_short = score_str.split('%').next().unwrap_or("?").trim();
+                runs.push(RunData { label: format!("{} {}%", date, score_short), tasks });
             }
         }
     }
@@ -232,13 +242,14 @@ fn run_app() -> io::Result<()> {
 
             let mut hdr = vec![Cell::from("").style(Style::default())];
             for (i, run) in visible.iter().enumerate() {
-                let lbl: String = run.label.chars().take(4).collect();
+                // Show just date part (MM-DD) truncated to fit column
+                let date_part: String = run.label.split_whitespace().next().unwrap_or("?").to_string();
                 let style = if start + i == col_select {
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
-                hdr.push(Cell::from(lbl.to_string()).style(style));
+                hdr.push(Cell::from(date_part).style(style));
             }
             hdr.push(Cell::from("%").style(Style::default().fg(Color::DarkGray)));
 
