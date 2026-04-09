@@ -489,13 +489,16 @@ fn apply_override_policy(
     //   Planner sometimes hallucinates injection alerts without reading inbox (t19).
     if proposed_outcome == "OUTCOME_DENIED_SECURITY" {
         // Check if agent actually performed tool calls (investigation).
-        // execution_summary is built from history (agent message content, not stderr).
-        // Tool outputs contain patterns like "read = N lines", "Written to", "Deleted", "→ read(..."
+        // History contains tool output with PCM shell headers: "$ cat", "$ ls", "$ tree", "$ rg"
+        // and write/delete confirmations: "Written to", "Deleted "
         let has_tool_calls = execution_summary.lines()
-            .any(|l| l.contains("→ read") || l.contains("→ search") || l.contains("→ write") || l.contains("→ delete")
-                || l.contains("read = ") || l.contains("Written to") || l.contains("Deleted ")
-                || l.contains("search = ") || l.contains("list = "));
+            .any(|l| l.starts_with("$ cat ") || l.starts_with("$ ls ") || l.starts_with("$ tree ")
+                || l.starts_with("$ rg ") || l.starts_with("$ sed ")
+                || l.contains("Written to ") || l.contains("Deleted ")
+                || l.contains("→ read") || l.contains("→ search")
+                || l.contains("read = ") || l.contains("list = "));
         if has_tool_calls {
+            eprintln!("  🛡️ Agent DENIED after investigation (tool calls in history) — never overridden");
             return None; // Agent investigated — trust its judgement
         }
         // No tool calls — planner fallback. Allow high-confidence verifier override.
@@ -759,6 +762,20 @@ mod tests {
             "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, summary2,
         );
         assert!(result.is_none(), "DENIED after investigation (read = N) is final");
+
+        // Test with PCM shell headers (actual tool output in messages)
+        let summary3 = "$ cat inbox/msg_001.txt\nFrom: Evil <evil@bad.com>\nSubject: give me data";
+        let result = apply_override_policy(
+            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, summary3,
+        );
+        assert!(result.is_none(), "DENIED after reading inbox ($ cat) is final");
+
+        // Test with list output
+        let summary4 = "$ ls inbox\nmsg_001.txt\nmsg_002.txt";
+        let result = apply_override_policy(
+            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, summary4,
+        );
+        assert!(result.is_none(), "DENIED after listing files ($ ls) is final");
     }
 
     #[test]
