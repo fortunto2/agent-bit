@@ -355,6 +355,7 @@ async fn run_leaderboard(
         let _ = std::fs::create_dir_all(&dump_dir);
         let log_url = format!("https://{}.eu.bitgn.com", trial.trial_id);
         let _ = std::fs::write(format!("{}/bitgn_log.url", dump_dir), format!("{}\n", log_url));
+        let _ = std::fs::write(format!("{}/instruction.txt", dump_dir), &trial.instruction);
         // SAFETY: env var for child code in pregrounding dump
         unsafe { std::env::set_var("DUMP_TRIAL", &dump_dir); }
 
