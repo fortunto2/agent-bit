@@ -247,6 +247,16 @@ impl New {
             }
         };
 
+        // Question-word override: "What is the email of..." is a query, not an email task
+        let first_word = self.instruction.split_whitespace().next().unwrap_or("").to_lowercase();
+        let is_question = matches!(first_word.as_str(), "what" | "who" | "which" | "how" | "where" | "when" | "list" | "return" | "find" | "look" | "show");
+        let intent = if is_question && intent != "intent_query" && intent != "intent_delete" {
+            eprintln!("  [STAGE:classify] ↳ question-word override: {} → intent_query", intent);
+            "intent_query".to_string()
+        } else {
+            intent
+        };
+
         Ok(Classified {
             instruction: self.instruction,
             intent,
