@@ -140,10 +140,7 @@ fn run_app() -> io::Result<()> {
     loop {
         let sel = table_state.selected().unwrap_or(0);
         let task_id = TASK_IDS[sel];
-        let cache_key = (task_id.to_string(), trial_select);
-        let log_content = log_cache.entry(cache_key)
-            .or_insert_with(|| render_trial(task_id, trial_select, &data))
-            .clone();
+        let log_content = render_trial(task_id, trial_select, &data);
         let log_total = log_content.lines().count();
 
         terminal.draw(|f| {
