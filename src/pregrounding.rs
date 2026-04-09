@@ -149,6 +149,54 @@ pub(crate) fn resolve_contact_hints(
 // read_inbox_files() removed — pipeline::Classified::scan_inbox() reads and classifies
 // inbox files in a single pass. Content reused from pipeline::Ready::inbox_files.
 
+/// Quick LLM intent classification — 1 function call when ML confidence is low.
+/// Returns None on error (structural fallback handles it).
+async fn classify_intent_via_llm(
+    instruction: &str,
+    model: &str,
+    base_url: Option<&str>,
+    api_key: &str,
+    extra_headers: &[(String, String)],
+    temperature: f32,
+) -> Option<String> {
+    use sgr_agent::tool::ToolDef;
+
+    let cfg = make_llm_config(model, base_url, api_key, extra_headers, temperature);
+    let llm = Llm::new(&cfg);
+
+    let td = ToolDef {
+        name: "classify".to_string(),
+        description: "Classify the task intent".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "intent": {
+                    "type": "string",
+                    "enum": ["intent_inbox", "intent_email", "intent_delete", "intent_query", "intent_edit"],
+                    "description": "inbox=process/review inbox messages, email=send/write email, delete=remove files, query=lookup/count data, edit=update/create/capture files"
+                }
+            },
+            "required": ["intent"]
+        }),
+    };
+
+    let messages = vec![
+        Message::system("Classify this CRM task instruction into one intent. Just call classify()."),
+        Message::user(instruction),
+    ];
+
+    match llm.tools_call_stateful(&messages, &[td], None).await {
+        Ok((calls, _)) if !calls.is_empty() => {
+            calls[0].arguments.get("intent").and_then(|v| v.as_str()).map(|s| s.to_string())
+        }
+        Ok(_) => None,
+        Err(e) => {
+            eprintln!("  ⚠ LLM intent classify failed: {}", e);
+            None
+        }
+    }
+}
+
 /// Run a planning phase: read-only exploration → structured Plan.
 /// Returns None if planning fails or model doesn't call submit_plan.
 pub(crate) async fn run_planning_phase(
@@ -477,13 +525,22 @@ pub(crate) async fn run_agent(
     // ── Pipeline Stage 4: Ready ─────────────────────────────────────
     let mut ready = checked.ready();
 
-    // Low-confidence intent fallback: if classifier unsure AND structural signals available,
-    // override intent using PCM state (inbox_files count) instead of trusting bad ML prediction.
-    // This handles NEW instruction variants the classifier hasn't seen yet.
-    if intent_confidence < 0.30 && !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" {
-        eprintln!("  ↳ Low-confidence intent fallback: {} ({:.2}) → intent_inbox (inbox_files={})",
-            ready.intent, intent_confidence, ready.inbox_files.len());
-        ready.intent = "intent_inbox".to_string();
+    // Low-confidence intent: ML unsure → ask LLM → structural fallback
+    if intent_confidence < 0.30 {
+        // Layer 2: quick LLM classify (1 function call)
+        let llm_intent = classify_intent_via_llm(
+            instruction, model, base_url, api_key, extra_headers, temperature,
+        ).await;
+
+        if let Some(ref llm_label) = llm_intent {
+            eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, llm_label);
+            ready.intent = llm_label.clone();
+        } else if !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" {
+            // Layer 3: structural fallback (inbox files exist → inbox task)
+            eprintln!("  ↳ Structural intent fallback: {} ({:.2}) → intent_inbox (inbox_files={})",
+                ready.intent, intent_confidence, ready.inbox_files.len());
+            ready.intent = "intent_inbox".to_string();
+        }
     }
 
     // Dump trial data for offline analysis (when DUMP_TRIAL dir is set)
