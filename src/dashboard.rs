@@ -166,7 +166,7 @@ fn run_app() -> io::Result<()> {
                     Span::styled(format!("{}/{} tasks ", tasks_with_data, TASK_IDS.len()), Style::default().fg(Color::White)),
                     Span::styled(format!("{}% pass ", pass_rate), Style::default().fg(if pass_rate > 90 { Color::Green } else { Color::Yellow })),
                     Span::styled(format!("({}/{}) ", total_pass, total_scored), Style::default().fg(Color::DarkGray)),
-                    Span::styled("↑↓=task ←→=trial d/u=scroll q=quit", Style::default().fg(Color::DarkGray)),
+                    Span::styled("↑↓←→ Space o=open q=quit", Style::default().fg(Color::DarkGray)),
                 ]),
             ]);
             f.render_widget(header, left[0]);
@@ -268,6 +268,16 @@ fn run_app() -> io::Result<()> {
                 let max_scroll = log_total.saturating_sub(5);
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
+                    // o = open BitGN URL in browser
+                    KeyCode::Char('o') => {
+                        if let Some(td) = data.get(task_id) {
+                            let idx = trial_select.min(td.trials.len().saturating_sub(1));
+                            let dir = format!("benchmarks/tasks/{}/{}", task_id, td.trials[idx].trial_id);
+                            if let Ok(url) = std::fs::read_to_string(format!("{}/bitgn_log.url", dir)) {
+                                let _ = std::process::Command::new("open").arg(url.trim()).spawn();
+                            }
+                        }
+                    }
                     // Space = scroll down one page
                     KeyCode::Char(' ') => { log_scroll = (log_scroll + 30).min(max_scroll); }
                     // d/u ALWAYS scroll log
