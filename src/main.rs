@@ -352,10 +352,26 @@ async fn run_leaderboard(
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
         let (last_msg, history, tool_calls) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
-        verify_and_submit(
+
+        // Self-consistency retry: if verifier disagrees, re-run agent with different temperature
+        let should_retry = check_verifier_agreement(
             &pcm, &trial.instruction, &last_msg, &history, tool_calls,
             model, base_url, llm_api_key, extra_headers, temperature,
         ).await;
+
+        if should_retry {
+            eprintln!("  🔄 Self-consistency retry: verifier disagrees, re-running with temp={:.2}", temperature + 0.1);
+            let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
+            let retry_temp = temperature + 0.1;
+            let (last_msg2, history2, tool_calls2) = run_trial(&pcm2, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
+            verify_and_submit(
+                &pcm2, &trial.instruction, &last_msg2, &history2, tool_calls2,
+                model, base_url, llm_api_key, extra_headers, retry_temp,
+            ).await;
+        } else {
+            // First attempt accepted — submit
+            let _ = pcm.submit_proposed(None).await;
+        }
 
         let result = harness.end_trial(&trial.trial_id).await?;
         if let Some(score) = result.score {
@@ -405,6 +421,49 @@ async fn run_trial(
             (String::new(), String::new(), 0)
         }
     }
+}
+
+/// Check if verifier agrees with proposed answer (without submitting).
+/// Returns true if retry recommended (verifier disagrees with high confidence).
+#[allow(clippy::too_many_arguments)]
+async fn check_verifier_agreement(
+    pcm: &Arc<pcm::PcmClient>,
+    instruction: &str,
+    _last_msg: &str,
+    history: &str,
+    tool_call_count: usize,
+    model: &str,
+    base_url: Option<&str>,
+    api_key: &str,
+    extra_headers: &[(String, String)],
+    temperature: f32,
+) -> bool {
+    let execution_summary = pregrounding::build_execution_summary(history, 15);
+    let proposed = pcm.get_proposed_answer();
+    let Some(ref p) = proposed else { return false };
+
+    let verified = pregrounding::run_outcome_verifier(
+        model, base_url, api_key, extra_headers, temperature,
+        instruction, &execution_summary, &p.outcome, &p.message,
+    ).await;
+
+    let Some(ref v) = verified else { return false };
+
+    // If override policy would change outcome → retry instead
+    if let Some(_) = apply_override_policy(&p.outcome, &v.outcome, v.confidence, tool_call_count) {
+        eprintln!("  🔍 Verifier wants override {} → {} (conf={:.2}) — will retry",
+            p.outcome, v.outcome, v.confidence);
+        return true;
+    }
+
+    // If verifier disagrees with high confidence → retry
+    if v.outcome != p.outcome && v.confidence >= 0.85 {
+        eprintln!("  🔍 Verifier disagrees: {} vs {} (conf={:.2}) — will retry",
+            p.outcome, v.outcome, v.confidence);
+        return true;
+    }
+
+    false
 }
 
 /// Post-execution verification and submission.

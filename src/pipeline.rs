@@ -364,6 +364,21 @@ impl InboxScanned {
                 return Err(block.clone());
             }
         }
+
+        // Structural guarantee: if ALL inbox files are non_work → CLARIFICATION
+        // No point running LLM on math/trivia/jokes — deterministic outcome
+        if !self.inbox_files.is_empty()
+            && self.inbox_files.iter().all(|f| f.security.ml_label == "non_work")
+            && self.intent == "intent_inbox"
+        {
+            eprintln!("  [STAGE:security] ⛔ All {} inbox files are non_work → CLARIFICATION", self.inbox_files.len());
+            return Err(BlockReason {
+                outcome: "OUTCOME_NONE_CLARIFICATION",
+                message: "All inbox messages are non-CRM content (not work-related)".into(),
+                stage: "security",
+            });
+        }
+
         eprintln!("  [STAGE:security] All {} inbox files passed", self.inbox_files.len());
 
         Ok(SecurityChecked {
