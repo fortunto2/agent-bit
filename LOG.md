@@ -301,6 +301,20 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF
 **Run 7:** 86.0% (37/43) — skills v1
 **Run 8:** 90.7% (39/43) — all fixes applied
 
+#### Code quality pass
+- Removed keyword hack `inbox-word override` → retrained ML classifier (7 new intent_inbox examples)
+- Removed keyword hack `imperative_ratio` word list → replaced with `sentence_length` + NLI features
+- Removed keyword hack `extract_company_ref` extra patterns → ONNX semantic similarity
+- Verified: zero hardcoded keyword lists in domain logic
+- All detection: ML (ONNX MiniLM + DeBERTa NLI) + CRM graph (petgraph + embeddings) + structural security patterns + feature matrix
+
+#### Architecture principles (no hacks)
+- **ML for intent**: classifier centroids, not `contains("inbox")` 
+- **ML for cross-account**: ONNX embeddings + cosine similarity, not word lists
+- **ML for threat**: NLI entailment + structural patterns, not imperative word lists
+- **Feature matrix**: 11 numeric features → weighted dot product, not if/else chains
+- **Skills for workflow**: SKILL.md files, not hardcoded prompt strings
+
 ---
 
 <!-- NEW ENTRIES GO HERE -->
