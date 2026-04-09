@@ -533,68 +533,87 @@ impl CrmGraph {
         self.graph.node_count()
     }
 
-    /// Build semantic signature for each account (name + metadata) and compute embeddings.
-    /// Call after graph is built, with shared classifier for ONNX encode.
+    /// Build embedding matrix for all accounts — enables batch similarity queries.
+    /// Each row = L2-normalized MiniLM embedding of "name | industry | country | description".
+    /// Pre-computes norms for efficient cosine similarity (dot product on normalized vectors).
     pub fn compute_account_embeddings(&mut self, clf: &crate::scanner::SharedClassifier) {
-        let mut sigs = Vec::new();
-        for idx in self.graph.node_indices() {
-            if let Node::Account { ref name, ref industry, ref country, ref description, .. } = self.graph[idx] {
-                // Build rich signature: "AccountName | industry | country | description"
-                let mut parts = vec![name.clone()];
-                if let Some(ind) = industry { parts.push(ind.clone()); }
-                if let Some(cty) = country { parts.push(cty.clone()); }
-                if let Some(desc) = description { parts.push(desc.clone()); }
-                sigs.push((name.clone(), parts.join(" | ")));
-            }
-        }
-        // Encode all signatures
-        if let Ok(mut guard) = clf.lock() {
-            if let Some(ref mut clf) = *guard {
-                for (name, sig) in &sigs {
-                    if let Ok(emb) = clf.encode(sig) {
-                        self.account_embeddings.push((name.clone(), emb));
-                    }
-                }
+        let sigs: Vec<(String, String)> = self.account_signatures();
+        if sigs.is_empty() { return; }
+
+        let Ok(mut guard) = clf.lock() else { return };
+        let Some(ref mut encoder) = *guard else { return };
+
+        for (name, sig) in &sigs {
+            if let Ok(emb) = encoder.encode(sig) {
+                // L2-normalize for cosine similarity via dot product
+                let norm = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
+                let normalized = if norm > 1e-9 { &emb / norm } else { emb };
+                self.account_embeddings.push((name.clone(), normalized));
             }
         }
         if !self.account_embeddings.is_empty() {
-            eprintln!("  CRM graph: {} account embeddings computed", self.account_embeddings.len());
+            eprintln!("  CRM graph: {} account embeddings (L2-norm)", self.account_embeddings.len());
         }
     }
 
-    /// Detect cross-account request using semantic similarity.
-    /// Encodes the inbox body and finds the most similar account.
-    /// Returns Some((matched_account, similarity)) if a strong match to a different account is found.
+    /// Batch similarity: compute cosine similarity between query and ALL accounts.
+    /// Returns sorted Vec<(account_name, similarity)> descending.
+    /// Uses pre-normalized embeddings → cosine sim = dot product.
+    pub fn similarity_scores(
+        &self,
+        query_emb: &ndarray::Array1<f32>,
+    ) -> Vec<(String, f64)> {
+        let norm = query_emb.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let q_norm = if norm > 1e-9 { query_emb / norm } else { query_emb.clone() };
+
+        let mut scores: Vec<(String, f64)> = self.account_embeddings.iter()
+            .map(|(name, emb)| {
+                let sim = q_norm.dot(emb) as f64; // dot of L2-normed = cosine sim
+                (name.clone(), sim)
+            })
+            .collect();
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores
+    }
+
+    /// Detect cross-account request using semantic similarity matrix.
+    /// Encodes inbox body → batch cosine similarity vs all account embeddings.
+    /// Returns Some((matched_account, similarity)) if best match ≠ sender and sim > threshold.
     pub fn detect_cross_account(
         &self,
         body: &str,
         sender_account: &str,
         clf: &crate::scanner::SharedClassifier,
     ) -> Option<(String, f64)> {
-        if self.account_embeddings.is_empty() {
-            return None;
-        }
-        // Encode inbox body
+        if self.account_embeddings.is_empty() { return None; }
+
+        // Encode query
         let body_emb = {
             let mut guard = clf.lock().ok()?;
-            let clf = guard.as_mut()?;
-            clf.encode(body).ok()?
+            let encoder = guard.as_mut()?;
+            encoder.encode(body).ok()?
         };
-        // Find best matching account (excluding sender's own account)
+
+        // Batch similarity against all accounts
+        let scores = self.similarity_scores(&body_emb);
         let sender_lower = sender_account.to_lowercase();
-        let mut best: Option<(String, f64)> = None;
-        for (name, emb) in &self.account_embeddings {
-            if name.to_lowercase() == sender_lower {
-                continue;
-            }
-            let sim = crate::classifier::cosine_similarity(body_emb.view(), emb.view()) as f64;
-            if sim > 0.45 { // threshold: meaningful semantic similarity
-                if best.as_ref().map_or(true, |(_, s)| sim > *s) {
-                    best = Some((name.clone(), sim));
-                }
+
+        // Find sender's own score and best non-sender score
+        let sender_sim = scores.iter()
+            .find(|(n, _)| n.to_lowercase() == sender_lower)
+            .map(|(_, s)| *s)
+            .unwrap_or(0.0);
+        let best_other = scores.iter()
+            .find(|(n, _)| n.to_lowercase() != sender_lower);
+
+        if let Some((other_name, other_sim)) = best_other {
+            // Cross-account: other account is MORE similar to the body than sender's own account
+            // AND similarity is meaningful (> 0.4)
+            if *other_sim > sender_sim && *other_sim > 0.4 {
+                return Some((other_name.clone(), *other_sim));
             }
         }
-        best
+        None
     }
 
     /// Compact summary of all accounts with domains, manager, and linked contacts for pre-grounding.
