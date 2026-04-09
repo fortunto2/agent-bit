@@ -275,20 +275,32 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         tools: &ToolRegistry,
         previous_response_id: Option<&str>,
     ) -> Result<(Decision, Option<String>), AgentError> {
-        // Prepare messages — trim if context too large (keep pre-grounding head + recent tail)
-        // Similar to sgr-agent Compactor but without extra LLM call (zero latency)
+        // Prepare messages — smart trim by type, not position
+        // Keep ALL user messages (pre-grounding, inbox, instruction — always critical)
+        // Trim old assistant messages (reasoning, plans — action ledger has summary)
         let mut msgs = Vec::with_capacity(messages.len() + 1);
         let has_system = messages.iter().any(|m| m.role == Role::System);
         if !has_system && !self.system_prompt.is_empty() {
             msgs.push(Message::system(&self.system_prompt));
         }
-        let max_msgs = 40; // ~8K tokens for Nemotron context
-        if messages.len() > max_msgs {
-            let head = max_msgs / 2;
-            let tail = max_msgs - head;
-            msgs.extend_from_slice(&messages[..head]);
-            msgs.push(Message::user("[... earlier steps compressed into action ledger below ...]"));
-            msgs.extend_from_slice(&messages[messages.len() - tail..]);
+        let est_tokens: usize = messages.iter().map(|m| m.content.len() / 4).sum();
+        if est_tokens > 12000 {
+            // Keep all user messages (inbox, instruction, tool results — critical context)
+            // Keep only last 6 assistant messages (recent reasoning — old ones in ledger)
+            let mut assistant_count = 0;
+            let total_assistant = messages.iter().filter(|m| m.role == Role::Assistant).count();
+            let skip_assistant = total_assistant.saturating_sub(6);
+            for m in messages {
+                if m.role == Role::Assistant {
+                    assistant_count += 1;
+                    if assistant_count <= skip_assistant {
+                        continue; // drop old assistant reasoning
+                    }
+                }
+                msgs.push(m.clone());
+            }
+            eprintln!("  📐 Context trim: dropped {} old assistant messages ({} → {} est tokens)",
+                skip_assistant, est_tokens, msgs.iter().map(|m| m.content.len() / 4).sum::<usize>());
         } else {
             msgs.extend_from_slice(messages);
         }
