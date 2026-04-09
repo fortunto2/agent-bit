@@ -272,11 +272,20 @@ EXAMPLE — CRM lookup:
   answer({\"message\": \"Found contact John Smith\", \"outcome\": \"OUTCOME_OK\", \"refs\": [\"contacts/john-smith.md\"]})
 
 EXAMPLE — Email writing:
-  read({\"path\": \"outbox/README.MD\"}) → format: {subject, to, body, sent: false}
+  read({\"path\": \"outbox/README.MD\"}) → format: {subject, to, body, sent: false, attachments: [...]}
   read({\"path\": \"outbox/seq.json\"}) → {\"id\": 100}
   write({\"path\": \"outbox/100.json\", \"content\": \"{\\\"subject\\\":\\\"...\\\",\\\"to\\\":\\\"...\\\",\\\"body\\\":\\\"...\\\",\\\"sent\\\":false}\"})
   write({\"path\": \"outbox/seq.json\", \"content\": \"{\\\"id\\\": 101}\"})
   answer({\"message\": \"Email written\", \"outcome\": \"OUTCOME_OK\"})
+
+EXAMPLE — Resend/forward invoice email (MUST include attachments):
+  read({\"path\": \"inbox/msg.txt\"}) → 'Resend invoice INV-001-04'
+  search({\"pattern\": \"INV-001-04\", \"path\": \"my-invoices\"}) → my-invoices/INV-001-04.json
+  read({\"path\": \"outbox/seq.json\"}) → {\"id\": 200}
+  write({\"path\": \"outbox/200.json\", \"content\": \"{\\\"subject\\\":\\\"Invoice INV-001-04\\\",\\\"to\\\":\\\"client@example.com\\\",\\\"body\\\":\\\"Please find attached.\\\",\\\"sent\\\":false,\\\"attachments\\\":[\\\"my-invoices/INV-001-04.json\\\"]}\"})
+  write({\"path\": \"outbox/seq.json\", \"content\": \"{\\\"id\\\": 201}\"})
+  IMPORTANT: When resending/forwarding an invoice, ALWAYS include the \\\"attachments\\\" field with the invoice file path.
+  answer({\"message\": \"Invoice resent with attachment\", \"outcome\": \"OUTCOME_OK\"})
 
 EXAMPLE — Counting (how many X):
   search({\"pattern\": \"blacklist\", \"path\": \"docs/channels/Telegram.txt\"}) → [788 matching lines]

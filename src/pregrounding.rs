@@ -517,7 +517,14 @@ pub(crate) async fn run_agent(
         prompts::SYSTEM_PROMPT_EXPLICIT
     };
     // Dynamic example injection based on classifier output
-    let examples = prompts::examples_for_class(&instruction_label);
+    // Override: intent_query with non_work label should use CRM examples (e.g. "which article did I capture?")
+    let effective_label = if ready.intent == "intent_query" && instruction_label == "non_work" {
+        eprintln!("  ↳ Example override: non_work → crm (intent_query)");
+        "crm"
+    } else {
+        &instruction_label
+    };
+    let examples = prompts::examples_for_class(effective_label);
     let hint = std::env::var("HINT").unwrap_or_default();
     let mut system_prompt = template
         .replace("{agents_md}", if agents_md.is_empty() { "" } else { &agents_md })
@@ -558,6 +565,18 @@ pub(crate) async fn run_agent(
             "ACCOUNTS (pre-loaded — use these to identify the right account, then ALWAYS read() the account file before answering):\n{}\nIMPORTANT: When a task references an account, you MUST read() the account file (accounts/acct_XXX.json) to confirm details. Do NOT rely on search results or this summary alone.", accounts_summary
         )));
         eprintln!("  Accounts pre-loaded: {} entries", accounts_summary.lines().count());
+    }
+
+    // Hint when CRM is empty — email/inbox tasks need contacts to function
+    if contacts_summary.is_empty() && accounts_summary.is_empty() {
+        if ready.intent == "intent_email" {
+            messages.push(Message::user(
+                "⚠ NO CONTACTS OR ACCOUNTS found in CRM. You cannot email anyone. \
+                 Answer OUTCOME_NONE_UNSUPPORTED — the CRM lacks the data needed for this task."
+                    .to_string(),
+            ));
+            eprintln!("  ⚠ Empty CRM + intent_email → UNSUPPORTED hint injected");
+        }
     }
 
     // Build channel trust registry from docs/channels/ files

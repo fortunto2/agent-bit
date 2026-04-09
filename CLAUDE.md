@@ -307,16 +307,26 @@ Providers in `config.toml`. Key fields per provider:
 - Single prompt for all models (explicit decision tree). No prompt_mode needed.
 - `headers` -- extra HTTP headers (e.g. CF Gateway timeout)
 
+## Evolution Log
+
+**`LOG.md`** — хронология экспериментов, гипотез и benchmark результатов. Обязательно обновлять после каждого:
+- Нового эксперимента/гипотезы
+- Benchmark run'а (score, провалы, commit)
+- Фикса задачи (что сделано, результат)
+
+Формат: эксперимент → гипотеза → решение → результат → матрица стабильности.
+
 ## Benchmarks
 
-Results tracked in `benchmarks/runs/`.
+Results tracked in `benchmarks/runs/`. Detailed evolution log in `LOG.md`.
 
-### Current Baselines (2026-04-08)
+### Current Baselines (2026-04-09)
 
 | Model | Score | Notes |
 |-------|-------|-------|
-| GPT-5.4 v2 | **77.5%** (31/40) | Full benchmark 2026-04-08. +2 fixes → est. 82.5% |
-| Nemotron-120b v2 | **~80%+** (est) | Partial benchmark 2026-04-07 |
+| Nemotron-120b | **88.4%** (38/43) | Best full run, 2026-04-09 |
+| Nemotron-120b | **81-86%** (avg) | Non-deterministic, ±4 tasks between runs |
+| GPT-5.4 v2 | **77.5%** (31/40) | Full benchmark 2026-04-08 |
 | GPT-5.4-mini | 65% (20/31) | Weaker reasoning |
 
 ### Development Workflow

@@ -433,7 +433,7 @@ async fn verify_and_submit(
 
             match verified {
                 Some(ref v) => {
-                    match apply_override_policy(&p.outcome, &v.outcome, v.confidence) {
+                    match apply_override_policy(&p.outcome, &v.outcome, v.confidence, history) {
                         Some(ref override_outcome) => {
                             eprintln!("  🔍 Verifier: OVERRIDE {} → {} (conf={:.2}) — {}",
                                 p.outcome, override_outcome, v.confidence, v.reason);
@@ -445,7 +445,7 @@ async fn verify_and_submit(
                         }
                         None => {
                             let reason = if p.outcome == "OUTCOME_DENIED_SECURITY" {
-                                "security never overridden"
+                                "security after investigation — never overridden"
                             } else {
                                 "low confidence"
                             };
@@ -479,10 +479,25 @@ fn apply_override_policy(
     proposed_outcome: &str,
     verifier_outcome: &str,
     verifier_confidence: f64,
+    execution_summary: &str,
 ) -> Option<String> {
-    // Agent said DENIED_SECURITY: only override with 3-vote unanimous OK + high confidence.
-    // Single verifier was unreliable (broke t25/t09), but 3-vote consensus is safer.
+    // Agent said DENIED_SECURITY:
+    // - If agent performed tool calls (read files, real investigation) → NEVER override.
+    //   Agent's conscious security judgement after reading data is final (t20, t25).
+    // - If no tool calls (planner-only / auto-answer fallback, 0 steps) → allow override.
+    //   Planner sometimes hallucinates injection alerts without reading inbox (t19).
     if proposed_outcome == "OUTCOME_DENIED_SECURITY" {
+        // Check if agent actually performed tool calls (investigation).
+        // execution_summary is built from history (agent message content, not stderr).
+        // Tool outputs contain patterns like "read = N lines", "Written to", "Deleted", "→ read(..."
+        let has_tool_calls = execution_summary.lines()
+            .any(|l| l.contains("→ read") || l.contains("→ search") || l.contains("→ write") || l.contains("→ delete")
+                || l.contains("read = ") || l.contains("Written to") || l.contains("Deleted ")
+                || l.contains("search = ") || l.contains("list = "));
+        if has_tool_calls {
+            return None; // Agent investigated — trust its judgement
+        }
+        // No tool calls — planner fallback. Allow high-confidence verifier override.
         if verifier_outcome == "OUTCOME_OK" && verifier_confidence >= 0.90 {
             return Some("OUTCOME_OK".to_string());
         }
@@ -710,57 +725,62 @@ mod tests {
 
     #[test]
     fn override_agree() {
-        let result = apply_override_policy("OUTCOME_OK", "OUTCOME_OK", 0.95);
+        let result = apply_override_policy("OUTCOME_OK", "OUTCOME_OK", 0.95, "");
         assert!(result.is_none(), "Same outcome = no override");
     }
 
     #[test]
     fn override_warn_only_for_non_security() {
-        // Non-security disagreements: still warn-only (6:1 wrong:correct ratio)
         let result = apply_override_policy(
-            "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.9,
+            "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.9, "→ read(inbox/msg.txt)",
         );
         assert!(result.is_none(), "Non-security disagree = no override");
 
         let result = apply_override_policy(
-            "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.6,
+            "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.6, "",
         );
         assert!(result.is_none(), "Low confidence disagree = no override");
     }
 
     #[test]
-    fn override_denied_to_ok_unanimous_high_conf() {
-        // 3-vote unanimous OK + high confidence → override DENIED
+    fn override_denied_with_tool_calls_never_overridden() {
+        // Agent read files and consciously chose DENIED → NEVER override
+        // Test with stderr-style tool call markers
+        let summary1 = "→ read(inbox/msg.txt)\n→ search(invoices)";
         let result = apply_override_policy(
-            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.95,
+            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, summary1,
+        );
+        assert!(result.is_none(), "DENIED after investigation (→ read) is final");
+
+        // Test with history-style tool output (from message content)
+        let summary2 = "read = 2 lines\nWritten to outbox/1.json";
+        let result = apply_override_policy(
+            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, summary2,
+        );
+        assert!(result.is_none(), "DENIED after investigation (read = N) is final");
+    }
+
+    #[test]
+    fn override_denied_without_tool_calls_allows_override() {
+        // Agent proposed DENIED from planner only (0 steps, no tool calls) → allow override
+        let empty_summary = "";
+        let result = apply_override_policy(
+            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.95, empty_summary,
         );
         assert_eq!(result.as_deref(), Some("OUTCOME_OK"),
-            "Unanimous high-confidence OK overrides false DENIED");
-    }
+            "Planner-only DENIED can be overridden by high-confidence verifier");
 
-    #[test]
-    fn override_denied_to_ok_low_conf_no_override() {
-        // Low confidence → don't override DENIED
+        // But not with low confidence
         let result = apply_override_policy(
-            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.80,
+            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.80, empty_summary,
         );
-        assert!(result.is_none(), "Low confidence = don't override DENIED");
-    }
-
-    #[test]
-    fn override_denied_non_ok_no_override() {
-        // Verifier says CLARIFICATION, not OK → don't override DENIED
-        let result = apply_override_policy(
-            "OUTCOME_DENIED_SECURITY", "OUTCOME_NONE_CLARIFICATION", 0.95,
-        );
-        assert!(result.is_none(), "Only OK can override DENIED, not CLARIFICATION");
+        assert!(result.is_none(), "Low confidence = don't override even planner DENIED");
     }
 
     #[test]
     fn override_security_high_confidence() {
-        // Verifier detects injection agent missed → override
         let result = apply_override_policy(
-            "OUTCOME_OK", "OUTCOME_DENIED_SECURITY", 0.99,
+            "OUTCOME_OK", "OUTCOME_DENIED_SECURITY", 0.99, "→ read(inbox/msg.txt)",
         );
         assert_eq!(result.as_deref(), Some("OUTCOME_DENIED_SECURITY"),
             "High-confidence security detection overrides agent OK");
@@ -768,9 +788,8 @@ mod tests {
 
     #[test]
     fn override_security_low_confidence_no_override() {
-        // Low confidence security detection → warn only
         let result = apply_override_policy(
-            "OUTCOME_OK", "OUTCOME_DENIED_SECURITY", 0.80,
+            "OUTCOME_OK", "OUTCOME_DENIED_SECURITY", 0.80, "",
         );
         assert!(result.is_none(), "Low confidence security = no override");
     }
