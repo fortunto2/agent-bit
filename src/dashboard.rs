@@ -1,11 +1,12 @@
 //! PAC1 Dashboard — TUI heatmap of benchmark runs.
 //!
-//! Reads LOG.md benchmark history + benchmarks/runs/ for task-level results.
-//! Shows: task matrix (43 tasks × N runs), pass/fail heatmap, stability stats.
+//! Data sources:
+//! 1. benchmarks/runs/*.md — per-task results from each run
+//! 2. LOG.md — benchmark history summary
 //!
 //! Usage: cargo run --bin pac1-dash
 
-use std::io;
+use std::{io, path::Path};
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -13,93 +14,119 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Terminal,
 };
 
-/// A benchmark run parsed from LOG.md.
-struct Run {
-    date: String,
-    commit: String,
-    score: String,
-    failures: Vec<String>,
+const TASK_IDS: &[&str] = &[
+    "t01","t02","t03","t04","t05","t06","t07","t08","t09","t10",
+    "t11","t12","t13","t14","t15","t16","t17","t18","t19","t20",
+    "t21","t22","t23","t24","t25","t26","t27","t28","t29","t30",
+    "t31","t32","t33","t34","t35","t36","t37","t38","t39","t40",
+    "t41","t42","t43",
+];
+
+struct RunData {
+    label: String,  // "04-01 nemotron"
+    score: String,  // "50% (15/30)"
+    tasks: std::collections::HashMap<String, f32>,  // task_id → score
 }
 
-/// Task stability info.
-struct TaskInfo {
-    id: String,
-    hint: String,
-    status: String,
-    results: Vec<bool>, // per-run pass/fail
-}
+fn parse_run_file(path: &Path) -> Option<RunData> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let filename = path.file_stem()?.to_str()?;
+    // Format: 2026-04-01__nemotron__3cf84f2
+    let parts: Vec<&str> = filename.split("__").collect();
+    let date = parts.first().map(|d| &d[5..]).unwrap_or("?"); // strip year
+    let provider = parts.get(1).unwrap_or(&"?");
+    let label = format!("{} {}", date, provider);
 
-fn parse_log_md() -> (Vec<Run>, Vec<TaskInfo>) {
-    let content = std::fs::read_to_string("LOG.md").unwrap_or_default();
-    let mut runs = Vec::new();
-    let mut tasks = Vec::new();
-    let mut in_benchmark = false;
-    let mut in_stability = false;
+    let mut score_line = String::new();
+    let mut tasks = std::collections::HashMap::new();
 
     for line in content.lines() {
-        // Benchmark History table
-        if line.contains("| Date | Commit |") {
-            in_benchmark = true;
-            in_stability = false;
-            continue;
+        if line.starts_with("**Score:**") {
+            score_line = line.replace("**Score:**", "").trim().to_string();
         }
-        if in_benchmark && line.starts_with("| ") && !line.contains("---") {
+        if line.starts_with("| t") {
+            let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
+            if cols.len() >= 3 {
+                let task_id = cols[1].to_string();
+                let score: f32 = cols[2].parse().unwrap_or(-1.0);
+                tasks.insert(task_id, score);
+            }
+        }
+    }
+
+    Some(RunData { label, score: score_line, tasks })
+}
+
+fn parse_log_md_runs() -> Vec<RunData> {
+    let content = std::fs::read_to_string("LOG.md").unwrap_or_default();
+    let mut runs = Vec::new();
+
+    for line in content.lines() {
+        if line.starts_with("| ") && line.contains('`') && line.contains('%') {
             let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
             if cols.len() >= 6 {
-                let failures: Vec<String> = cols[5].split(", ")
+                let date = cols[1];
+                let score = cols[4];
+                let failures_str = cols[5];
+                let failures: Vec<&str> = failures_str.split(", ")
                     .filter(|s| s.starts_with('t'))
-                    .map(|s| s.split_whitespace().next().unwrap_or(s).to_string())
+                    .map(|s| s.split_whitespace().next().unwrap_or(s))
                     .collect();
-                runs.push(Run {
-                    date: cols[1].to_string(),
-                    commit: cols[2].trim_matches('`').to_string(),
-                    score: cols[4].to_string(),
-                    failures,
+
+                let mut tasks = std::collections::HashMap::new();
+                for tid in TASK_IDS {
+                    if failures.contains(tid) {
+                        tasks.insert(tid.to_string(), 0.0);
+                    } else {
+                        tasks.insert(tid.to_string(), 1.0);
+                    }
+                }
+
+                runs.push(RunData {
+                    label: format!("{} {}", date, &score[..score.len().min(12)]),
+                    score: score.to_string(),
+                    tasks,
                 });
             }
         }
-        if in_benchmark && line.starts_with("---") && !line.contains("|") {
-            in_benchmark = false;
-        }
+    }
+    runs
+}
 
-        // Task Stability Matrix
-        if line.contains("| Task | Hint |") {
-            in_stability = true;
-            in_benchmark = false;
-            continue;
-        }
-        if in_stability && line.starts_with("| t") {
-            let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
-            if cols.len() >= 6 {
-                tasks.push(TaskInfo {
-                    id: cols[1].to_string(),
-                    hint: cols[2].to_string(),
-                    status: cols.last().unwrap_or(&"").to_string(),
-                    results: Vec::new(),
-                });
+fn load_all_runs() -> Vec<RunData> {
+    // Try benchmarks/runs/ first
+    let runs_dir = Path::new("benchmarks/runs");
+    let mut runs: Vec<RunData> = if runs_dir.exists() {
+        let mut entries: Vec<_> = std::fs::read_dir(runs_dir)
+            .into_iter().flatten().flatten()
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+        entries.sort_by_key(|e| e.file_name());
+        entries.iter().filter_map(|e| parse_run_file(&e.path())).collect()
+    } else {
+        Vec::new()
+    };
+
+    // Supplement with LOG.md benchmark history
+    let log_runs = parse_log_md_runs();
+    if runs.is_empty() {
+        runs = log_runs;
+    } else {
+        // Append LOG.md runs that aren't in benchmarks/runs/
+        for lr in log_runs {
+            if !runs.iter().any(|r| r.score == lr.score) {
+                runs.push(lr);
             }
         }
-        if in_stability && line.is_empty() {
-            in_stability = false;
-        }
     }
-
-    // Cross-reference: for each task, check which runs it failed in
-    for task in &mut tasks {
-        for run in &runs {
-            let failed = run.failures.iter().any(|f| f == &task.id);
-            task.results.push(!failed);
-        }
-    }
-
-    (runs, tasks)
+    runs
 }
 
 fn run_app() -> io::Result<()> {
@@ -110,117 +137,108 @@ fn run_app() -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
     let mut table_state = TableState::default();
     table_state.select(Some(0));
+    let mut scroll_x: usize = 0;
 
-    let (runs, tasks) = parse_log_md();
-
-    // Show last N runs (fit screen)
-    let max_runs = 8;
-    let recent_runs: Vec<&Run> = runs.iter().rev().take(max_runs).collect::<Vec<_>>().into_iter().rev().collect();
+    let runs = load_all_runs();
+    let max_visible_runs = 10;
 
     loop {
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(3),  // header
-                    Constraint::Min(10),    // heatmap
-                    Constraint::Length(5),  // summary
+                    Constraint::Length(3),
+                    Constraint::Min(10),
+                    Constraint::Length(3),
                 ])
                 .split(f.area());
 
             // Header
-            let header_text = format!(
-                " PAC1 Dashboard — {} tasks × {} runs | Best: {} | q=quit ↑↓=scroll",
-                tasks.len(), runs.len(),
-                runs.last().map(|r| r.score.as_str()).unwrap_or("?")
-            );
-            let header = Paragraph::new(header_text)
-                .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-                .block(Block::default().borders(Borders::BOTTOM));
+            let latest_score = runs.last().map(|r| r.score.as_str()).unwrap_or("?");
+            let header = Paragraph::new(format!(
+                " PAC1 Heatmap — {} runs | Latest: {} | q=quit ↑↓=scroll ←→=pan runs",
+                runs.len(), latest_score
+            ))
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .block(Block::default().borders(Borders::BOTTOM));
             f.render_widget(header, chunks[0]);
 
-            // Heatmap table
-            let mut header_cells = vec![
+            // Visible runs window
+            let end = runs.len().min(scroll_x + max_visible_runs);
+            let start = end.saturating_sub(max_visible_runs);
+            let visible: Vec<&RunData> = runs[start..end].iter().collect();
+
+            // Header row
+            let mut hdr_cells = vec![
                 Cell::from("Task").style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Cell::from("Hint").style(Style::default().fg(Color::DarkGray)),
             ];
-            for run in &recent_runs {
-                header_cells.push(
-                    Cell::from(format!("{}", &run.date))
-                        .style(Style::default().fg(Color::DarkGray))
-                );
+            for run in &visible {
+                let label = if run.label.len() > 14 { &run.label[..14] } else { &run.label };
+                hdr_cells.push(Cell::from(label.to_string()).style(Style::default().fg(Color::DarkGray)));
             }
-            header_cells.push(Cell::from("Status").style(Style::default().fg(Color::Yellow)));
+            hdr_cells.push(Cell::from("Rate").style(Style::default().fg(Color::Yellow)));
 
-            let header_row = Row::new(header_cells).height(1);
-
-            let rows: Vec<Row> = tasks.iter().map(|task| {
+            // Task rows
+            let rows: Vec<Row> = TASK_IDS.iter().map(|&tid| {
                 let mut cells = vec![
-                    Cell::from(task.id.clone()).style(Style::default().fg(Color::White)),
-                    Cell::from(if task.hint.len() > 25 {
-                        format!("{}…", &task.hint[..24])
-                    } else {
-                        task.hint.clone()
-                    }).style(Style::default().fg(Color::DarkGray)),
+                    Cell::from(tid).style(Style::default().fg(Color::White)),
                 ];
 
-                // Heatmap cells for recent runs
-                let start = if task.results.len() > max_runs { task.results.len() - max_runs } else { 0 };
-                for i in start..task.results.len() {
-                    let (symbol, color) = if task.results[i] {
-                        ("✓", Color::Green)
+                let mut pass_count = 0;
+                let mut total_count = 0;
+
+                for run in &visible {
+                    let score = run.tasks.get(tid).copied().unwrap_or(-1.0);
+                    let (block, color) = if score < 0.0 {
+                        ("·", Color::DarkGray) // no data
+                    } else if score >= 1.0 {
+                        pass_count += 1;
+                        total_count += 1;
+                        ("██", Color::Green)
                     } else {
-                        ("✗", Color::Red)
+                        total_count += 1;
+                        ("██", Color::Red)
                     };
-                    cells.push(Cell::from(symbol).style(Style::default().fg(color)));
-                }
-                // Pad if fewer results than runs
-                for _ in task.results.len()..recent_runs.len() {
-                    cells.push(Cell::from("·").style(Style::default().fg(Color::DarkGray)));
+                    cells.push(Cell::from(block).style(Style::default().fg(color)));
                 }
 
-                // Status
-                let status_color = if task.status.contains("stable") { Color::Green }
-                    else if task.status.contains("fixed") || task.status.contains("FIXED") { Color::Cyan }
-                    else if task.status.contains("improved") { Color::Yellow }
-                    else if task.status.contains("non-det") { Color::Magenta }
-                    else if task.status.contains("PERSISTENT") { Color::Red }
-                    else { Color::DarkGray };
-                cells.push(Cell::from(task.status.clone()).style(Style::default().fg(status_color)));
+                // Pass rate
+                let rate = if total_count > 0 {
+                    let pct = pass_count * 100 / total_count;
+                    let color = if pct == 100 { Color::Green }
+                        else if pct >= 75 { Color::Yellow }
+                        else if pct >= 50 { Color::Magenta }
+                        else { Color::Red };
+                    Cell::from(format!("{:3}%", pct)).style(Style::default().fg(color))
+                } else {
+                    Cell::from("  -").style(Style::default().fg(Color::DarkGray))
+                };
+                cells.push(rate);
 
                 Row::new(cells)
             }).collect();
 
-            let widths = {
-                let mut w = vec![Constraint::Length(4), Constraint::Length(26)];
-                for _ in &recent_runs {
-                    w.push(Constraint::Length(6));
-                }
-                w.push(Constraint::Min(20));
-                w
-            };
+            let mut widths = vec![Constraint::Length(4)];
+            for _ in &visible { widths.push(Constraint::Length(15)); }
+            widths.push(Constraint::Length(5));
 
             let table = Table::new(rows, widths)
-                .header(header_row)
-                .block(Block::default().borders(Borders::ALL).title(" Task Heatmap "))
+                .header(Row::new(hdr_cells).height(1))
+                .block(Block::default().borders(Borders::ALL).title(" ██ Pass  ██ Fail  · No data "))
                 .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
             f.render_stateful_widget(table, chunks[1], &mut table_state);
 
-            // Summary
-            let stable = tasks.iter().filter(|t| t.status.contains("stable")).count();
-            let fixed = tasks.iter().filter(|t| t.status.contains("fixed") || t.status.contains("FIXED")).count();
-            let nondet = tasks.iter().filter(|t| t.status.contains("non-det")).count();
-            let persistent = tasks.iter().filter(|t| t.status.contains("PERSISTENT")).count();
-
-            let summary = Paragraph::new(vec![
-                Line::from(vec![
-                    Span::styled(format!(" Stable: {} ", stable), Style::default().fg(Color::Green)),
-                    Span::styled(format!(" Fixed: {} ", fixed), Style::default().fg(Color::Cyan)),
-                    Span::styled(format!(" Non-det: {} ", nondet), Style::default().fg(Color::Magenta)),
-                    Span::styled(format!(" Persistent: {} ", persistent), Style::default().fg(Color::Red)),
-                    Span::styled(format!(" Total: {}/43", stable + fixed), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-                ]),
-            ]).block(Block::default().borders(Borders::TOP).title(" Summary "));
+            // Summary line
+            let total_tasks = TASK_IDS.len();
+            let always_pass = TASK_IDS.iter().filter(|&&tid| {
+                visible.iter().all(|r| r.tasks.get(tid).copied().unwrap_or(0.0) >= 1.0)
+            }).count();
+            let summary = Paragraph::new(Line::from(vec![
+                Span::styled(format!(" Always pass: {}/{} ", always_pass, total_tasks),
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("| Runs {}-{} of {} ", start+1, end, runs.len()),
+                    Style::default().fg(Color::DarkGray)),
+            ])).block(Block::default().borders(Borders::TOP));
             f.render_widget(summary, chunks[2]);
         })?;
 
@@ -230,11 +248,17 @@ fn run_app() -> io::Result<()> {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Down | KeyCode::Char('j') => {
                         let i = table_state.selected().unwrap_or(0);
-                        table_state.select(Some((i + 1).min(tasks.len().saturating_sub(1))));
+                        table_state.select(Some((i + 1).min(TASK_IDS.len() - 1)));
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         let i = table_state.selected().unwrap_or(0);
                         table_state.select(Some(i.saturating_sub(1)));
+                    }
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        if scroll_x + max_visible_runs < runs.len() { scroll_x += 1; }
+                    }
+                    KeyCode::Left | KeyCode::Char('h') => {
+                        scroll_x = scroll_x.saturating_sub(1);
                     }
                     _ => {}
                 }
