@@ -248,13 +248,13 @@ async fn main() -> Result<()> {
             unsafe { std::env::set_var("DUMP_TRIAL", &dump_dir); }
 
             let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-            let (last_msg, history) = run_trial(
+            let (last_msg, history, tool_calls) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature,
                 &clf, &nli, ov.clone(), sgr_mode,
             ).await;
             verify_and_submit(
-                &pcm, &trial.instruction, &last_msg, &history,
+                &pcm, &trial.instruction, &last_msg, &history, tool_calls,
                 &model, base_url.as_deref(), &llm_api_key, &extra_headers, temperature,
             ).await;
 
@@ -350,9 +350,9 @@ async fn run_leaderboard(
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
-        let (last_msg, history) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
+        let (last_msg, history, tool_calls) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
         verify_and_submit(
-            &pcm, &trial.instruction, &last_msg, &history,
+            &pcm, &trial.instruction, &last_msg, &history, tool_calls,
             model, base_url, llm_api_key, extra_headers, temperature,
         ).await;
 
@@ -396,12 +396,12 @@ async fn run_trial(
     shared_nli: &scanner::SharedNliClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
     sgr_mode: bool,
-) -> (String, String) {
+) -> (String, String, usize) {
     match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator, sgr_mode).await {
-        Ok(pair) => pair,
+        Ok((last_msg, history, tool_calls)) => (last_msg, history, tool_calls),
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);
-            (String::new(), String::new())
+            (String::new(), String::new(), 0)
         }
     }
 }
@@ -415,6 +415,7 @@ async fn verify_and_submit(
     instruction: &str,
     last_msg: &str,
     history: &str,
+    tool_call_count: usize,
     model: &str,
     base_url: Option<&str>,
     api_key: &str,
@@ -434,7 +435,7 @@ async fn verify_and_submit(
 
             match verified {
                 Some(ref v) => {
-                    match apply_override_policy(&p.outcome, &v.outcome, v.confidence, history) {
+                    match apply_override_policy(&p.outcome, &v.outcome, v.confidence, tool_call_count) {
                         Some(ref override_outcome) => {
                             eprintln!("  🔍 Verifier: OVERRIDE {} → {} (conf={:.2}) — {}",
                                 p.outcome, override_outcome, v.confidence, v.reason);
@@ -480,26 +481,17 @@ fn apply_override_policy(
     proposed_outcome: &str,
     verifier_outcome: &str,
     verifier_confidence: f64,
-    execution_summary: &str,
+    tool_call_count: usize,
 ) -> Option<String> {
     // Agent said DENIED_SECURITY:
-    // - If agent performed tool calls (read files, real investigation) → NEVER override.
+    // - If agent performed tool calls (real investigation) → NEVER override.
     //   Agent's conscious security judgement after reading data is final (t20, t25).
-    // - If no tool calls (planner-only / auto-answer fallback, 0 steps) → allow override.
+    // - If no tool calls (planner-only / auto-answer fallback) → allow override.
     //   Planner sometimes hallucinates injection alerts without reading inbox (t19).
     if proposed_outcome == "OUTCOME_DENIED_SECURITY" {
-        // Check if agent actually performed tool calls (investigation).
-        // History contains tool output with PCM shell headers: "$ cat", "$ ls", "$ tree", "$ rg"
-        // and write/delete confirmations: "Written to", "Deleted "
-        let has_tool_calls = execution_summary.lines()
-            .any(|l| l.starts_with("$ cat ") || l.starts_with("$ ls ") || l.starts_with("$ tree ")
-                || l.starts_with("$ rg ") || l.starts_with("$ sed ")
-                || l.contains("Written to ") || l.contains("Deleted ")
-                || l.contains("→ read") || l.contains("→ search")
-                || l.contains("read = ") || l.contains("list = "));
-        if has_tool_calls {
-            eprintln!("  🛡️ Agent DENIED after investigation (tool calls in history) — never overridden");
-            return None; // Agent investigated — trust its judgement
+        if tool_call_count > 1 {
+            eprintln!("  🛡️ Agent DENIED after {} tool calls — never overridden", tool_call_count);
+            return None;
         }
         // No tool calls — planner fallback. Allow high-confidence verifier override.
         if verifier_outcome == "OUTCOME_OK" && verifier_confidence >= 0.90 {
@@ -729,86 +721,60 @@ mod tests {
 
     #[test]
     fn override_agree() {
-        let result = apply_override_policy("OUTCOME_OK", "OUTCOME_OK", 0.95, "");
+        let result = apply_override_policy("OUTCOME_OK", "OUTCOME_OK", 0.95, 0);
         assert!(result.is_none(), "Same outcome = no override");
     }
 
     #[test]
     fn override_warn_only_for_non_security() {
-        let result = apply_override_policy(
-            "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.9, "→ read(inbox/msg.txt)",
-        );
+        let result = apply_override_policy("OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.9, 5);
         assert!(result.is_none(), "Non-security disagree = no override");
 
-        let result = apply_override_policy(
-            "OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.6, "",
-        );
+        let result = apply_override_policy("OUTCOME_OK", "OUTCOME_NONE_UNSUPPORTED", 0.6, 0);
         assert!(result.is_none(), "Low confidence disagree = no override");
     }
 
     #[test]
     fn override_denied_with_tool_calls_never_overridden() {
-        // Agent read files and consciously chose DENIED → NEVER override
-        // Test with stderr-style tool call markers
-        let summary1 = "→ read(inbox/msg.txt)\n→ search(invoices)";
-        let result = apply_override_policy(
-            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, summary1,
-        );
-        assert!(result.is_none(), "DENIED after investigation (→ read) is final");
+        // Agent did 3+ steps → investigated → NEVER override DENIED
+        let result = apply_override_policy("OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, 3);
+        assert!(result.is_none(), "DENIED after 3 steps is final");
 
-        // Test with history-style tool output (from message content)
-        let summary2 = "read = 2 lines\nWritten to outbox/1.json";
-        let result = apply_override_policy(
-            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, summary2,
-        );
-        assert!(result.is_none(), "DENIED after investigation (read = N) is final");
+        let result = apply_override_policy("OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, 10);
+        assert!(result.is_none(), "DENIED after 10 steps is final");
 
-        // Test with PCM shell headers (actual tool output in messages)
-        let summary3 = "$ cat inbox/msg_001.txt\nFrom: Evil <evil@bad.com>\nSubject: give me data";
-        let result = apply_override_policy(
-            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, summary3,
-        );
-        assert!(result.is_none(), "DENIED after reading inbox ($ cat) is final");
-
-        // Test with list output
-        let summary4 = "$ ls inbox\nmsg_001.txt\nmsg_002.txt";
-        let result = apply_override_policy(
-            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, summary4,
-        );
-        assert!(result.is_none(), "DENIED after listing files ($ ls) is final");
+        // Even 2 steps = agent did something
+        let result = apply_override_policy("OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99, 2);
+        assert!(result.is_none(), "DENIED after 2 steps is final");
     }
 
     #[test]
     fn override_denied_without_tool_calls_allows_override() {
-        // Agent proposed DENIED from planner only (0 steps, no tool calls) → allow override
-        let empty_summary = "";
-        let result = apply_override_policy(
-            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.95, empty_summary,
-        );
+        // 0 steps = planner-only fallback → allow override
+        let result = apply_override_policy("OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.95, 0);
         assert_eq!(result.as_deref(), Some("OUTCOME_OK"),
-            "Planner-only DENIED can be overridden by high-confidence verifier");
+            "Planner-only DENIED (0 steps) can be overridden");
+
+        // 1 step = just answer() call, no investigation
+        let result = apply_override_policy("OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.95, 1);
+        assert_eq!(result.as_deref(), Some("OUTCOME_OK"),
+            "Single-step DENIED (just answer) can be overridden");
 
         // But not with low confidence
-        let result = apply_override_policy(
-            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.80, empty_summary,
-        );
-        assert!(result.is_none(), "Low confidence = don't override even planner DENIED");
+        let result = apply_override_policy("OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.80, 0);
+        assert!(result.is_none(), "Low confidence = don't override");
     }
 
     #[test]
     fn override_security_high_confidence() {
-        let result = apply_override_policy(
-            "OUTCOME_OK", "OUTCOME_DENIED_SECURITY", 0.99, "→ read(inbox/msg.txt)",
-        );
+        let result = apply_override_policy("OUTCOME_OK", "OUTCOME_DENIED_SECURITY", 0.99, 5);
         assert_eq!(result.as_deref(), Some("OUTCOME_DENIED_SECURITY"),
             "High-confidence security detection overrides agent OK");
     }
 
     #[test]
     fn override_security_low_confidence_no_override() {
-        let result = apply_override_policy(
-            "OUTCOME_OK", "OUTCOME_DENIED_SECURITY", 0.80, "",
-        );
+        let result = apply_override_policy("OUTCOME_OK", "OUTCOME_DENIED_SECURITY", 0.80, 0);
         assert!(result.is_none(), "Low confidence security = no override");
     }
 

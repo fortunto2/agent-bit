@@ -397,7 +397,7 @@ pub(crate) async fn run_agent(
     shared_nli: &SharedNliClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
     sgr_mode: bool,
-) -> Result<(String, String)> {
+) -> Result<(String, String, usize)> {
     use crate::pipeline;
 
     // ── Pipeline Stage 1: Classify instruction ──────────────────────
@@ -407,7 +407,7 @@ pub(crate) async fn run_agent(
         Err(block) => {
             eprintln!("  ⛔ [STAGE:{}] {}", block.stage, block.message);
             pcm.answer(&block.message, block.outcome, &[]).await.ok();
-            return Ok((block.message, String::new()));
+            return Ok((block.message, String::new(), 0));
         }
     };
     let instruction_label = classified.instruction_label.clone();
@@ -458,7 +458,7 @@ pub(crate) async fn run_agent(
         Err(block) => {
             eprintln!("  ⛔ [STAGE:{}] {}", block.stage, block.message);
             pcm.answer(&block.message, block.outcome, &[]).await.ok();
-            return Ok((block.message, String::new()));
+            return Ok((block.message, String::new(), 0));
         }
     };
 
@@ -468,7 +468,7 @@ pub(crate) async fn run_agent(
         Err(block) => {
             eprintln!("  ⛔ [STAGE:{}] {}", block.stage, block.message);
             pcm.answer(&block.message, block.outcome, &[]).await.ok();
-            return Ok((block.message, String::new()));
+            return Ok((block.message, String::new(), 0));
         }
     };
 
@@ -976,7 +976,7 @@ pub(crate) async fn run_agent(
             .collect::<Vec<_>>()
             .join("\n");
 
-        return Ok((last_msg, history));
+        return Ok((last_msg, history, 0)); // SGR mode — no step tracking
     }
 
     let loop_config = LoopConfig {
@@ -1108,12 +1108,14 @@ pub(crate) async fn run_agent(
         .collect::<Vec<_>>()
         .join("\n");
 
+    let tool_call_count = ctx.iteration; // steps completed = proxy for tool calls
+
     if let Err(e) = result {
         eprintln!("  ⚠ Agent error: agent loop: {:#}", e);
-        return Ok((last_assistant, history));
+        return Ok((last_assistant, history, tool_call_count));
     }
 
-    Ok((last_assistant, history))
+    Ok((last_assistant, history, tool_call_count))
 }
 
 /// Build a compact execution summary for the verifier from message history.
