@@ -173,6 +173,7 @@ fn run_app() -> io::Result<()> {
     table_state.select(Some(0));
     let mut trial_select: usize = 0;
     let mut log_scroll: u16 = 0;
+    let mut focus_log = false; // Tab toggles focus between heatmap and log
 
     let data = load_task_data();
     let max_trials = data.values().map(|d| d.trials.len()).max().unwrap_or(0);
@@ -195,9 +196,10 @@ fn run_app() -> io::Result<()> {
                 .split(main[0]);
 
             let tasks_with_data = data.len();
+            let focus_indicator = if focus_log { "LOG" } else { "MAP" };
             let title = Paragraph::new(format!(
-                " PAC1 — {}/{} tasks, {} trials | q ↑↓ ←→ PgUp/Dn",
-                tasks_with_data, TASK_IDS.len(), max_trials
+                " PAC1 {}/{} tasks | Tab={} ↑↓←→ d/u q",
+                tasks_with_data, TASK_IDS.len(), focus_indicator
             )).style(Style::default().fg(Color::Cyan));
             f.render_widget(title, left[0]);
 
@@ -268,9 +270,15 @@ fn run_app() -> io::Result<()> {
                 .map(|l| Line::from(Span::styled(l, colorize_line(l))))
                 .collect();
 
+            let log_border_style = if focus_log {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
             let log_widget = Paragraph::new(log_lines)
                 .block(Block::default()
                     .borders(Borders::ALL)
+                    .border_style(log_border_style)
                     .title(format!(" {} [{}/{}] ", task_id, log_scroll, total_lines))
                 )
                 .wrap(Wrap { trim: false });
@@ -281,15 +289,25 @@ fn run_app() -> io::Result<()> {
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Tab => { focus_log = !focus_log; }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        let i = table_state.selected().unwrap_or(0);
-                        table_state.select(Some((i + 1).min(TASK_IDS.len() - 1)));
-                        log_scroll = 0;
+                        if focus_log {
+                            let max = log_content.lines().count().saturating_sub(5) as u16;
+                            log_scroll = (log_scroll + 1).min(max);
+                        } else {
+                            let i = table_state.selected().unwrap_or(0);
+                            table_state.select(Some((i + 1).min(TASK_IDS.len() - 1)));
+                            log_scroll = 0;
+                        }
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
-                        let i = table_state.selected().unwrap_or(0);
-                        table_state.select(Some(i.saturating_sub(1)));
-                        log_scroll = 0;
+                        if focus_log {
+                            log_scroll = log_scroll.saturating_sub(1);
+                        } else {
+                            let i = table_state.selected().unwrap_or(0);
+                            table_state.select(Some(i.saturating_sub(1)));
+                            log_scroll = 0;
+                        }
                     }
                     KeyCode::Right | KeyCode::Char('l') => {
                         trial_select += 1;
@@ -300,7 +318,7 @@ fn run_app() -> io::Result<()> {
                         log_scroll = 0;
                     }
                     KeyCode::PageDown | KeyCode::Char('d') => {
-                        let max = log_content.lines().count().saturating_sub(10) as u16;
+                        let max = log_content.lines().count().saturating_sub(5) as u16;
                         log_scroll = (log_scroll + 20).min(max);
                     }
                     KeyCode::PageUp | KeyCode::Char('u') => {
