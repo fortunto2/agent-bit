@@ -524,6 +524,8 @@ pub(crate) async fn run_agent(
     } else {
         &instruction_label
     };
+    // Wrap in Arc early — needed for both prompt injection and agent tools
+    let skill_registry = std::sync::Arc::new(skill_registry);
     let skill_body = crate::skills::select_body(&skill_registry, effective_label, &instruction_intent, instruction);
     let hint = std::env::var("HINT").unwrap_or_default();
     let mut system_prompt = template
@@ -795,7 +797,9 @@ pub(crate) async fn run_agent(
         .register(tools::MkDirTool(pcm.clone()))
         .register(tools::MoveTool(pcm.clone()))
         .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone(), Some(workflow.clone())))
-        .register(tools::ContextTool(pcm.clone()));
+        .register(tools::ContextTool(pcm.clone()))
+        .register(tools::ListSkillsTool(skill_registry.clone()))
+        .register(tools::GetSkillTool(skill_registry.clone()));
 
     let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, Some(workflow.clone()));
     agent.set_intent(&instruction_intent);

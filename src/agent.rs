@@ -491,10 +491,27 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         let phase_filtered = filter_tools_by_workflow(filtered, &self.workflow);
         let defs = if phase_filtered.is_empty() { tools.to_defs() } else { phase_filtered };
 
-        let (tool_calls, new_response_id) = self
-            .client
-            .tools_call_stateful(&action_msgs, &defs, previous_response_id)
-            .await?;
+        // Retry on empty: if LLM returns text without tool calls, nudge and retry (up to 2x)
+        let mut tool_calls;
+        let mut new_response_id;
+        let mut retries = 0u32;
+        loop {
+            let (tc, rid) = self
+                .client
+                .tools_call_stateful(&action_msgs, &defs, previous_response_id)
+                .await?;
+            tool_calls = tc;
+            new_response_id = rid;
+
+            if !tool_calls.is_empty() || retries >= 2 {
+                break;
+            }
+            retries += 1;
+            eprintln!("  🔁 Empty tool calls — retry {}/2", retries);
+            action_msgs.push(Message::user(
+                "You must call a tool. Use one of the available tools to make progress on the task.",
+            ));
+        }
 
         let completed =
             tool_calls.is_empty() || tool_calls.iter().any(|tc| tc.name == "finish_task");
