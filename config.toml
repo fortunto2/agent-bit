@@ -71,8 +71,9 @@ base_url = "https://api.deepinfra.com/v1/openai"
 api_key = "REDACTED_DEEPINFRA_KEY"
 temperature = 0.1
 planning_temperature = 0.2
-reasoning_effort = "none"  # Required for FC on reasoning models
-use_chat_api = true        # DeepInfra doesn't support Responses API
+reasoning_effort = "none"        # Required for FC on reasoning models
+use_chat_api = true              # DeepInfra doesn't support Responses API
+prompt_cache_key = "pac1-v1"     # Server-side prompt prefix caching
 
 [providers.nemotron-v2]
 model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"

@@ -111,6 +111,10 @@ async fn main() -> Result<()> {
     if let Some(ref effort) = reasoning_effort {
         unsafe { std::env::set_var("LLM_REASONING_EFFORT", effort); }
     }
+    // Forward prompt_cache_key from config
+    if let Some(ref key) = cfg.providers.get(provider_name).and_then(|p| p.prompt_cache_key.clone()) {
+        unsafe { std::env::set_var("LLM_PROMPT_CACHE_KEY", key); }
+    }
     if sgr_mode {
         eprintln!("[pac1] SGR mode: pure (single LLM call per step)");
     }

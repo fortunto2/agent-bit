@@ -50,9 +50,11 @@ pub struct ProviderSection {
     #[serde(default)]
     pub sgr_mode: Option<bool>,
     /// Reasoning effort for reasoning models: "none", "low", "medium", "high".
-    /// "none" disables reasoning — required for FC on DeepInfra Nemotron Super.
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    /// Server-side prompt prefix caching key.
+    #[serde(default)]
+    pub prompt_cache_key: Option<String>,
     /// Use Chat Completions API instead of Responses API.
     #[serde(default)]
     pub use_chat_api: Option<bool>,
