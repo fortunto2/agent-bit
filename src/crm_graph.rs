@@ -57,6 +57,8 @@ pub struct CrmGraph {
     name_index: HashMap<String, NodeIndex>,
     /// account ID → account name (for resolving contact.account_id)
     account_id_map: HashMap<String, String>,
+    /// Pre-computed account signatures for semantic matching: (account_name, signature_text, embedding)
+    account_embeddings: Vec<(String, ndarray::Array1<f32>)>,
 }
 
 impl CrmGraph {
@@ -67,6 +69,7 @@ impl CrmGraph {
             domain_index: HashMap::new(),
             name_index: HashMap::new(),
             account_id_map: HashMap::new(),
+            account_embeddings: Vec::new(),
         }
     }
 
@@ -530,6 +533,70 @@ impl CrmGraph {
         self.graph.node_count()
     }
 
+    /// Build semantic signature for each account (name + metadata) and compute embeddings.
+    /// Call after graph is built, with shared classifier for ONNX encode.
+    pub fn compute_account_embeddings(&mut self, clf: &crate::scanner::SharedClassifier) {
+        let mut sigs = Vec::new();
+        for idx in self.graph.node_indices() {
+            if let Node::Account { ref name, ref industry, ref country, ref description, .. } = self.graph[idx] {
+                // Build rich signature: "AccountName | industry | country | description"
+                let mut parts = vec![name.clone()];
+                if let Some(ind) = industry { parts.push(ind.clone()); }
+                if let Some(cty) = country { parts.push(cty.clone()); }
+                if let Some(desc) = description { parts.push(desc.clone()); }
+                sigs.push((name.clone(), parts.join(" | ")));
+            }
+        }
+        // Encode all signatures
+        if let Ok(mut guard) = clf.lock() {
+            if let Some(ref mut clf) = *guard {
+                for (name, sig) in &sigs {
+                    if let Ok(emb) = clf.encode(sig) {
+                        self.account_embeddings.push((name.clone(), emb));
+                    }
+                }
+            }
+        }
+        if !self.account_embeddings.is_empty() {
+            eprintln!("  CRM graph: {} account embeddings computed", self.account_embeddings.len());
+        }
+    }
+
+    /// Detect cross-account request using semantic similarity.
+    /// Encodes the inbox body and finds the most similar account.
+    /// Returns Some((matched_account, similarity)) if a strong match to a different account is found.
+    pub fn detect_cross_account(
+        &self,
+        body: &str,
+        sender_account: &str,
+        clf: &crate::scanner::SharedClassifier,
+    ) -> Option<(String, f64)> {
+        if self.account_embeddings.is_empty() {
+            return None;
+        }
+        // Encode inbox body
+        let body_emb = {
+            let mut guard = clf.lock().ok()?;
+            let clf = guard.as_mut()?;
+            clf.encode(body).ok()?
+        };
+        // Find best matching account (excluding sender's own account)
+        let sender_lower = sender_account.to_lowercase();
+        let mut best: Option<(String, f64)> = None;
+        for (name, emb) in &self.account_embeddings {
+            if name.to_lowercase() == sender_lower {
+                continue;
+            }
+            let sim = crate::classifier::cosine_similarity(body_emb.view(), emb.view()) as f64;
+            if sim > 0.45 { // threshold: meaningful semantic similarity
+                if best.as_ref().map_or(true, |(_, s)| sim > *s) {
+                    best = Some((name.clone(), sim));
+                }
+            }
+        }
+        best
+    }
+
     /// Compact summary of all accounts with domains, manager, and linked contacts for pre-grounding.
     /// Includes industry/country/description when available to help resolve account paraphrases.
     pub fn accounts_summary(&self) -> String {
@@ -577,6 +644,21 @@ impl CrmGraph {
         }
         lines.sort();
         lines.join("\n")
+    }
+
+    /// Build account signatures for semantic matching (name + industry + country + description).
+    pub fn account_signatures(&self) -> Vec<(String, String)> {
+        let mut sigs = Vec::new();
+        for idx in self.graph.node_indices() {
+            if let Node::Account { ref name, ref industry, ref country, ref description, .. } = self.graph[idx] {
+                let mut parts = vec![name.clone()];
+                if let Some(ind) = industry { parts.push(ind.clone()); }
+                if let Some(cty) = country { parts.push(cty.clone()); }
+                if let Some(desc) = description { parts.push(desc.clone()); }
+                sigs.push((name.clone(), parts.join(" ")));
+            }
+        }
+        sigs
     }
 
     /// Compact summary of all contacts with their accounts for pre-grounding.

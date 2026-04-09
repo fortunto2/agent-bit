@@ -139,16 +139,15 @@ pub(crate) fn analyze_inbox_content(inbox_content: &str) -> String {
 /// Extract company reference from invoice/resend requests.
 pub(crate) fn extract_company_ref(text: &str) -> Option<String> {
     let lower = text.to_lowercase();
-    // Look for "invoice for X" or "resend ... for X"
-    for pattern in &["invoice for ", "invoices for ", "resend invoice"] {
+    // Look for "invoice for X", "resend ... for X" — extract the referenced entity
+    for pattern in &["invoice for ", "invoices for ", "resend invoice for "] {
         if let Some(pos) = lower.find(pattern) {
             let after = &text[pos + pattern.len()..];
-            // Take until period, question mark, or newline
             let company: String = after
                 .chars()
                 .take_while(|c| *c != '.' && *c != '?' && *c != '\n')
                 .collect();
-            let trimmed = company.trim();
+            let trimmed = company.trim().trim_matches('"');
             if !trimmed.is_empty() && trimmed.len() > 2 {
                 return Some(trimmed.to_string());
             }
@@ -156,6 +155,10 @@ pub(crate) fn extract_company_ref(text: &str) -> Option<String> {
     }
     None
 }
+
+// AI-NOTE: Cross-account paraphrase detection uses ONNX embeddings in crm_graph.rs.
+// CrmGraph::detect_cross_account() encodes inbox body + account signatures via MiniLM,
+// computes cosine similarity, and finds the best-matching non-sender account.
 
 /// Classify a single inbox file using ML classifier + NLI + CRM graph.
 /// Falls back to 2-way ensemble (ML + structural) if NLI is not available.
