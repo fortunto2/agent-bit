@@ -265,6 +265,12 @@ impl WorkflowState {
                 }
             }
             "write" => {
+                if self.write_paths.contains(&norm) {
+                    msgs.push(format!(
+                        "⚠ You already wrote '{}'. Do NOT rewrite the same file. Move on to the next step or call answer().",
+                        norm
+                    ));
+                }
                 self.write_paths.push(norm.clone());
                 self.reads_since_write = 0;
                 if self.phase == Phase::Reading {

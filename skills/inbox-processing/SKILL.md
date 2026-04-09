@@ -28,6 +28,7 @@ OUTBOX SEQUENCE:
   - Use that ID for first email, increment for each subsequent email
   - Write seq.json ONCE at the end with the final next-ID
   - Example: seq=100 → write 100.json, 101.json → update seq to 102
+  - NEVER re-write the same outbox file. Write ONCE → move on. Do NOT overwrite or retry.
 
 EXAMPLE — Multi-inbox with admin channel:
   Context shows 3 inbox messages (already loaded, do NOT re-read):
