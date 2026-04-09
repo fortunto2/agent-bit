@@ -93,44 +93,98 @@ fn load_runs() -> Vec<RunData> {
     parse_log_md_runs()
 }
 
-/// Find log file for task+run combination.
-fn find_log(task: &str, run_idx: usize) -> String {
-    // Try /tmp/evolve-{task}.log, /tmp/{task}.log, benchmarks/tasks/{task}/*/run.log
-    let candidates = [
-        format!("/tmp/evolve-{}.log", task),
-        format!("/tmp/{}.log", task),
-        format!("/tmp/{}v2.log", task),
-    ];
-    for c in &candidates {
-        if Path::new(c).exists() {
-            if let Ok(content) = std::fs::read_to_string(c) {
-                return content;
-            }
+/// Find and render log for task+run combination.
+/// Priority: /tmp logs → dump files (pipeline + inbox + contacts) → BitGN URL.
+fn find_log(task: &str, _run_idx: usize) -> String {
+    // 1. Try /tmp logs (from recent runs)
+    for suffix in &["", "v2", "v3", "-retry"] {
+        let path = if suffix.is_empty() {
+            format!("/tmp/evolve-{}.log", task)
+        } else {
+            format!("/tmp/{}{}.log", task, suffix)
+        };
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if !content.is_empty() { return content; }
         }
     }
-    // Try benchmarks/tasks/{task}/*/run.log
+
+    // 2. Try benchmarks/tasks/{task}/ dump directory
     let task_dir = format!("benchmarks/tasks/{}", task);
     if let Ok(entries) = std::fs::read_dir(&task_dir) {
         let mut dirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
         dirs.sort_by_key(|e| e.file_name());
         if let Some(latest) = dirs.last() {
-            let log_path = latest.path().join("run.log");
-            if let Ok(content) = std::fs::read_to_string(&log_path) {
-                return content;
+            let dir = latest.path();
+            let mut out = String::new();
+
+            // Header: trial ID
+            out.push_str(&format!("━━━ {} — {} ━━━\n\n", task, dir.file_name().unwrap_or_default().to_string_lossy()));
+
+            // BitGN URL
+            if let Ok(url) = std::fs::read_to_string(dir.join("bitgn_log.url")) {
+                out.push_str(&format!("🔗 BitGN: {}\n\n", url.trim()));
             }
-            // Try bitgn_log.url
-            let url_path = latest.path().join("bitgn_log.url");
-            if let Ok(url) = std::fs::read_to_string(&url_path) {
-                return format!("BitGN log: {}\n\nDump files:\n{}", url.trim(),
-                    std::fs::read_dir(latest.path())
-                        .into_iter().flatten().flatten()
-                        .map(|e| format!("  {}", e.file_name().to_string_lossy()))
-                        .collect::<Vec<_>>().join("\n")
-                );
+
+            // Pipeline info
+            if let Ok(content) = std::fs::read_to_string(dir.join("pipeline.txt")) {
+                out.push_str("── Pipeline ──\n");
+                out.push_str(&content);
+                out.push_str("\n\n");
             }
+
+            // Inbox files (show content with classification headers)
+            let mut inbox_files: Vec<_> = std::fs::read_dir(&dir)
+                .into_iter().flatten().flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with("inbox_"))
+                .collect();
+            inbox_files.sort_by_key(|e| e.file_name());
+            if !inbox_files.is_empty() {
+                out.push_str("── Inbox ──\n");
+                for f in &inbox_files {
+                    if let Ok(content) = std::fs::read_to_string(f.path()) {
+                        out.push_str(&content);
+                        out.push_str("\n---\n");
+                    }
+                }
+                out.push('\n');
+            }
+
+            // Contacts summary
+            if let Ok(content) = std::fs::read_to_string(dir.join("contacts.txt")) {
+                let lines: Vec<&str> = content.lines().take(15).collect();
+                out.push_str(&format!("── Contacts ({} lines) ──\n", content.lines().count()));
+                out.push_str(&lines.join("\n"));
+                out.push_str("\n\n");
+            }
+
+            // Accounts summary
+            if let Ok(content) = std::fs::read_to_string(dir.join("accounts.txt")) {
+                let lines: Vec<&str> = content.lines().take(15).collect();
+                out.push_str(&format!("── Accounts ({} lines) ──\n", content.lines().count()));
+                out.push_str(&lines.join("\n"));
+                out.push_str("\n\n");
+            }
+
+            // Tree
+            if let Ok(content) = std::fs::read_to_string(dir.join("tree.txt")) {
+                out.push_str("── Tree ──\n");
+                out.push_str(&content);
+                out.push_str("\n\n");
+            }
+
+            // AGENTS.md
+            if let Ok(content) = std::fs::read_to_string(dir.join("agents.md")) {
+                let lines: Vec<&str> = content.lines().take(20).collect();
+                out.push_str("── AGENTS.md ──\n");
+                out.push_str(&lines.join("\n"));
+                out.push('\n');
+            }
+
+            if !out.is_empty() { return out; }
         }
     }
-    format!("No log found for {} (run #{})\n\nTried:\n  /tmp/evolve-{t}.log\n  /tmp/{t}.log\n  benchmarks/tasks/{t}/*/run.log", task, run_idx, t=task)
+
+    format!("No data for {}\n\nRun with DUMP_TRIAL=1:\n  DUMP_TRIAL=1 cargo run -- --provider nemotron --task {}", task, task)
 }
 
 fn run_app() -> io::Result<()> {
