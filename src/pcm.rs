@@ -42,25 +42,49 @@ impl PcmClient {
         anyhow::anyhow!("PCM {} failed: {}", method, e)
     }
 
+    /// Cache-through helper: return cached value or fetch, cache, and return.
+    async fn cached<F, Fut>(&self, key: &str, fetch: F) -> Result<String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<String>>,
+    {
+        if let Ok(cache) = self.read_cache.lock() {
+            if let Some(hit) = cache.get(key) {
+                return Ok(hit.clone());
+            }
+        }
+        let result = fetch().await?;
+        if let Ok(mut cache) = self.read_cache.lock() {
+            cache.insert(key.to_string(), result.clone());
+        }
+        Ok(result)
+    }
+
     pub async fn tree(&self, root: &str, level: i32) -> Result<String> {
-        let resp = self.inner.tree(proto::TreeRequest {
-            root: root.into(), level, ..Default::default()
-        }).await.map_err(|e| Self::err("Tree", e))?;
-        let v = resp.view();
-        Ok(format!("$ tree -L {} {}\n{}", level, root, format_tree_entry(&v.root, "", true)))
+        let inner = &self.inner;
+        self.cached(&format!("__tree__{root}_{level}"), || async move {
+            let resp = inner.tree(proto::TreeRequest {
+                root: root.into(), level, ..Default::default()
+            }).await.map_err(|e| Self::err("Tree", e))?;
+            let v = resp.view();
+            Ok(format!("$ tree -L {} {}\n{}", level, root, format_tree_entry(&v.root, "", true)))
+        }).await
     }
 
     pub async fn list(&self, path: &str) -> Result<String> {
-        let resp = self.inner.list(proto::ListRequest {
-            name: path.into(), ..Default::default()
-        }).await.map_err(|e| Self::err("List", e))?;
-        let v = resp.view();
-        let mut out = format!("$ ls {}\n", path);
-        for e in &v.entries {
-            if e.is_dir { out.push_str(&format!("{}/\n", e.name)); }
-            else { out.push_str(&format!("{}\n", e.name)); }
-        }
-        Ok(out)
+        let inner = &self.inner;
+        self.cached(&format!("__list__{path}"), || async move {
+            let resp = inner.list(proto::ListRequest {
+                name: path.into(), ..Default::default()
+            }).await.map_err(|e| Self::err("List", e))?;
+            let v = resp.view();
+            let mut out = format!("$ ls {}\n", path);
+            for e in &v.entries {
+                if e.is_dir { out.push_str(&format!("{}/\n", e.name)); }
+                else { out.push_str(&format!("{}\n", e.name)); }
+            }
+            Ok(out)
+        }).await
     }
 
     pub async fn read(&self, path: &str, number: bool, start_line: i32, end_line: i32) -> Result<String> {
@@ -193,9 +217,12 @@ impl PcmClient {
     }
 
     pub async fn context(&self) -> Result<String> {
-        let resp = self.inner.context(proto::ContextRequest::default())
-            .await.map_err(|e| Self::err("Context", e))?;
-        Ok(format!("$ date\n{}", resp.view().time))
+        let inner = &self.inner;
+        self.cached("__context__", || async move {
+            let resp = inner.context(proto::ContextRequest::default())
+                .await.map_err(|e| Self::err("Context", e))?;
+            Ok(format!("$ date\n{}", resp.view().time))
+        }).await
     }
 
     pub async fn answer(&self, message: &str, outcome: &str, refs: &[String]) -> Result<()> {
