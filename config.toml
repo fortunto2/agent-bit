@@ -75,6 +75,15 @@ reasoning_effort = "none"        # Required for FC on reasoning models
 use_chat_api = true              # DeepInfra doesn't support Responses API
 prompt_cache_key = "pac1-v1"     # Server-side prompt prefix caching
 
+[providers.nemotron-70b]
+model = "nvidia/Llama-3.1-Nemotron-70B-Instruct"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key = "REDACTED_DEEPINFRA_KEY"
+temperature = 0.1
+planning_temperature = 0.2
+use_chat_api = true
+prompt_cache_key = "pac1-v1"
+
 [providers.nemotron-v2]
 model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
