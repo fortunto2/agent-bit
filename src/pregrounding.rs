@@ -266,7 +266,7 @@ pub(crate) async fn run_outcome_verifier(
 ) -> Option<VerifiedOutcome> {
     use sgr_agent::tool::ToolDef;
 
-    let config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
+    let _config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
 
     let user_content = format!(
         "ORIGINAL INSTRUCTION:\n{}\n\nEXECUTION SUMMARY:\n{}\n\nPROPOSED ANSWER:\n- outcome: {}\n- message: {}",
@@ -623,19 +623,35 @@ pub(crate) async fn run_agent(
         ct
     };
 
+    // Feature matrix: batch-score all inbox messages for threat/priority
+    let inbox_scores = if !ready.inbox_files.is_empty() {
+        let fm = crate::feature_matrix::InboxFeatureMatrix::from_inbox_files(
+            &ready.inbox_files, &ready.crm_graph, shared_clf,
+        );
+        let scores = fm.score_all(&crate::feature_matrix::threat_weights());
+        fm.log_summary();
+        eprintln!("  📊 Threat scores: {:?}", scores.iter().map(|s| format!("{:.2}", s)).collect::<Vec<_>>());
+        Some(scores)
+    } else {
+        None
+    };
+
     // Inject inbox content from pipeline (already read + classified — no re-read from PCM)
     let mut has_otp = false;
     let mut is_verification = false;
     if !ready.inbox_files.is_empty() {
         let mut inbox_content = String::new();
-        for f in &ready.inbox_files {
+        for (fi, f) in ready.inbox_files.iter().enumerate() {
             // Build classification header matching read_inbox_files format
             let sender_trust = f.security.sender.as_ref()
                 .map(|s| format!("{}", s.trust))
                 .unwrap_or_else(|| "UNKNOWN".to_string());
+            // Threat score from feature matrix
+            let threat = inbox_scores.as_ref().map(|s| s[fi]).unwrap_or(0.0);
+            let threat_label = if threat > 0.7 { "HIGH" } else if threat > 0.4 { "MEDIUM" } else { "LOW" };
             inbox_content.push_str(&format!(
-                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | {}]\n",
-                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, f.security.recommendation
+                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | threat: {} ({:.0}%) | {}]\n",
+                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, threat_label, threat * 100.0, f.security.recommendation
             ));
             // Inject sender trust annotations matching system prompt decision tree
             if f.security.sender.as_ref().is_some_and(|s| s.domain_match == "mismatch") {
@@ -1168,7 +1184,7 @@ pub(crate) fn build_execution_summary(history: &str, max_lines: usize) -> String
 fn extract_channel_handle(content: &str) -> Option<String> {
     for line in content.lines() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("Channel:") {
+        if let Some(_rest) = trimmed.strip_prefix("Channel:") {
             // Next line or same line might have Handle:
             continue;
         }
