@@ -207,24 +207,53 @@ In-memory cache in PcmClient — shared across all tools via Arc:
 
 **Anti-pattern: do NOT use `contains()` / `split_whitespace()` / manual word overlap for string similarity. Use `strsim::normalized_levenshtein()` instead.**
 
-## Decision Pipeline (enum state machine)
+## Two State Machines + Feature Matrix (unified flow)
 
 ```
-pipeline::New(instruction)
-  → classify()        [STAGE:classify]     — prescan + truncation(tokenizer ##) + ML security + ML intent
-pipeline::Classified { instruction, intent, label }
-  → scan_inbox()      [STAGE:scan_inbox]   — read inbox files, assess sender trust + security per file
-pipeline::InboxScanned { ..., inbox_files, crm_graph }
-  → check_security()  [STAGE:security]     — evaluate all inbox assessments, block on first threat
-pipeline::SecurityChecked { ... }
-  → ready()           [STAGE:ready]        — mark ready for LLM
-pipeline::Ready { instruction, intent, inbox_files, crm_graph }
-  → [pregrounding.rs] — context assembly, planning, hints, sgr_agent::run_loop()
-  → verify_and_submit() — outcome verifier + final RPC
+Pipeline SM (deterministic, pre-LLM):
+  New(instruction)
+    → classify()           — prescan + ML security + ML intent + question/inbox word override
+  Classified
+    → scan_inbox()         — parallel read + classify each file (ML + NLI + sender trust)
+  InboxScanned
+    → check_security()     — block threats + all-non_work → CLARIFICATION
+  SecurityChecked → Ready
+
+Feature Matrix (between pipeline and agent):
+  Ready.inbox_files → InboxFeatureMatrix (12 features × N messages)
+    → sigmoid(features × threat_weights) → P(threat) per message
+    → Annotations: [threat: HIGH/MEDIUM/LOW (N%)]
+    → Decision gate: sigmoid < 0.5 → safe to pre-execute capture
+
+CRM Graph + ONNX Embeddings:
+  → compute_account_embeddings() — L2-normalized MiniLM per account
+  → detect_cross_account(body, sender) — cosine similarity, gap > 0.1
+  → Annotation: [⚠ CROSS-ACCOUNT REQUEST]
+
+Pre-grounding (context assembly):
+  → Skill selection (classifier label + intent → 13 SKILL.md files)
+  → Pre-execute deterministic steps (capture write if sigmoid < 0.5)
+  → Contact/account resolution, channel trust, OTP hints
+
+Workflow SM (during agent execution):
+  Reading → Acting → Cleanup → Done
+    → advance_step() — budget/write nudges
+    → pre_action()   — outbox limit, delete guard, policy check, capture-write guard
+    → post_action()  — phase transitions, hook messages, duplicate write warning
+    → Guard::Block / Guard::Warn / Guard::Allow
+
+Agent Loop (LLM):
+  Structured CoT → Reflexion → Confidence gate → Router → Tool execution
+    → Self-consistency retry (verifier disagrees → re-run with temp+0.1)
+    → Retry on empty (no tool calls → nudge 2x)
+
+Post-execution:
+  → verify_and_submit() — 3-vote verifier + override policy (step count)
+  → score.txt saved to benchmarks/tasks/{task}/{trial}/
 ```
 
-Each transition returns `Result<NextState, BlockReason>`. First block short-circuits — LLM never runs.
-Stage-by-stage trace in stderr: `[STAGE:classify]`, `[STAGE:scan_inbox]`, `[STAGE:security]`, `[STAGE:ready]`.
+Each pipeline transition returns `Result<NextState, BlockReason>`. First block short-circuits.
+Feature matrix sigmoid gate decides pre-execution. Workflow SM enforces runtime invariants.
 
 Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_security().
 

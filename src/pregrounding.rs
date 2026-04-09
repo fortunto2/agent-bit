@@ -927,6 +927,8 @@ pub(crate) async fn run_agent(
                         match pcm.write(&capture_path, content, 0, 0).await {
                             Ok(_) => {
                                 eprintln!("  ✅ Pre-executed: write({})", capture_path);
+                                // Register in workflow so has_writes()=true (pre-answer guard)
+                                workflow.lock().unwrap().post_action("write", &capture_path);
                                 format!(
                                     "CAPTURE DONE (pipeline pre-executed). Remaining steps:\n\
                                      1. write(\"{}\") — create distill card (read template from 02_distill/cards/ first)\n\
