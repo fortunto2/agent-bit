@@ -57,6 +57,8 @@ pub struct WorkflowState {
     is_capture: bool,
     /// Whether instruction explicitly mentions delete/remove
     allows_delete: bool,
+    /// Consecutive reads since last write/delete (detects read-loops)
+    reads_since_write: usize,
     /// Verification-only mode — ZERO file changes allowed (OTP oracle)
     pub verification_only: bool,
     /// OTP with additional task (write email etc) — DENIED not allowed (OTP proves auth)
@@ -90,6 +92,7 @@ impl WorkflowState {
             hooks,
             is_capture,
             allows_delete,
+            reads_since_write: 0,
             verification_only: false,
             otp_with_task: false,
         }
@@ -130,8 +133,13 @@ impl WorkflowState {
             msgs.push("✏️ You have read multiple files but written nothing. Start writing NOW.".into());
         }
 
-        // Capture-delete nudge: 50%+ steps, capture task, inbox read but not deleted
-        if self.is_capture && pct >= 50 {
+        // Read-loop nudge: 3+ consecutive reads since last write/delete
+        if self.reads_since_write >= 3 && !self.write_paths.is_empty() {
+            msgs.push("✏️ STOP re-reading. You have the data — write() or delete() NOW.".into());
+        }
+
+        // Capture-delete nudge: 30%+ steps, capture task, inbox read but not deleted
+        if self.is_capture && pct >= 30 {
             let has_inbox_read = self.read_paths.iter().any(|p| p.contains("inbox"));
             let has_inbox_delete = self.delete_paths.iter().any(|p| p.contains("inbox"));
             if has_inbox_read && !has_inbox_delete && !self.write_paths.is_empty() {
@@ -248,6 +256,7 @@ impl WorkflowState {
                 if !self.read_paths.contains(&norm) {
                     self.read_paths.push(norm.clone());
                 }
+                self.reads_since_write += 1;
                 // Warn about reading files that are already pre-loaded in context
                 if self.read_paths.len() > 5 && self.phase == Phase::Reading && self.write_paths.is_empty() {
                     if self.read_paths.len() == 6 {
@@ -257,12 +266,14 @@ impl WorkflowState {
             }
             "write" => {
                 self.write_paths.push(norm.clone());
+                self.reads_since_write = 0;
                 if self.phase == Phase::Reading {
                     self.phase = Phase::Acting;
                 }
             }
             "delete" => {
                 self.delete_paths.push(norm.clone());
+                self.reads_since_write = 0;
                 if self.phase == Phase::Acting
                     || (self.intent == "intent_delete" && self.phase == Phase::Reading)
                 {
