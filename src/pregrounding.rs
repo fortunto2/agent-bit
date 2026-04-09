@@ -249,7 +249,8 @@ pub(crate) struct VerifiedOutcome {
     pub confidence: f64,
 }
 
-/// Post-execution verifier: single LLM call to validate the agent's outcome classification.
+/// Post-execution verifier: self-consistency via 3 parallel LLM calls + majority vote.
+/// AI-NOTE: RAG Challenge winner pattern — self-consistency reduces non-determinism.
 /// Falls back to proposed answer on any LLM error.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_outcome_verifier(
@@ -266,17 +267,11 @@ pub(crate) async fn run_outcome_verifier(
     use sgr_agent::tool::ToolDef;
 
     let config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
-    let llm = Llm::new(&config);
 
     let user_content = format!(
         "ORIGINAL INSTRUCTION:\n{}\n\nEXECUTION SUMMARY:\n{}\n\nPROPOSED ANSWER:\n- outcome: {}\n- message: {}",
         instruction, execution_summary, proposed_outcome, proposed_message,
     );
-
-    let messages = vec![
-        Message::system(prompts::VERIFIER_PROMPT),
-        Message::user(&user_content),
-    ];
 
     let tool_schema = prompts::verify_outcome_tool_def();
     let func = &tool_schema["function"];
@@ -286,23 +281,104 @@ pub(crate) async fn run_outcome_verifier(
         parameters: func["parameters"].clone(),
     };
 
-    match llm.tools_call_stateful(&messages, &[tool_def], None).await {
-        Ok((calls, _response_id)) => {
-            if let Some(call) = calls.into_iter().find(|c| c.name == "verify_outcome") {
-                let outcome = call.arguments["outcome"].as_str().unwrap_or(proposed_outcome).to_string();
-                let reason = call.arguments["reason"].as_str().unwrap_or("").to_string();
-                let confidence = call.arguments["confidence"].as_f64().unwrap_or(0.5);
-                Some(VerifiedOutcome { outcome, reason, confidence })
-            } else {
-                eprintln!("  ⚠ Verifier: no verify_outcome call returned");
-                None
+    // AI-NOTE: Agree-fast self-consistency (RAG Challenge winner pattern).
+    // 1st call: if agrees with proposed → done (fast path, ~70% of cases).
+    // 1st disagrees → 2 more parallel calls → majority vote (slow path for contested outcomes).
+
+    // Helper: spawn a verifier call
+    fn spawn_verifier_call(
+        model: &str, base_url: Option<&str>, api_key: &str,
+        extra_headers: &[(String, String)], temperature: f32,
+        user_content: String, tool_def: sgr_agent::tool::ToolDef, proposed_outcome: String,
+    ) -> tokio::task::JoinHandle<Option<VerifiedOutcome>> {
+        let cfg = make_llm_config(model, base_url, api_key, extra_headers, temperature);
+        let td = tool_def;
+        let po = proposed_outcome;
+        tokio::spawn(async move {
+            let llm = Llm::new(&cfg);
+            let messages = vec![
+                Message::system(prompts::VERIFIER_PROMPT),
+                Message::user(&user_content),
+            ];
+            match llm.tools_call_stateful(&messages, &[td], None).await {
+                Ok((calls, _)) => {
+                    if let Some(call) = calls.into_iter().find(|c| c.name == "verify_outcome") {
+                        let outcome = call.arguments["outcome"].as_str().unwrap_or(&po).to_string();
+                        let reason = call.arguments["reason"].as_str().unwrap_or("").to_string();
+                        let confidence = call.arguments["confidence"].as_f64().unwrap_or(0.5);
+                        Some(VerifiedOutcome { outcome, reason, confidence })
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => None,
             }
-        }
-        Err(e) => {
-            eprintln!("  ⚠ Verifier LLM error: {:#}", e);
-            None
-        }
+        })
     }
+
+    // Fast path: single call
+    let first = spawn_verifier_call(
+        model, base_url, api_key, extra_headers, temperature,
+        user_content.clone(), tool_def.clone(), proposed_outcome.to_string(),
+    );
+    let first_result = match first.await {
+        Ok(Some(v)) => v,
+        _ => {
+            eprintln!("  ⚠ Verifier: 1st call failed");
+            return None;
+        }
+    };
+
+    // If 1st agrees with proposed → done (fast path)
+    if first_result.outcome == proposed_outcome {
+        eprintln!("  🗳️ Verifier: agree (fast path, conf={:.2})", first_result.confidence);
+        return Some(first_result);
+    }
+
+    // Disagreement → 2 more parallel calls for majority vote
+    eprintln!("  🗳️ Verifier: 1st disagrees ({}→{}), running 2 more...",
+        proposed_outcome, first_result.outcome);
+    let h2 = spawn_verifier_call(
+        model, base_url, api_key, extra_headers, temperature,
+        user_content.clone(), tool_def.clone(), proposed_outcome.to_string(),
+    );
+    let h3 = spawn_verifier_call(
+        model, base_url, api_key, extra_headers, temperature,
+        user_content, tool_def, proposed_outcome.to_string(),
+    );
+    let (r2, r3) = tokio::join!(h2, h3);
+
+    let mut results = vec![first_result];
+    if let Ok(Some(v)) = r2 { results.push(v); }
+    if let Ok(Some(v)) = r3 { results.push(v); }
+
+    // Majority vote
+    let mut votes: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for r in &results {
+        *votes.entry(&r.outcome).or_insert(0) += 1;
+    }
+    let (majority_outcome, majority_count) = votes.iter()
+        .max_by_key(|(_, v)| **v)
+        .map(|(k, v)| (*k, *v))
+        .unwrap();
+
+    let best = results.iter()
+        .filter(|r| r.outcome == majority_outcome)
+        .max_by(|a, b| a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap();
+
+    eprintln!("  🗳️ Verifier votes: {} ({}/{} agree)",
+        majority_outcome, majority_count, results.len());
+
+    Some(VerifiedOutcome {
+        outcome: best.outcome.clone(),
+        reason: best.reason.clone(),
+        confidence: if majority_count == results.len() {
+            best.confidence.max(0.9)
+        } else {
+            best.confidence * 0.7
+        },
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -773,6 +849,15 @@ pub(crate) async fn run_agent(
                 n
             )));
         }
+    }
+
+    // External URL hint: instruction references external API → UNSUPPORTED
+    if crate::pipeline::has_external_url(&ready.instruction) {
+        messages.push(Message::user(
+            "⚠ This instruction references an EXTERNAL URL/API. \
+             You CANNOT access external APIs, deploy, or upload to URLs. \
+             Answer OUTCOME_NONE_UNSUPPORTED immediately."
+        ));
     }
 
     // Scale max_steps for multi-inbox: 5+ messages need more room

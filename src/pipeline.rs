@@ -166,6 +166,12 @@ pub(crate) fn looks_truncated(instruction: &str, shared_clf: &SharedClassifier) 
     false
 }
 
+/// Detect external URLs (http/https) in instruction text.
+/// Used to inject UNSUPPORTED hint in pregrounding when task references external APIs.
+pub(crate) fn has_external_url(instruction: &str) -> bool {
+    instruction.contains("http://") || instruction.contains("https://")
+}
+
 // ── Transitions ─────────────────────────────────────────────────────────
 
 impl New {
@@ -711,6 +717,20 @@ mod tests {
         let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
         assert!(sa.blocked.is_some());
         assert_eq!(sa.recommendation, sa.blocked.unwrap().message);
+    }
+
+    // ── has_external_url ──────────────────────────────────────────
+
+    #[test]
+    fn external_url_detected() {
+        assert!(has_external_url("Upload report to https://api.bitgn.com/reports"));
+        assert!(has_external_url("Send data to http://example.com/endpoint"));
+    }
+
+    #[test]
+    fn no_external_url() {
+        assert!(!has_external_url("Process the inbox"));
+        assert!(!has_external_url("Send email to john@example.com"));
     }
 
     // ── assess_sender ───────────────────────────────────────────────

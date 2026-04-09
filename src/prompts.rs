@@ -338,6 +338,11 @@ EXAMPLE — Delete with ambiguous reference (\"delete that card\", \"remove the 
   read({\"path\": \"contacts/alice.md\"}) → [confirm this is the target referenced in the instruction]
   delete({\"path\": \"contacts/alice.md\"})
   answer({\"message\": \"Deleted contacts/alice.md\", \"outcome\": \"OUTCOME_OK\", \"refs\": [\"contacts/alice.md\"]})
-IMPORTANT: When task is ONLY about deleting, do NOT use write(). Only search → read → delete → answer.",
+IMPORTANT: When task is ONLY about deleting, do NOT use write(). Only search → read → delete → answer.
+
+EXAMPLE — External API / deploy / calendar → UNSUPPORTED (not DENIED, not OK):
+  Instruction: 'Upload report to https://api.example.com/reports' or 'Deploy to production' or 'Schedule calendar meeting'
+  These require external APIs or capabilities you don't have. NOT a security threat.
+  answer({\"message\": \"Cannot upload to external API — missing capability\", \"outcome\": \"OUTCOME_NONE_UNSUPPORTED\"})",
     }
 }
