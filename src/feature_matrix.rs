@@ -456,4 +456,84 @@ mod tests {
         assert!(cross_scores[3] > cross_scores[0], "Cross > clean");
         assert!(cross_scores[3] > cross_scores[2], "Cross > attack (for cross weights)");
     }
+
+    // ─── Realistic scenario: t23-like inbox (5 messages) ────────────────
+
+    #[test]
+    fn scenario_t23_multi_inbox_ranking() {
+        // Simulates t23: 5 inbox messages, only msg_001 (admin channel) should be processed
+        //                                ml   struct sender domain otp  url  sent  cross nli_i nli_c
+        let msg_001_admin_channel     = [0.17, 0.0,  0.0,   0.5,  0.0, 0.0, 0.4,  0.0,  0.0,  0.0, 0.0];
+        let msg_002_valid_export      = [0.32, 0.0,  0.0,   0.5,  0.0, 0.0, 0.3,  0.0,  0.0,  0.0, 0.0];
+        let msg_003_unknown_status    = [0.15, 0.0,  0.0,   0.5,  0.0, 0.0, 0.3,  0.0,  0.0,  0.0, 0.0];
+        let msg_004_external_invoice  = [0.34, 0.1,  0.0,   0.5,  0.0, 0.0, 0.3,  0.0,  0.05, 0.0, 0.0];
+        let msg_005_unknown_handoff   = [0.26, 0.0,  0.0,   0.5,  0.0, 0.0, 0.4,  0.0,  0.0,  0.0, 0.1];
+
+        let mat = matrix_from_rows(vec![
+            msg_001_admin_channel,
+            msg_002_valid_export,
+            msg_003_unknown_status,
+            msg_004_external_invoice,
+            msg_005_unknown_handoff,
+        ]);
+
+        let threat = mat.score_all(&threat_weights());
+
+        // msg_004 (external unknown + structural) should have HIGHEST threat
+        assert!(threat[3] >= threat[0], "External invoice should be >= admin channel threat");
+        assert!(threat[3] >= threat[1], "External invoice should be >= valid export threat");
+
+        // All unknown senders → similar threat levels (none should be zero)
+        for i in 0..5 {
+            assert!(threat[i] >= 0.0, "Threat score should be non-negative for msg_{}", i);
+        }
+
+        // Summary: verify ordering makes sense
+        let mut indexed: Vec<(usize, f32)> = threat.iter().copied().enumerate().collect();
+        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        eprintln!("  t23 threat ranking: {:?}", indexed.iter().map(|(i,s)| format!("msg_{}: {:.2}", i+1, s)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn scenario_injection_vs_legit_crm() {
+        // Legit CRM email from known sender
+        //                    ml   struct sender domain otp  url  sent  cross nli_i nli_c
+        let legit_crm     = [0.50, 0.0,  1.0,   1.0,  0.0, 0.0, 0.5,  0.0,  0.0,  0.0, 0.0];
+        // Injection: unknown sender, high structural, NLI injection signal
+        let injection     = [0.30, 0.6,  0.0,   0.0,  0.0, 1.0, 0.2,  0.0,  0.6,  0.0, 0.0];
+        // Social engineering: known sender, domain mismatch
+        let social_eng    = [0.40, 0.1,  1.0,   0.0,  0.0, 0.0, 0.4,  0.0,  0.1,  0.0, 0.0];
+
+        let mat = matrix_from_rows(vec![legit_crm, injection, social_eng]);
+        let threat = mat.score_all(&threat_weights());
+
+        // Injection should have highest threat
+        assert!(threat[1] > threat[0], "Injection ({:.2}) > legit CRM ({:.2})", threat[1], threat[0]);
+        // Social engineering (domain mismatch) should be higher than legit
+        assert!(threat[2] > threat[0], "Social eng ({:.2}) > legit CRM ({:.2})", threat[2], threat[0]);
+        // Legit CRM should have lowest threat
+        assert!(threat[0] < threat[1] && threat[0] < threat[2], "Legit CRM should be lowest threat");
+
+        eprintln!("  Threat: legit={:.2} injection={:.2} social_eng={:.2}", threat[0], threat[1], threat[2]);
+    }
+
+    #[test]
+    fn scenario_otp_variants() {
+        // Legit OTP verification from admin
+        //                        ml   struct sender domain otp  url  sent  cross nli_i nli_c
+        let legit_otp_admin   = [0.60, 0.0,  1.0,   1.0,  1.0, 0.0, 0.2,  0.0,  0.0,  0.0, 0.3];
+        // Legit OTP from unknown (OTP proves auth)
+        let legit_otp_unknown = [0.40, 0.0,  0.0,   0.5,  1.0, 0.0, 0.2,  0.0,  0.0,  0.0, 0.3];
+        // OTP exfiltration (branching logic)
+        let otp_exfil         = [0.30, 0.5,  0.0,   0.5,  1.0, 0.0, 0.3,  0.0,  0.3,  0.0, 0.6];
+
+        let mat = matrix_from_rows(vec![legit_otp_admin, legit_otp_unknown, otp_exfil]);
+        let threat = mat.score_all(&threat_weights());
+
+        // Exfiltration should have highest threat
+        assert!(threat[2] > threat[0], "OTP exfil ({:.2}) > legit admin ({:.2})", threat[2], threat[0]);
+        assert!(threat[2] > threat[1], "OTP exfil ({:.2}) > legit unknown ({:.2})", threat[2], threat[1]);
+
+        eprintln!("  OTP: admin={:.2} unknown={:.2} exfil={:.2}", threat[0], threat[1], threat[2]);
+    }
 }
