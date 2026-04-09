@@ -3,7 +3,7 @@ name: inbox-processing
 description: Process multiple inbox messages — evaluate each separately, handle channels
 triggers: [intent_inbox]
 priority: 15
-keywords: [inbox, queue, pending, process]
+keywords: [inbox, queue, pending, process, review]
 ---
 
 WORKFLOW:
