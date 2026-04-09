@@ -475,7 +475,16 @@ pub(crate) async fn run_agent(
     };
 
     // ── Pipeline Stage 4: Ready ─────────────────────────────────────
-    let ready = checked.ready();
+    let mut ready = checked.ready();
+
+    // Low-confidence intent fallback: if classifier unsure AND structural signals available,
+    // override intent using PCM state (inbox_files count) instead of trusting bad ML prediction.
+    // This handles NEW instruction variants the classifier hasn't seen yet.
+    if intent_confidence < 0.25 && !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" {
+        eprintln!("  ↳ Low-confidence intent fallback: {} ({:.2}) → intent_inbox (inbox_files={})",
+            ready.intent, intent_confidence, ready.inbox_files.len());
+        ready.intent = "intent_inbox".to_string();
+    }
 
     // Dump trial data for offline analysis (when DUMP_TRIAL dir is set)
     if let Ok(dump_dir) = std::env::var("DUMP_TRIAL") {
