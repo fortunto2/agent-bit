@@ -307,14 +307,19 @@ Providers in `config.toml`. Key fields per provider:
 - Single prompt for all models (explicit decision tree). No prompt_mode needed.
 - `headers` -- extra HTTP headers (e.g. CF Gateway timeout)
 
-## Evolution Log
+## Evolution Log — ОБЯЗАТЕЛЬНО ОБНОВЛЯТЬ
 
-**`LOG.md`** — хронология экспериментов, гипотез и benchmark результатов. Обязательно обновлять после каждого:
-- Нового эксперимента/гипотезы
-- Benchmark run'а (score, провалы, commit)
-- Фикса задачи (что сделано, результат)
+**`LOG.md`** (корень репо) — единый лог эволюции агента. Структура:
+- **Summary** — текущий статус, архитектура, проблемные зоны
+- **Benchmark History** — таблица всех runs (дата, commit, score, провалы)
+- **Task Stability Matrix** — каждая задача: hint, best/worst, status
+- **Experiment Log** — хронологические записи, новые в конец (append-only)
 
-Формат: эксперимент → гипотеза → решение → результат → матрица стабильности.
+**КОГДА обновлять** (это блокирующее требование):
+1. После каждого `make full` / `make task` — добавить строку в Benchmark History
+2. После каждого эксперимента/фикса — добавить запись в Experiment Log
+3. После изменения стабильности задачи — обновить Task Stability Matrix
+4. После изменения архитектуры — обновить Summary
 
 ## Benchmarks
 
