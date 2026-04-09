@@ -144,22 +144,35 @@ pub(crate) fn looks_truncated(instruction: &str, shared_clf: &SharedClassifier) 
         }
     }
     let words: Vec<&str> = trimmed.split_whitespace().collect();
-    if words.len() < 3 {
+    if words.len() < 2 {
         return false;
     }
     let last = words.last().unwrap();
-    if last.len() > 5 {
-        return false; // long words unlikely truncated
-    }
-    // Use tokenizer: if last word produces continuation tokens (##), it's a word fragment
+    // Use tokenizer: check if last word is a word fragment
     let mut guard = shared_clf.lock().unwrap();
     if let Some(clf) = guard.as_mut() {
         if let Ok(encoding) = clf.tokenizer().encode(last.to_string(), false) {
             let tokens = encoding.get_tokens();
-            // If any token starts with ## → subword split → word fragment
             let has_continuation = tokens.iter().any(|t| t.starts_with("##"));
+            // Short words with continuation tokens → truncated
             if has_continuation && last.len() <= 3 {
                 return true;
+            }
+            // Longer words: suffix-completion check — if appending a suffix
+            // produces a single-token word, the base was a truncated prefix.
+            // e.g. "captur" (2 tokens) + "e" = "capture" (1 token) → truncated
+            if has_continuation && last.len() > 3 {
+                let lw = last.to_lowercase();
+                for suffix in &["e", "s", "ed", "er", "es", "ing", "ly", "ure", "tion"] {
+                    let extended = format!("{}{}", lw, suffix);
+                    if let Ok(ext_enc) = clf.tokenizer().encode(extended, false) {
+                        let ext_has_cont = ext_enc.get_tokens().iter()
+                            .any(|t| t.starts_with("##"));
+                        if !ext_has_cont {
+                            return true; // suffix completed to a vocab word
+                        }
+                    }
+                }
             }
         }
     }
@@ -610,9 +623,23 @@ mod tests {
     }
 
     #[test]
+    fn truncated_create_captur() {
+        if !models_available() { return; } // requires tokenizer
+        let clf = make_clf();
+        assert!(looks_truncated("Create captur", &clf));  // "captur" → prefix of "capture"
+    }
+
+    #[test]
     fn not_truncated_normal() {
         let clf = make_clf();
         assert!(!looks_truncated("Process the inbox", &clf));
+    }
+
+    #[test]
+    fn not_truncated_two_words() {
+        if !models_available() { return; }
+        let clf = make_clf();
+        assert!(!looks_truncated("handle inbox", &clf));
     }
 
     #[test]
@@ -623,8 +650,9 @@ mod tests {
 
     #[test]
     fn not_truncated_long_last_word() {
+        if !models_available() { return; }
         let clf = make_clf();
-        assert!(!looks_truncated("Send the latest report", &clf));  // "report" > 5 chars
+        assert!(!looks_truncated("Send the latest report", &clf));  // "report" is a complete word
     }
 
     #[test]
