@@ -275,13 +275,29 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         tools: &ToolRegistry,
         previous_response_id: Option<&str>,
     ) -> Result<(Decision, Option<String>), AgentError> {
-        // Prepare messages with system prompt
+        // Prepare messages with plan compression:
+        // Keep system prompt + pre-grounding (first N user messages) + last 6 messages (rolling window)
+        // Action ledger (injected below) carries compressed full history
         let mut msgs = Vec::with_capacity(messages.len() + 1);
         let has_system = messages.iter().any(|m| m.role == Role::System);
         if !has_system && !self.system_prompt.is_empty() {
             msgs.push(Message::system(&self.system_prompt));
         }
-        msgs.extend_from_slice(messages);
+        // Context window management: if too many messages, keep head (pre-grounding) + tail (recent)
+        let max_context_msgs = 40;
+        if messages.len() > max_context_msgs {
+            // Keep first 20 (system + pre-grounding + inbox) and last 20 (recent actions)
+            let head = 20;
+            let tail = max_context_msgs - head;
+            msgs.extend_from_slice(&messages[..head]);
+            msgs.push(Message::user(&format!(
+                "[{} intermediate messages compressed — see action ledger below for full history]",
+                messages.len() - max_context_msgs
+            )));
+            msgs.extend_from_slice(&messages[messages.len() - tail..]);
+        } else {
+            msgs.extend_from_slice(messages);
+        }
 
         // Inject action ledger + observation log for context
         if let Some(ledger) = self.ledger_text() {
