@@ -227,21 +227,30 @@ fn run_app() -> io::Result<()> {
             f.render_widget(status, left[2]);
 
             // ── RIGHT: Log viewer ──
-            let vis = main[1].height.saturating_sub(2) as usize;
-            let lines: Vec<Line> = log_content.lines()
-                .skip(log_scroll)
-                .take(vis)
+            // Build ALL lines (not sliced) — let Paragraph.scroll() handle offset
+            let all_lines: Vec<Line> = log_content.lines()
                 .map(|l| Line::from(Span::styled(l, colorize(l))))
                 .collect();
 
-            let log_widget = Paragraph::new(lines)
+            let log_widget = Paragraph::new(all_lines)
                 .block(Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::DarkGray))
                     .title(format!(" {} [{}/{}] d=↓ u=↑ ", task_id, log_scroll, log_total))
                 )
-                .wrap(Wrap { trim: false });
+                .scroll((log_scroll as u16, 0));
             f.render_widget(log_widget, main[1]);
+
+            // Scrollbar
+            use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
+            let mut sb_state = ScrollbarState::default()
+                .content_length(log_total)
+                .position(log_scroll);
+            let scrollbar = Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .thumb_symbol("█")
+                .track_symbol(Some("│"));
+            f.render_stateful_widget(scrollbar, main[1], &mut sb_state);
         })?;
 
         if event::poll(std::time::Duration::from_millis(50))? {
