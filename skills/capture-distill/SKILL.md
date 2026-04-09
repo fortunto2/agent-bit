@@ -32,3 +32,5 @@ CRITICAL RULES:
   - ALWAYS delete the inbox file after processing (write BEFORE delete).
   - Thread update is REQUIRED — read 02_distill/AGENTS.md for which thread to update.
   - After reading a file, write IMMEDIATELY. Do NOT re-read — you already have the content.
+  - You MUST write ALL 3 files: capture + card + thread. Missing ANY = task failure.
+  - If you read the inbox content, you have ALL data needed. No re-reads, just write.

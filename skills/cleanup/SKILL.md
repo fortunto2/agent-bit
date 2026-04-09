@@ -26,5 +26,8 @@ EXAMPLE — Bulk cleanup ("remove all cards and threads"):
 
 CRITICAL RULES:
   - DELETE tasks = search + read + delete ONLY. Do NOT write, create, or capture files.
-  - Skip templates and README files when doing bulk cleanup.
+  - "cards and threads" = ONLY 02_distill/cards/ and 02_distill/threads/
+  - Do NOT delete from 01_capture/ — captured sources are IMMUTABLE
+  - Do NOT delete from 00_inbox/ — inbox files are separate
+  - Skip templates (_card-template.md) and README files
   - When task is ambiguous, search first to identify the exact target.
