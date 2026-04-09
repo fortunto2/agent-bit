@@ -172,8 +172,8 @@ async fn classify_intent_via_llm(
             "properties": {
                 "intent": {
                     "type": "string",
-                    "enum": ["intent_inbox", "intent_email", "intent_delete", "intent_query", "intent_edit"],
-                    "description": "inbox=process/review inbox messages, email=send/write email, delete=remove files, query=lookup/count data, edit=update/create/capture files"
+                    "enum": ["intent_inbox", "intent_email", "intent_delete", "intent_query", "intent_edit", "intent_capture"],
+                    "description": "inbox=process/review/handle inbox messages or queue, email=send/write/compose email, delete=remove/discard/clean up files, query=lookup/find/count/list data, edit=update/create/modify files, capture=capture/distill from inbox into cards"
                 }
             },
             "required": ["intent"]
@@ -533,8 +533,10 @@ pub(crate) async fn run_agent(
         ).await;
 
         if let Some(ref llm_label) = llm_intent {
-            eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, llm_label);
-            ready.intent = llm_label.clone();
+            // Normalize: intent_capture → intent_inbox (same pipeline path)
+            let normalized = if llm_label == "intent_capture" { "intent_inbox".to_string() } else { llm_label.clone() };
+            eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, normalized);
+            ready.intent = normalized;
         } else if !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" {
             // Layer 3: structural fallback (inbox files exist → inbox task)
             eprintln!("  ↳ Structural intent fallback: {} ({:.2}) → intent_inbox (inbox_files={})",
