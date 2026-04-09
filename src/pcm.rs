@@ -165,6 +165,14 @@ impl PcmClient {
         if let Ok(mut cache) = self.read_cache.lock() {
             cache.remove(norm);
         }
+        // Track written path for auto-refs (agent wrote this file → include in answer refs)
+        if let Ok(mut reads) = self.recent_reads.lock() {
+            let p = norm.to_string();
+            if !reads.contains(&p) {
+                reads.push(p);
+                if reads.len() > 50 { reads.remove(0); }
+            }
+        }
         Ok(())
     }
 
