@@ -118,6 +118,13 @@ INTENT_CLASSES = {
         "Take the next file from the inbox and create a card",
         "Read and process all unread inbox messages",
         "Process the next file from the inbox",
+        "Review The Inbox!",
+        "REVIEW INBOX",
+        "Handle the pending inbox items",
+        "Handle the incoming queue",
+        "Review and process inbox queue",
+        "Process the inbox queue",
+        "Check the inbox and process messages",
     ],
     "intent_email": [
         "Send email to Blue Harbor Bank with subject Security review",

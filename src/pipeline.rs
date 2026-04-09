@@ -259,16 +259,8 @@ impl New {
             intent
         };
 
-        // Inbox-word override: "process inbox", "review the inbox", "handle inbox" → intent_inbox
-        let instr_lower = self.instruction.to_lowercase();
-        let has_inbox_keyword = instr_lower.contains("inbox") || instr_lower.contains("incoming queue")
-            || instr_lower.contains("pending items") || instr_lower.contains("inbound");
-        let intent = if has_inbox_keyword && intent != "intent_inbox" && intent != "intent_delete" {
-            eprintln!("  [STAGE:classify] ↳ inbox-word override: {} → intent_inbox", intent);
-            "intent_inbox".to_string()
-        } else {
-            intent
-        };
+        // AI-NOTE: intent_inbox detection via ML classifier (retrained with "Review Inbox", "handle queue" examples).
+        // No keyword hack needed — classifier centroids updated in models/class_embeddings.json.
 
         Ok(Classified {
             instruction: self.instruction,
