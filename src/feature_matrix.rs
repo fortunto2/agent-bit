@@ -346,4 +346,112 @@ mod tests {
     fn feature_count() {
         assert_eq!(FEATURE_NAMES.len(), N_FEATURES);
     }
+
+    // ─── Trap tests: adversarial scenarios ──────────────────────────────
+
+    /// Helper: build matrix from raw feature rows.
+    fn matrix_from_rows(rows: Vec<[f32; N_FEATURES]>) -> InboxFeatureMatrix {
+        let n = rows.len();
+        let flat: Vec<f32> = rows.iter().flat_map(|r| r.iter().copied()).collect();
+        InboxFeatureMatrix {
+            data: Array2::from_shape_vec((n, N_FEATURES), flat).unwrap(),
+            labels: vec!["crm".into(); n],
+            paths: (0..n).map(|i| format!("inbox/msg_{}.txt", i)).collect(),
+            garbage_mask: vec![false; n],
+        }
+    }
+
+    #[test]
+    fn trap_domain_mismatch_scores_high_threat() {
+        // Trap: KNOWN sender but domain MISMATCH (social engineering)
+        let legit = [0.4, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.0, 0.0, 0.0];
+        let attack = [0.4, 0.1, 1.0, 0.0, 0.0, 0.0, 0.3, 0.05, 0.0, 0.1, 0.0];
+        //                              ^mismatch                      ^nli_inj
+        let mat = matrix_from_rows(vec![legit, attack]);
+        let scores = mat.score_all(&threat_weights());
+        assert!(scores[1] > scores[0], "Domain mismatch should score higher threat than legit");
+    }
+
+    #[test]
+    fn trap_unknown_sender_with_imperatives_high_threat() {
+        // Trap: unknown sender + many imperative verbs = social engineering
+        let legit = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.2, 0.01, 0.0, 0.0, 0.0];
+        let trap =  [0.3, 0.2, 0.0, 0.5, 0.0, 0.0, 0.5, 0.15, 0.0, 0.05, 0.0];
+        //               ^struct ^unknown                 ^imperatives
+        let mat = matrix_from_rows(vec![legit, trap]);
+        let scores = mat.score_all(&threat_weights());
+        assert!(scores[1] > scores[0], "Unknown sender + imperatives should be higher threat");
+    }
+
+    #[test]
+    fn trap_cross_account_detected_by_weights() {
+        // Trap: known sender asking about another account
+        let normal = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.0, 0.0, 0.0];
+        let cross =  [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.8, 0.0, 0.0];
+        //                                                        ^cross_sim
+        let mat = matrix_from_rows(vec![normal, cross]);
+        let scores = mat.score_all(&cross_account_weights());
+        assert!(scores[1] > scores[0], "Cross-account similarity should raise score");
+    }
+
+    #[test]
+    fn trap_otp_exfiltration_vs_legit_otp() {
+        // OTP in message is NOT always bad — depends on structural + imperatives
+        let legit_otp = [0.6, 0.0, 1.0, 1.0, 1.0, 0.0, 0.1, 0.01, 0.0, 0.0, 0.3];
+        let exfil_otp = [0.3, 0.4, 0.0, 0.5, 1.0, 0.0, 0.3, 0.10, 0.0, 0.2, 0.5];
+        //                    ^high_struct ^unknown                ^imp ^inj ^cred
+        let mat = matrix_from_rows(vec![legit_otp, exfil_otp]);
+        let scores = mat.score_all(&threat_weights());
+        assert!(scores[1] > scores[0], "OTP exfiltration should score higher than legit OTP");
+    }
+
+    #[test]
+    fn trap_clean_email_low_threat() {
+        // Normal business email: known sender, matching domain, no signals
+        let clean = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.2, 0.01, 0.0, 0.0, 0.0];
+        let mat = matrix_from_rows(vec![clean]);
+        let scores = mat.score_all(&threat_weights());
+        // Score should be moderate-low (negative weights on high trust features pull it down)
+        assert!(scores[0] < 0.6, "Clean email should have low threat score, got {}", scores[0]);
+    }
+
+    #[test]
+    fn trap_correlation_structural_and_injection() {
+        // When structural score is high, NLI injection should also be high → correlated
+        let rows = vec![
+            [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.01, 0.0, 0.0, 0.0], // clean
+            [0.3, 0.3, 0.5, 0.5, 0.0, 0.0, 0.5, 0.08, 0.0, 0.3, 0.0], // some injection
+            [0.2, 0.7, 0.0, 0.0, 0.0, 0.0, 0.8, 0.15, 0.0, 0.7, 0.0], // heavy injection
+            [0.6, 0.0, 1.0, 1.0, 0.0, 0.0, 0.1, 0.00, 0.0, 0.0, 0.0], // clean
+            [0.1, 0.9, 0.0, 0.0, 1.0, 1.0, 0.9, 0.20, 0.0, 0.8, 0.5], // full attack
+        ];
+        let mat = matrix_from_rows(rows);
+        let corr = mat.correlation_matrix();
+        let struct_idx = column_index("structural_score").unwrap();
+        let nli_inj_idx = column_index("nli_injection").unwrap();
+        assert!(corr[[struct_idx, nli_inj_idx]] > 0.5,
+            "structural_score and nli_injection should be positively correlated, got {}",
+            corr[[struct_idx, nli_inj_idx]]);
+    }
+
+    #[test]
+    fn trap_multi_message_ranking() {
+        // 5 messages: 1 clean, 1 suspicious, 1 attack, 1 cross-account, 1 OTP
+        let clean   = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.2, 0.01, 0.0, 0.0, 0.0];
+        let sus     = [0.3, 0.1, 0.0, 0.5, 0.0, 0.0, 0.4, 0.05, 0.0, 0.05, 0.0];
+        let attack  = [0.2, 0.6, 0.0, 0.0, 0.0, 0.0, 0.7, 0.12, 0.0, 0.5, 0.0];
+        let cross   = [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.02, 0.7, 0.0, 0.0];
+        let otp     = [0.6, 0.0, 1.0, 1.0, 1.0, 0.0, 0.1, 0.01, 0.0, 0.0, 0.4];
+        let mat = matrix_from_rows(vec![clean, sus, attack, cross, otp]);
+
+        let threat = mat.score_all(&threat_weights());
+        // Attack should rank highest threat
+        assert!(threat[2] > threat[0], "Attack > clean");
+        assert!(threat[2] > threat[1], "Attack > suspicious");
+
+        let cross_scores = mat.score_all(&cross_account_weights());
+        // Cross-account message should rank highest
+        assert!(cross_scores[3] > cross_scores[0], "Cross > clean");
+        assert!(cross_scores[3] > cross_scores[2], "Cross > attack (for cross weights)");
+    }
 }
