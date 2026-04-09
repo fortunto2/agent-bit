@@ -526,14 +526,14 @@ pub(crate) async fn run_agent(
     let mut ready = checked.ready();
 
     // Low-confidence intent: ML unsure → ask LLM → structural fallback
-    if intent_confidence < 0.30 {
+    // Skip fallback for intent_delete — structural forcing already handles it via detect_forced_task_type
+    if intent_confidence < 0.30 && ready.intent != "intent_delete" {
         // Layer 2: quick LLM classify (1 function call)
         let llm_intent = classify_intent_via_llm(
             instruction, model, base_url, api_key, extra_headers, temperature,
         ).await;
 
         if let Some(ref llm_label) = llm_intent {
-            // Normalize: intent_capture → intent_inbox (same pipeline path)
             let normalized = if llm_label == "intent_capture" { "intent_inbox".to_string() } else { llm_label.clone() };
             eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, normalized);
             ready.intent = normalized;
