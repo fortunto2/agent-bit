@@ -13,6 +13,10 @@ license = "MIT"
 name = "pac1"
 path = "src/main.rs"
 
+[[bin]]
+name = "pac1-dash"
+path = "src/dashboard.rs"
+
 [dependencies]
 sgr-agent = { path = "../../shared/rust-code/crates/sgr-agent", default-features = false, features = ["agent", "oxide", "genai", "providers", "telemetry", "session"] }
 tokio = { version = "1", features = ["full"] }
@@ -41,3 +45,5 @@ ndarray = "0.16"
 petgraph = "0.7"
 strsim = "0.11"
 dotenvy = "0.15.7"
+ratatui = "0.29"
+crossterm = "0.28"
