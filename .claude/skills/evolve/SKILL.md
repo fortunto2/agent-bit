@@ -68,23 +68,27 @@ answer() tool → OUTCOME_OK / OUTCOME_DENIED_SECURITY / OUTCOME_NONE_CLARIFICAT
 | Structural signals | `src/main.rs` `structural_injection_score()` | Pattern detection (imperatives, system refs, base64, unicode) | Missing signal categories |
 | CRM graph | `src/crm_graph.rs` | Sender trust via email domain → contacts/accounts | Wrong trust level for scenario |
 | Classification ensemble | `src/main.rs` `semantic_classify_inbox_file()` | Combines ML + structural + sender trust → recommendation | Wrong recommendation text |
+| Skills | `skills/*.md` + `src/skills.rs` | 13 domain-specific SKILL.md prompts, hot-reloadable | Wrong workflow for task type — edit .md file, no rebuild |
 | System prompt | `src/prompts.rs` `SYSTEM_PROMPT_V2/EXPLICIT` | V2: annotation-driven. Explicit: decision tree | Model ignores annotations or skips steps |
 | Tool hooks | `src/hooks.rs` | HookRegistry: data-driven completion hooks from AGENTS.MD | Agent skips workflow steps (e.g., writes card but not thread) |
 | File policy | `src/policy.rs` | PcmClient blocks write/delete to protected paths | Agent tries to modify system files |
 | Reasoning schema | `src/agent.rs` | CoT fields: task_type, security_assessment, known_facts, plan | Model skips security assessment |
-| Tool descriptions | `src/tools.rs` | Tool docs + hook-augmented output | Model misuses tool or misses next step |
+| Tool descriptions | `src/tools.rs` | Tool docs + hook-augmented output + list_skills/get_skill | Model misuses tool or misses next step |
 
 ### Intervention Hierarchy (prefer higher = less invasive)
 
-1. **Tool completion hook** — add hook to `src/hooks.rs` HookRegistry (data-driven, parsed from AGENTS.MD)
-2. **Prompt example** — add to `examples_for_class()` in `src/prompts.rs` (per classifier label)
-3. **Pipeline annotation** — inject pre-grounding message (e.g., [✓ TRUSTED], capture paths)
-4. **Classification recommendation** — change recommendation text in `semantic_classify_inbox_file()`
-5. **File policy** — add protected path to `src/policy.rs` constants
-6. **Pipeline signal** — add new signal to `assess_security()` in `src/pipeline.rs`
-7. **Sender trust logic** — add new trust check in CRM graph
-8. **Reasoning schema** — add field or enum value to CoT schema
+1. **Skill edit** — edit `skills/{name}/SKILL.md` (hot-reload, no rebuild, no recompile)
+2. **Tool completion hook** — add hook to `src/hooks.rs` HookRegistry (data-driven, parsed from AGENTS.MD)
+3. **Skill triggers/keywords** — adjust frontmatter in SKILL.md to fix routing
+4. **Pipeline annotation** — inject pre-grounding message (e.g., [✓ TRUSTED], capture paths)
+5. **Classification recommendation** — change recommendation text in `semantic_classify_inbox_file()`
+6. **File policy** — add protected path to `src/policy.rs` constants
+7. **Pipeline signal** — add new signal to `assess_security()` in `src/pipeline.rs`
+8. **Sender trust logic** — add new trust check in CRM graph
+9. **Reasoning schema** — add field or enum value to CoT schema
+10. **New skill** — create `skills/{name}/SKILL.md` + add to `COMPILED_SKILLS` in `src/skills.rs`
 
+**Skills are the primary tuning knob** — edit .md files, test immediately (no rebuild).
 **Prefer hooks over prompt changes** — Nemotron ignores long prompts but follows tool output.
 NEVER: hardcoded keyword lists, task-ID checks, bypassing the LLM.
 

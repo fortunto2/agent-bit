@@ -20,14 +20,15 @@ cargo run -- --audit-store                        # audit adaptive store
 ```
 src/pipeline.rs      -- enum state machine (New→Classified→InboxScanned→SecurityChecked→Ready)
 src/main.rs          -- CLI, orchestration, verify_and_submit, guess_outcome
-src/prompts.rs       -- system prompts (V2 annotation-driven + explicit decision tree), dynamic examples
+src/prompts.rs       -- system prompts (V2 annotation-driven + explicit decision tree)
+src/skills.rs        -- skill system: loads SKILL.md files, push-model selection via classifier
 src/scanner.rs       -- security scanning, inbox classification, domain matching
 src/pregrounding.rs  -- context assembly, planning, hints, agent execution (uses pipeline states)
 src/agent.rs         -- Pac1Agent (Router + Structured CoT reasoning, two-phase FC)
 src/pac1_sgr.rs      -- Pac1SgrAgent (pure SGR mode, single LLM call per step, experimental)
 src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
 src/pcm.rs           -- PcmRuntime client (11 file-system RPCs + read cache + ProposedAnswer)
-src/tools.rs         -- 11 Tool implementations + security guard + OutcomeValidator
+src/tools.rs         -- 13 Tool implementations + security guard + OutcomeValidator + skill introspection
 src/hooks.rs         -- HookRegistry: data-driven tool completion hooks from AGENTS.MD
 src/policy.rs        -- File access policy: structural guards for protected paths
 src/config.rs        -- Provider config with prompt_mode, temperature, sgr_mode
@@ -80,6 +81,62 @@ Replaces 5 scattered guards with one SM. Tracks agent progress during execution.
 
 **Key rule: Block > Warn** — Nemotron ignores warnings, obeys blocks.
 
+### Skills System (src/skills.rs + skills/) — Domain-Specific Prompt Injection
+
+Replaces hardcoded `examples_for_class()` with file-based SKILL.md files. Uses `sgr_agent::skills` (shared crate).
+
+**Push model:** classifier label + intent → skill selection → inject into `{examples}` placeholder.
+**Hybrid fallback:** agent can call `list_skills` / `get_skill` tools mid-task to switch workflows.
+
+**Directory:** `skills/` (13 skills, hot-reloadable — edit .md, no rebuild needed)
+```
+skills/
+├── crm-default/SKILL.md       — general CRM (email, contacts, cross-account, multi-inbox)
+├── crm-lookup/SKILL.md        — data queries, counting, captured article lookup
+├── crm-invoice/SKILL.md       — resend/forward invoices with attachments
+├── inbox-processing/SKILL.md  — multi-inbox workflow, channel priority, seq.json
+├── capture-distill/SKILL.md   — capture → card → thread → delete source
+├── cleanup/SKILL.md           — delete cards/threads (search → read → delete only)
+├── security-injection/SKILL.md — injection/social engineering → DENIED
+├── security-credential/SKILL.md — OTP workflow (7 examples, exfiltration anti-pattern)
+├── non-work/SKILL.md          — non-CRM → CLARIFICATION
+├── unsupported/SKILL.md       — external API/deploy/calendar → UNSUPPORTED
+├── followup-reschedule/SKILL.md — reschedule dates in accounts + reminders
+├── invoice-creation/SKILL.md  — create typed invoice JSON
+└── purchase-ops/SKILL.md      — fix purchase ID prefix regression
+```
+
+**SKILL.md format** (YAML frontmatter + markdown body):
+```yaml
+---
+name: crm-invoice
+description: Resend or forward invoices — MUST include attachments
+triggers: [intent_inbox, intent_email]    # classifier labels that activate this skill
+priority: 20                               # higher wins when multiple match
+keywords: [invoice, resend, forward, INV-] # disambiguate within same trigger group
+---
+WORKFLOW:
+  1. Read inbox... 2. Search invoice... 3. Write outbox WITH attachments...
+```
+
+**Selection logic** (`skills::select_body`):
+1. Match triggers against [security_label, intent] → candidates
+2. If multiple → prefer keyword match in instruction text
+3. Highest priority wins
+4. Fallback: crm-default
+
+**Self-correcting classification** (agent tools):
+- `list_skills` — lists all 13 skills with descriptions
+- `get_skill(name)` — loads full skill instructions mid-task
+- Both from `sgr_agent::{ListSkillsTool, GetSkillTool}`
+
+**Retry on empty:** If LLM returns text without tool calls, nudge and retry up to 2x.
+
+**When to edit skills vs other components:**
+- Wrong workflow/examples → edit `skills/{name}/SKILL.md` (no rebuild needed)
+- Wrong skill selected → adjust `triggers` or `keywords` in frontmatter
+- Need new skill → create `skills/{name}/SKILL.md` + add to `COMPILED_SKILLS` in `src/skills.rs`
+
 ### Architecture Decision Guide
 
 Before ANY fix, check these in order:
@@ -89,9 +146,10 @@ Before ANY fix, check these in order:
 4. **crm_graph.rs** — sender/contact trust? → Use graph
 5. **pipeline.rs** — pre-LLM classification? → Add signal
 6. **classifier.rs** — content classification? → Use ONNX
-7. **prompts.rs** — LLM reasoning guidance? → Check `examples_for_class()` first (per-label examples), then decision tree (LAST resort)
+7. **skills/** — LLM workflow guidance? → Edit skill .md file (hot-reload, no rebuild)
+8. **prompts.rs** — system prompt / decision tree → LAST resort
 
-**Step 7 checklist**: when fixing LLM behavior, ALWAYS check `examples_for_class()` in prompts.rs — it injects per-classifier-label examples. Adding an example for the relevant class (crm/credential/injection/etc) is less invasive than editing the decision tree.
+**Step 7 checklist**: when fixing LLM behavior, FIRST check if the right skill is selected (grep `🎯 Skill:` in logs). If wrong skill → adjust triggers/keywords. If right skill but wrong behavior → edit the skill's SKILL.md file. Adding a rule to a skill is less invasive than editing the system prompt decision tree.
 
 ### Prompt Modes (src/prompts.rs)
 
