@@ -129,6 +129,12 @@ INTENT_CLASSES = {
         "Take from inbox, capture it, distill, and delete the inbox file when done",
         "Capture it into influential folder and delete the inbox file",
         "Delete the inbox file after capturing and distilling",
+        "Review the next inbound note and act on it",
+        "WORK THROUGH THE INCOMING QUEUE",
+        "Take Care Of The Inbox",
+        "handle the incoming items",
+        "Act on the next inbound message",
+        "work through the inbox queue",
     ],
     "intent_email": [
         "Send email to Blue Harbor Bank with subject Security review",
