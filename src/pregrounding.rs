@@ -904,56 +904,53 @@ pub(crate) async fn run_agent(
         if instr_lower.contains("capture") || instr_lower.contains("distill") {
                 // Resolve capture folder from instruction using fuzzy match against tree
                 let capture_target = resolve_capture_folder(&ready.instruction, &tree_out);
-                // Pre-build write payloads: inject inbox content + target paths
-                // Agent has everything it needs — just call write(), no re-read needed
+                // Pre-execute capture write: deterministic copy, no LLM needed.
+                // Reduces agent work from 5 steps to 3 (card + thread + delete).
                 let msg = if let Some((source, capture_path, card_path)) = capture_target {
-                    // Find source file content from pre-loaded inbox
                     let source_content = ready.inbox_files.iter()
                         .find(|f| source.contains(&f.path) || f.path.contains(&source))
                         .map(|f| {
-                            // Strip PCM header "$ cat ..."
-                            let body = if f.content.starts_with("$ ") {
+                            if f.content.starts_with("$ ") {
                                 f.content.find('\n').map(|i| &f.content[i+1..]).unwrap_or(&f.content)
-                            } else {
-                                &f.content
-                            };
-                            body.to_string()
+                            } else { &f.content }
                         });
 
-                    if let Some(ref content) = source_content {
-                        let preview = &content[..content.len().min(200)];
-                        format!(
-                            "CAPTURE-DISTILL — READY TO EXECUTE (do NOT re-read, content is below):\n\
-                             \n\
-                             STEP 1: write(\"{}\", content=<INBOX CONTENT BELOW>)\n\
-                             STEP 2: write(\"{}\", content=<CARD from template + content below>)\n\
-                             STEP 3: read + update thread in 02_distill/threads/\n\
-                             STEP 4: delete(\"{}\")\n\
-                             STEP 5: answer(OUTCOME_OK)\n\
-                             \n\
-                             === INBOX CONTENT (use this for write, do NOT re-read) ===\n\
-                             {}\n\
-                             === END CONTENT ===\n\
-                             \n\
-                             You have the content. Call write() NOW. Do NOT call read() on the inbox file.",
-                            capture_path, card_path, source, preview
-                        )
+                    if let Some(content) = source_content {
+                        // Pipeline pre-executes capture write (deterministic — just copy)
+                        match pcm.write(&capture_path, content, 0, 0).await {
+                            Ok(_) => {
+                                eprintln!("  ✅ Pre-executed: write({})", capture_path);
+                                format!(
+                                    "CAPTURE DONE (pipeline pre-executed). Remaining steps:\n\
+                                     1. write(\"{}\") — create distill card (read template from 02_distill/cards/ first)\n\
+                                     2. Update thread in 02_distill/threads/ (read AGENTS.md for rules)\n\
+                                     3. delete(\"{}\") — remove inbox source\n\
+                                     4. answer(OUTCOME_OK)\n\
+                                     \n\
+                                     Capture already written to {}. Do NOT re-write it.",
+                                    card_path, source, capture_path
+                                )
+                            }
+                            Err(e) => {
+                                eprintln!("  ⚠ Pre-execute capture failed: {}", e);
+                                format!(
+                                    "CAPTURE-DISTILL: write(\"{}\") → write(\"{}\") → thread → delete(\"{}\") → answer(OK)",
+                                    capture_path, card_path, source
+                                )
+                            }
+                        }
                     } else {
                         format!(
-                            "CAPTURE-DISTILL paths resolved:\n\
-                             write(\"{}\") → write(\"{}\") → update thread → delete(\"{}\") → answer(OK)\n\
-                             Content is ALREADY in context above — use it directly.",
+                            "CAPTURE-DISTILL: write(\"{}\") → write(\"{}\") → thread → delete(\"{}\") → answer(OK)\n\
+                             Content is in context above.",
                             capture_path, card_path, source
                         )
                     }
                 } else {
-                    "CAPTURE-DISTILL WORKFLOW:\n\
-                     1. Inbox content is ALREADY in context above — use it directly\n\
-                     2. WRITE to capture folder (01_capture/{folder}/{same filename})\n\
-                     3. WRITE distill card to 02_distill/cards/{same filename}\n\
-                     4. DELETE original inbox file\n\
-                     5. answer(OUTCOME_OK)\n\
-                     Do NOT re-read inbox — content is above. Write IMMEDIATELY.".to_string()
+                    "CAPTURE-DISTILL: Inbox content is in context above.\n\
+                     1. WRITE to 01_capture/{folder}/{same filename}\n\
+                     2. WRITE card to 02_distill/cards/{same filename}\n\
+                     3. Update thread, delete source, answer(OK)".to_string()
                 };
                 messages.push(Message::user(&msg));
         } else if has_otp {
