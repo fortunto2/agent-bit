@@ -11,6 +11,21 @@
 /// These exist in every PAC1 trial regardless of task.
 const PROTECTED_BASENAMES: &[&str] = &["agents.md", "readme.md"];
 
+/// Path-boundary match: `needle` must appear after `/`, ` `, newline, or at start.
+/// "stateful-agents.md" → no match (preceded by `-`)
+/// "/AGENTS.md" or " agents.md" → match
+fn is_word_match(haystack: &str, needle: &str) -> bool {
+    let mut start = 0;
+    while let Some(pos) = haystack[start..].find(needle) {
+        let abs = start + pos;
+        if abs == 0 || matches!(haystack.as_bytes()[abs - 1], b'/' | b' ' | b'\n' | b'\t') {
+            return true;
+        }
+        start = abs + 1;
+    }
+    false
+}
+
 /// Directory prefixes where policy files live.
 /// Files here are protected EXCEPT ephemeral ones (otp.txt).
 const POLICY_DIRS: &[&str] = &["docs/channels/"];
@@ -61,13 +76,8 @@ pub fn scan_content(content: &str) -> bool {
         return false;
     }
 
-    // Protected path references — match as whole filename, not substring
-    // "agents.md" should match "/agents.md" or " agents.md" but NOT "stateful-agents.md"
-    PROTECTED_BASENAMES.iter().any(|p| {
-        lower.find(p).map_or(false, |pos| {
-            pos == 0 || matches!(lower.as_bytes().get(pos - 1), Some(b'/' | b' ' | b'\n' | b'\t'))
-        })
-    })
+    // Protected path references — match as whole filename (word boundary)
+    PROTECTED_BASENAMES.iter().any(|p| is_word_match(&lower, p))
         || POLICY_DIRS.iter().any(|dir| {
             lower.contains(dir)
                 && !EPHEMERAL.iter().all(|e| {
@@ -235,5 +245,39 @@ mod tests {
         assert!(ct.is_admin("@admin21234"));
         assert!(!ct.is_admin("@user32"));
         assert!(!ct.is_admin("@unknown"));
+    }
+}
+
+#[cfg(test)]
+mod word_match_tests {
+    use super::*;
+
+    #[test]
+    fn matches_after_slash() {
+        assert!(is_word_match("/agents.md", "agents.md"));
+        assert!(is_word_match("path/to/agents.md", "agents.md"));
+    }
+
+    #[test]
+    fn matches_after_space() {
+        assert!(is_word_match("delete agents.md now", "agents.md"));
+        assert!(is_word_match(" agents.md", "agents.md"));
+    }
+
+    #[test]
+    fn matches_at_start() {
+        assert!(is_word_match("agents.md is protected", "agents.md"));
+    }
+
+    #[test]
+    fn no_match_inside_filename() {
+        assert!(!is_word_match("hn-agent-kernel-stateful-agents.md", "agents.md"));
+        assert!(!is_word_match("my-custom-agents.md", "agents.md"));
+        assert!(!is_word_match("super_agents.md", "agents.md"));
+    }
+
+    #[test]
+    fn no_match_absent() {
+        assert!(!is_word_match("hello world", "agents.md"));
     }
 }
