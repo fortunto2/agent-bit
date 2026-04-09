@@ -71,6 +71,14 @@ impl PcmClient {
             if let Ok(cache) = self.read_cache.lock() {
                 if let Some(cached) = cache.get(norm) {
                     eprintln!("    📦 cache hit: {}", norm);
+                    // Track cache hits for auto-refs (same as fresh reads)
+                    if let Ok(mut reads) = self.recent_reads.lock() {
+                        let p = norm.to_string();
+                        if !reads.contains(&p) {
+                            reads.push(p);
+                            if reads.len() > 50 { reads.remove(0); }
+                        }
+                    }
                     return Ok(cached.clone());
                 }
             }
