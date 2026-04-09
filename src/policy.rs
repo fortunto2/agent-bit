@@ -61,8 +61,13 @@ pub fn scan_content(content: &str) -> bool {
         return false;
     }
 
-    // Protected path references
-    PROTECTED_BASENAMES.iter().any(|p| lower.contains(p))
+    // Protected path references — match as whole filename, not substring
+    // "agents.md" should match "/agents.md" or " agents.md" but NOT "stateful-agents.md"
+    PROTECTED_BASENAMES.iter().any(|p| {
+        lower.find(p).map_or(false, |pos| {
+            pos == 0 || matches!(lower.as_bytes().get(pos - 1), Some(b'/' | b' ' | b'\n' | b'\t'))
+        })
+    })
         || POLICY_DIRS.iter().any(|dir| {
             lower.contains(dir)
                 && !EPHEMERAL.iter().all(|e| {
@@ -136,6 +141,7 @@ impl ChannelTrust {
     }
 
     /// Check if handle is admin.
+    #[allow(dead_code)]
     pub fn is_admin(&self, handle: &str) -> bool {
         self.check(handle) == ChannelLevel::Admin
     }

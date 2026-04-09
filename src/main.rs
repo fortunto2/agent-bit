@@ -245,6 +245,7 @@ async fn main() -> Result<()> {
             });
             let _ = std::fs::create_dir_all(&dump_dir);
             let _ = std::fs::write(format!("{}/bitgn_log.url", dump_dir), format!("{}\n", log_url));
+            let _ = std::fs::write(format!("{}/instruction.txt", dump_dir), &trial.instruction);
             // SAFETY: single-threaded env var set for child code in same task
             unsafe { std::env::set_var("DUMP_TRIAL", &dump_dir); }
 
