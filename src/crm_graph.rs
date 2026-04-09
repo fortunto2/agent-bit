@@ -615,9 +615,20 @@ impl CrmGraph {
         if let Some((other_name, other_sim)) = best_other {
             eprintln!("  📊 Cross-check: sender '{}' sim={:.3}, best other '{}' sim={:.3}",
                 sender_account, sender_sim, other_name, other_sim);
-            // Cross-account: other account is SIGNIFICANTLY more similar (gap > 0.1)
-            // Small differences (0.37 vs 0.30) are noise — only flag clear cross-account
-            if *other_sim > sender_sim + 0.1 && *other_sim > 0.3 {
+            // Cross-account detection (two paths):
+            // 1. Embedding gap > 0.1: clear semantic difference
+            // 2. Account name appears in body but sender is different account:
+            //    "Acme" in body + sender=Helios → cross-account even with small gap
+            let gap = *other_sim - sender_sim;
+            let name_in_body = {
+                let body_lower = body.to_lowercase();
+                let other_lower = other_name.to_lowercase();
+                // Check if first significant word of account name appears in body
+                other_lower.split_whitespace()
+                    .find(|w| w.len() > 3)
+                    .map_or(false, |word| body_lower.contains(word))
+            };
+            if *other_sim > 0.3 && (gap > 0.1 || (gap > 0.0 && name_in_body)) {
                 return Some((other_name.clone(), *other_sim));
             }
         }
