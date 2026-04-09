@@ -248,7 +248,13 @@ fn run_app() -> io::Result<()> {
                 .block(Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::DarkGray))
-                    .title(format!(" {} [line {}/{}] Space=↓ b=↑ ", task_id, log_scroll + 1, log_total))
+                    .title({
+                        let score_info = data.get(task_id)
+                            .and_then(|td| td.trials.get(trial_select.min(td.trials.len().saturating_sub(1))))
+                            .map(|t| if t.score >= 1.0 { " PASS ".to_string() } else if t.score >= 0.0 { format!(" FAIL ({}) ", t.detail.lines().next().unwrap_or("")) } else { " ? ".to_string() })
+                            .unwrap_or_default();
+                        format!(" {}{} [{}/{}] ", task_id, score_info, log_scroll + 1, log_total)
+                    })
                 )
                 .scroll((log_scroll as u16, 0));
             f.render_widget(log_widget, main[1]);
