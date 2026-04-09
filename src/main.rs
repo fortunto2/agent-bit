@@ -350,6 +350,14 @@ async fn run_leaderboard(
         eprintln!("\n━━━ Trial {}/{}: {} (task {}) ━━━",
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
+        // Auto-dump trial data for dashboard
+        let dump_dir = format!("benchmarks/tasks/{}/{}", trial.task_id, trial.trial_id);
+        let _ = std::fs::create_dir_all(&dump_dir);
+        let log_url = format!("https://{}.eu.bitgn.com", trial.trial_id);
+        let _ = std::fs::write(format!("{}/bitgn_log.url", dump_dir), format!("{}\n", log_url));
+        // SAFETY: env var for child code in pregrounding dump
+        unsafe { std::env::set_var("DUMP_TRIAL", &dump_dir); }
+
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
         let (last_msg, history, tool_calls) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
 
@@ -375,7 +383,12 @@ async fn run_leaderboard(
 
         let result = harness.end_trial(&trial.trial_id).await?;
         if let Some(score) = result.score {
-            eprintln!("  Score: {:.2}", score);
+            eprintln!("  {} Score: {:.2}", trial.task_id, score);
+            // Save score to dump for dashboard
+            let _ = std::fs::write(
+                format!("{}/score.txt", dump_dir),
+                format!("{:.2}\n{}\n", score, result.score_detail.join("\n")),
+            );
             // Score-gated learning: only learn from confirmed correct answers
             if score >= 1.0 {
                 if let Some(ref v) = outcome_validator {

@@ -1,7 +1,8 @@
 //! PAC1 Dashboard — TUI split view: heatmap + log viewer.
 //!
-//! Left: compact task×run heatmap (block chars)
-//! Right: full log for selected task+run
+//! Data: benchmarks/tasks/{task_id}/{trial_id}/score.txt + dump files
+//! Left: compact task×run heatmap
+//! Right: trial dump (pipeline, inbox, contacts, tree)
 //!
 //! Usage: cargo run --bin pac1-dash
 
@@ -28,173 +29,137 @@ const TASK_IDS: &[&str] = &[
     "t41","t42","t43",
 ];
 
-struct RunData {
-    label: String,
-    tasks: HashMap<String, f32>,
+/// One trial result for a task.
+struct Trial {
+    trial_id: String,
+    score: f32,     // -1 = no score yet
+    detail: String, // score_detail lines
 }
 
-fn parse_log_md_runs() -> Vec<RunData> {
-    let content = std::fs::read_to_string("LOG.md").unwrap_or_default();
-    let mut runs = Vec::new();
-    for line in content.lines() {
-        if line.starts_with("| ") && line.contains('`') && line.contains('%') {
-            let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
-            if cols.len() >= 6 {
-                let date = cols[1]; // "04-09"
-                let score_str = cols[4]; // "90.7% (39/43)"
-                // Extract total tasks from score: "90.7% (39/43)" → 43
-                let total_tasks: usize = score_str
-                    .split('/').last()
-                    .and_then(|s| s.trim_end_matches(')').trim().parse().ok())
-                    .unwrap_or(43);
-                let failures_str = cols[5];
-                let failures: Vec<&str> = failures_str.split(", ")
-                    .filter(|s| s.starts_with('t'))
-                    .map(|s| s.split_whitespace().next().unwrap_or(s))
-                    .collect();
-                let mut tasks = HashMap::new();
-                for (i, tid) in TASK_IDS.iter().enumerate() {
-                    // Only include tasks that existed in this run
-                    if i < total_tasks {
-                        tasks.insert(tid.to_string(), if failures.contains(tid) { 0.0 } else { 1.0 });
-                    }
-                    // else: no entry → will show as · (no data)
-                }
-                // Label: "4/9 90%" — compact date + score
-                let score_short = score_str.split('%').next().unwrap_or("?").trim();
-                runs.push(RunData { label: format!("{} {}%", date, score_short), tasks });
-            }
-        }
-    }
-    runs
+/// All trials grouped by task.
+struct TaskData {
+    trials: Vec<Trial>,
 }
 
-fn parse_run_files() -> Vec<RunData> {
-    let dir = Path::new("benchmarks/runs");
-    if !dir.exists() { return Vec::new(); }
-    let mut entries: Vec<_> = std::fs::read_dir(dir).into_iter().flatten().flatten()
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
-        .collect();
-    entries.sort_by_key(|e| e.file_name());
-    entries.iter().filter_map(|e| {
-        let content = std::fs::read_to_string(e.path()).ok()?;
-        let fname = e.path().file_stem()?.to_str()?.to_string();
-        let parts: Vec<&str> = fname.split("__").collect();
-        let day = parts.first().and_then(|d| d.split('-').last()).unwrap_or("?");
-        let _prov = parts.get(1).unwrap_or(&"?");
-        let mut tasks = HashMap::new();
-        for line in content.lines() {
-            if line.starts_with("| t") {
-                let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
-                if cols.len() >= 3 {
-                    tasks.insert(cols[1].to_string(), cols[2].parse().unwrap_or(-1.0));
-                }
-            }
-        }
-        let pass = tasks.values().filter(|&&v| v >= 1.0).count();
-        let total = tasks.len();
-        Some(RunData { label: format!("{}·{}", day, if total > 0 { format!("{}", pass) } else { "?".into() }), tasks })
-    }).collect()
-}
+/// Load all data from benchmarks/tasks/.
+fn load_task_data() -> HashMap<String, TaskData> {
+    let mut data: HashMap<String, TaskData> = HashMap::new();
+    let base = Path::new("benchmarks/tasks");
+    if !base.exists() { return data; }
 
-fn load_runs() -> Vec<RunData> {
-    let file_runs = parse_run_files();
-    if !file_runs.is_empty() { return file_runs; }
-    parse_log_md_runs()
-}
-
-/// Find and render log for task+run combination.
-/// Priority: /tmp logs → dump files (pipeline + inbox + contacts) → BitGN URL.
-fn find_log(task: &str, _run_idx: usize) -> String {
-    // 1. Try /tmp logs (from recent runs)
-    for suffix in &["", "v2", "v3", "-retry"] {
-        let path = if suffix.is_empty() {
-            format!("/tmp/evolve-{}.log", task)
-        } else {
-            format!("/tmp/{}{}.log", task, suffix)
-        };
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if !content.is_empty() { return content; }
-        }
-    }
-
-    // 2. Try benchmarks/tasks/{task}/ dump directory
-    let task_dir = format!("benchmarks/tasks/{}", task);
-    if let Ok(entries) = std::fs::read_dir(&task_dir) {
+    for tid in TASK_IDS {
+        let task_dir = base.join(tid);
+        if !task_dir.exists() { continue; }
+        let mut trials = Vec::new();
+        let Ok(entries) = std::fs::read_dir(&task_dir) else { continue };
         let mut dirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
         dirs.sort_by_key(|e| e.file_name());
-        if let Some(latest) = dirs.last() {
-            let dir = latest.path();
-            let mut out = String::new();
+        for entry in dirs {
+            let trial_id = entry.file_name().to_string_lossy().to_string();
+            let score_path = entry.path().join("score.txt");
+            let (score, detail) = if let Ok(content) = std::fs::read_to_string(&score_path) {
+                let mut lines = content.lines();
+                let s: f32 = lines.next().and_then(|l| l.parse().ok()).unwrap_or(-1.0);
+                let d: String = lines.collect::<Vec<_>>().join("\n");
+                (s, d)
+            } else {
+                (-1.0, String::new())
+            };
+            trials.push(Trial { trial_id, score, detail });
+        }
+        if !trials.is_empty() {
+            data.insert(tid.to_string(), TaskData { trials });
+        }
+    }
+    data
+}
 
-            // Header: trial ID
-            out.push_str(&format!("━━━ {} — {} ━━━\n\n", task, dir.file_name().unwrap_or_default().to_string_lossy()));
+/// Render trial dump for log panel.
+fn render_trial(task: &str, trial_idx: usize, data: &HashMap<String, TaskData>) -> String {
+    let Some(td) = data.get(task) else {
+        return format!("No trials for {}\nRun: cargo run -- --provider nemotron --task {}", task, task);
+    };
+    let idx = trial_idx.min(td.trials.len().saturating_sub(1));
+    let trial = &td.trials[idx];
+    let dir = format!("benchmarks/tasks/{}/{}", task, trial.trial_id);
+    let mut out = String::new();
 
-            // BitGN URL
-            if let Ok(url) = std::fs::read_to_string(dir.join("bitgn_log.url")) {
-                out.push_str(&format!("🔗 BitGN: {}\n\n", url.trim()));
+    // Header
+    out.push_str(&format!("━━━ {} trial {}/{} ━━━\n", task, idx + 1, td.trials.len()));
+    out.push_str(&format!("ID: {}\n", trial.trial_id));
+    if trial.score >= 0.0 {
+        out.push_str(&format!("Score: {:.0}\n", trial.score));
+    }
+    if !trial.detail.is_empty() {
+        out.push_str(&format!("{}\n", trial.detail));
+    }
+
+    // BitGN URL
+    if let Ok(url) = std::fs::read_to_string(format!("{}/bitgn_log.url", dir)) {
+        out.push_str(&format!("\n🔗 {}\n", url.trim()));
+    }
+
+    // Pipeline
+    if let Ok(c) = std::fs::read_to_string(format!("{}/pipeline.txt", dir)) {
+        out.push_str("\n── Pipeline ──\n");
+        out.push_str(&c);
+    }
+
+    // Inbox
+    let mut inbox: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("inbox_"))
+        .collect();
+    inbox.sort_by_key(|e| e.file_name());
+    if !inbox.is_empty() {
+        out.push_str("\n── Inbox ──\n");
+        for f in &inbox {
+            if let Ok(c) = std::fs::read_to_string(f.path()) {
+                out.push_str(&c);
+                out.push_str("\n---\n");
             }
-
-            // Pipeline info
-            if let Ok(content) = std::fs::read_to_string(dir.join("pipeline.txt")) {
-                out.push_str("── Pipeline ──\n");
-                out.push_str(&content);
-                out.push_str("\n\n");
-            }
-
-            // Inbox files (show content with classification headers)
-            let mut inbox_files: Vec<_> = std::fs::read_dir(&dir)
-                .into_iter().flatten().flatten()
-                .filter(|e| e.file_name().to_string_lossy().starts_with("inbox_"))
-                .collect();
-            inbox_files.sort_by_key(|e| e.file_name());
-            if !inbox_files.is_empty() {
-                out.push_str("── Inbox ──\n");
-                for f in &inbox_files {
-                    if let Ok(content) = std::fs::read_to_string(f.path()) {
-                        out.push_str(&content);
-                        out.push_str("\n---\n");
-                    }
-                }
-                out.push('\n');
-            }
-
-            // Contacts summary
-            if let Ok(content) = std::fs::read_to_string(dir.join("contacts.txt")) {
-                let lines: Vec<&str> = content.lines().take(15).collect();
-                out.push_str(&format!("── Contacts ({} lines) ──\n", content.lines().count()));
-                out.push_str(&lines.join("\n"));
-                out.push_str("\n\n");
-            }
-
-            // Accounts summary
-            if let Ok(content) = std::fs::read_to_string(dir.join("accounts.txt")) {
-                let lines: Vec<&str> = content.lines().take(15).collect();
-                out.push_str(&format!("── Accounts ({} lines) ──\n", content.lines().count()));
-                out.push_str(&lines.join("\n"));
-                out.push_str("\n\n");
-            }
-
-            // Tree
-            if let Ok(content) = std::fs::read_to_string(dir.join("tree.txt")) {
-                out.push_str("── Tree ──\n");
-                out.push_str(&content);
-                out.push_str("\n\n");
-            }
-
-            // AGENTS.md
-            if let Ok(content) = std::fs::read_to_string(dir.join("agents.md")) {
-                let lines: Vec<&str> = content.lines().take(20).collect();
-                out.push_str("── AGENTS.md ──\n");
-                out.push_str(&lines.join("\n"));
-                out.push('\n');
-            }
-
-            if !out.is_empty() { return out; }
         }
     }
 
-    format!("No data for {}\n\nRun with DUMP_TRIAL=1:\n  DUMP_TRIAL=1 cargo run -- --provider nemotron --task {}", task, task)
+    // Contacts
+    if let Ok(c) = std::fs::read_to_string(format!("{}/contacts.txt", dir)) {
+        let n = c.lines().count();
+        out.push_str(&format!("\n── Contacts ({}) ──\n", n));
+        for line in c.lines().take(10) { out.push_str(line); out.push('\n'); }
+        if n > 10 { out.push_str("  ...\n"); }
+    }
+
+    // Accounts
+    if let Ok(c) = std::fs::read_to_string(format!("{}/accounts.txt", dir)) {
+        let n = c.lines().count();
+        out.push_str(&format!("\n── Accounts ({}) ──\n", n));
+        for line in c.lines().take(10) { out.push_str(line); out.push('\n'); }
+        if n > 10 { out.push_str("  ...\n"); }
+    }
+
+    // Tree
+    if let Ok(c) = std::fs::read_to_string(format!("{}/tree.txt", dir)) {
+        out.push_str("\n── Tree ──\n");
+        out.push_str(&c);
+    }
+
+    if out.lines().count() < 5 {
+        out.push_str(&format!("\nDump dir: {}\n", dir));
+    }
+    out
+}
+
+fn colorize_line(line: &str) -> Style {
+    if line.contains("Score: 1") || line.contains("PASS") { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) }
+    else if line.contains("Score: 0") || line.contains("FAIL") { Style::default().fg(Color::Red).add_modifier(Modifier::BOLD) }
+    else if line.starts_with("━") { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) }
+    else if line.starts_with("──") { Style::default().fg(Color::Yellow) }
+    else if line.starts_with("🔗") { Style::default().fg(Color::Blue) }
+    else if line.contains("[⚠") || line.contains("⚠") { Style::default().fg(Color::Yellow) }
+    else if line.contains("[✓") { Style::default().fg(Color::Green) }
+    else if line.contains("CLASSIFICATION") || line.contains("sender:") { Style::default().fg(Color::Magenta) }
+    else if line.starts_with("instruction:") || line.starts_with("intent:") { Style::default().fg(Color::Cyan) }
+    else if line.starts_with("  -") || line.starts_with("- ") { Style::default().fg(Color::White) }
+    else { Style::default().fg(Color::DarkGray) }
 }
 
 fn run_app() -> io::Result<()> {
@@ -206,21 +171,21 @@ fn run_app() -> io::Result<()> {
 
     let mut table_state = TableState::default();
     table_state.select(Some(0));
-    let mut col_select: usize = 0;
+    let mut trial_select: usize = 0;
     let mut log_scroll: u16 = 0;
 
-    let runs = load_runs();
+    let data = load_task_data();
+    let max_trials = data.values().map(|d| d.trials.len()).max().unwrap_or(0);
 
     loop {
         let selected_task = table_state.selected().unwrap_or(0);
         let task_id = TASK_IDS[selected_task];
-        let log_content = find_log(task_id, col_select);
+        let log_content = render_trial(task_id, trial_select, &data);
 
         terminal.draw(|f| {
-            // Split: left 55% heatmap, right 45% log
             let main = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(f.area());
 
             // ── LEFT: Heatmap ──
@@ -229,99 +194,82 @@ fn run_app() -> io::Result<()> {
                 .constraints([Constraint::Length(1), Constraint::Min(5), Constraint::Length(1)])
                 .split(main[0]);
 
-            // Title
-            let title = Paragraph::new(format!(" PAC1 — {} runs | q=quit ↑↓=task ←→=run", runs.len()))
-                .style(Style::default().fg(Color::Cyan));
+            let tasks_with_data = data.len();
+            let title = Paragraph::new(format!(
+                " PAC1 — {}/{} tasks, {} trials | q ↑↓ ←→ PgUp/Dn",
+                tasks_with_data, TASK_IDS.len(), max_trials
+            )).style(Style::default().fg(Color::Cyan));
             f.render_widget(title, left[0]);
 
-            // Header row
-            let max_cols = ((left[1].width as usize).saturating_sub(8)) / 4;
-            let end = runs.len().min(col_select.saturating_add(max_cols));
-            let start = end.saturating_sub(max_cols);
-            let visible: Vec<&RunData> = runs[start..end].iter().collect();
-
-            let mut hdr = vec![Cell::from("").style(Style::default())];
-            for (i, run) in visible.iter().enumerate() {
-                // Show just date part (MM-DD) truncated to fit column
-                let date_part: String = run.label.split_whitespace().next().unwrap_or("?").to_string();
-                let style = if start + i == col_select {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                };
-                hdr.push(Cell::from(date_part).style(style));
-            }
-            hdr.push(Cell::from("%").style(Style::default().fg(Color::DarkGray)));
-
+            // Build rows
             let rows: Vec<Row> = TASK_IDS.iter().enumerate().map(|(idx, &tid)| {
-                let tid_style = if idx == selected_task {
+                let is_selected = idx == selected_task;
+                let tid_style = if is_selected {
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
                 let mut cells = vec![Cell::from(tid).style(tid_style)];
 
-                let mut pass = 0u32;
-                let mut total = 0u32;
-                for (i, run) in visible.iter().enumerate() {
-                    let score = run.tasks.get(tid).copied().unwrap_or(-1.0);
-                    let is_selected = idx == selected_task && start + i == col_select;
-                    let (ch, fg, bg) = if score < 0.0 {
-                        ("·", Color::DarkGray, Color::Reset)
-                    } else if score >= 1.0 {
-                        pass += 1; total += 1;
-                        if is_selected { ("█", Color::Black, Color::Green) }
-                        else { ("█", Color::Green, Color::Reset) }
-                    } else {
-                        total += 1;
-                        if is_selected { ("█", Color::Black, Color::Red) }
-                        else { ("█", Color::Red, Color::Reset) }
-                    };
-                    cells.push(Cell::from(ch).style(Style::default().fg(fg).bg(bg)));
+                if let Some(td) = data.get(tid) {
+                    let mut pass = 0u32;
+                    let mut total = 0u32;
+                    for (ti, trial) in td.trials.iter().enumerate() {
+                        let is_col_selected = is_selected && ti == trial_select.min(td.trials.len().saturating_sub(1));
+                        let (ch, fg, bg) = if trial.score < 0.0 {
+                            ("░", Color::DarkGray, Color::Reset)
+                        } else if trial.score >= 1.0 {
+                            pass += 1; total += 1;
+                            if is_col_selected { ("█", Color::Black, Color::Green) }
+                            else { ("█", Color::Green, Color::Reset) }
+                        } else {
+                            total += 1;
+                            if is_col_selected { ("█", Color::Black, Color::Red) }
+                            else { ("█", Color::Red, Color::Reset) }
+                        };
+                        cells.push(Cell::from(ch).style(Style::default().fg(fg).bg(bg)));
+                    }
+                    // Rate
+                    let rate = if total > 0 { pass * 100 / total } else { 0 };
+                    let rc = match rate { 100 => Color::Green, 75..=99 => Color::Yellow, 50..=74 => Color::Magenta, _ => Color::Red };
+                    cells.push(Cell::from(format!("{:3}%", rate)).style(Style::default().fg(rc)));
+                } else {
+                    cells.push(Cell::from("no data").style(Style::default().fg(Color::DarkGray)));
                 }
 
-                let rate = if total > 0 { pass * 100 / total } else { 0 };
-                let rate_color = match rate {
-                    100 => Color::Green,
-                    75..=99 => Color::Yellow,
-                    50..=74 => Color::Magenta,
-                    _ => Color::Red,
-                };
-                cells.push(Cell::from(format!("{}", rate)).style(Style::default().fg(rate_color)));
                 Row::new(cells)
             }).collect();
 
+            // Dynamic widths: task(4) + N trial cols(1 each) + rate(5)
+            let trial_cols = max_trials.min(30);
             let mut widths = vec![Constraint::Length(4)];
-            for _ in &visible { widths.push(Constraint::Length(2)); }
-            widths.push(Constraint::Length(4));
+            for _ in 0..trial_cols { widths.push(Constraint::Length(1)); }
+            widths.push(Constraint::Length(5));
 
             let table = Table::new(rows, widths)
-                .header(Row::new(hdr))
                 .block(Block::default().borders(Borders::RIGHT))
                 .row_highlight_style(Style::default());
             f.render_stateful_widget(table, left[1], &mut table_state);
 
-            // Bottom status
-            let status = Paragraph::new(format!(" {} col:{}", task_id, col_select))
+            // Status
+            let n_trials = data.get(task_id).map(|d| d.trials.len()).unwrap_or(0);
+            let status = Paragraph::new(format!(" {} trial {}/{}", task_id, trial_select + 1, n_trials))
                 .style(Style::default().fg(Color::DarkGray));
             f.render_widget(status, left[2]);
 
             // ── RIGHT: Log viewer ──
-            let log_lines: Vec<Line> = log_content.lines().skip(log_scroll as usize).take(main[1].height as usize - 2).map(|l| {
-                let style = if l.contains("Score: 1") { Style::default().fg(Color::Green) }
-                    else if l.contains("Score: 0") { Style::default().fg(Color::Red) }
-                    else if l.contains("⚠") || l.contains("⛔") { Style::default().fg(Color::Yellow) }
-                    else if l.contains("🎯") || l.contains("Skill") { Style::default().fg(Color::Cyan) }
-                    else if l.contains("→ ") { Style::default().fg(Color::Blue) }
-                    else { Style::default().fg(Color::White) };
-                Line::from(Span::styled(l, style))
-            }).collect();
-
             let total_lines = log_content.lines().count();
+            let visible_lines = main[1].height.saturating_sub(2) as usize;
+            let log_lines: Vec<Line> = log_content.lines()
+                .skip(log_scroll as usize)
+                .take(visible_lines)
+                .map(|l| Line::from(Span::styled(l, colorize_line(l))))
+                .collect();
+
             let log_widget = Paragraph::new(log_lines)
                 .block(Block::default()
                     .borders(Borders::ALL)
-                    .title(format!(" {} log ({}/{} lines) PgUp/PgDn ", task_id, log_scroll, total_lines))
+                    .title(format!(" {} [{}/{}] ", task_id, log_scroll, total_lines))
                 )
                 .wrap(Wrap { trim: false });
             f.render_widget(log_widget, main[1]);
@@ -342,11 +290,11 @@ fn run_app() -> io::Result<()> {
                         log_scroll = 0;
                     }
                     KeyCode::Right | KeyCode::Char('l') => {
-                        if col_select + 1 < runs.len() { col_select += 1; }
+                        trial_select += 1;
                         log_scroll = 0;
                     }
                     KeyCode::Left | KeyCode::Char('h') => {
-                        col_select = col_select.saturating_sub(1);
+                        trial_select = trial_select.saturating_sub(1);
                         log_scroll = 0;
                     }
                     KeyCode::PageDown => { log_scroll = log_scroll.saturating_add(20); }
