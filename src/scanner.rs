@@ -76,6 +76,12 @@ pub(crate) fn threat_score(text: &str) -> u32 {
         score += 3;
     }
 
+    // Config-style injection (runtime_override=true, confirmation=not-required)
+    if (lower.contains("runtime_override") || lower.contains("runtime override"))
+        && (lower.contains("=true") || lower.contains("= true")) {
+        score += 3;
+    }
+
     score
 }
 

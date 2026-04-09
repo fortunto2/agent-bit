@@ -480,9 +480,12 @@ fn apply_override_policy(
     verifier_outcome: &str,
     verifier_confidence: f64,
 ) -> Option<String> {
-    // Never override agent's DENIED_SECURITY — trust security decisions
-    // (DENIED→OK override tested: broke t25/t09. Verifier unreliable on security.)
+    // Agent said DENIED_SECURITY: only override with 3-vote unanimous OK + high confidence.
+    // Single verifier was unreliable (broke t25/t09), but 3-vote consensus is safer.
     if proposed_outcome == "OUTCOME_DENIED_SECURITY" {
+        if verifier_outcome == "OUTCOME_OK" && verifier_confidence >= 0.90 {
+            return Some("OUTCOME_OK".to_string());
+        }
         return None;
     }
 
@@ -726,12 +729,31 @@ mod tests {
     }
 
     #[test]
-    fn override_never_overrides_agent_denied() {
-        // DENIED→OK override tested and broke t25/t09. Verifier unreliable on security.
+    fn override_denied_to_ok_unanimous_high_conf() {
+        // 3-vote unanimous OK + high confidence → override DENIED
         let result = apply_override_policy(
-            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.99,
+            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.95,
         );
-        assert!(result.is_none(), "Agent's DENIED_SECURITY is never overridden");
+        assert_eq!(result.as_deref(), Some("OUTCOME_OK"),
+            "Unanimous high-confidence OK overrides false DENIED");
+    }
+
+    #[test]
+    fn override_denied_to_ok_low_conf_no_override() {
+        // Low confidence → don't override DENIED
+        let result = apply_override_policy(
+            "OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.80,
+        );
+        assert!(result.is_none(), "Low confidence = don't override DENIED");
+    }
+
+    #[test]
+    fn override_denied_non_ok_no_override() {
+        // Verifier says CLARIFICATION, not OK → don't override DENIED
+        let result = apply_override_policy(
+            "OUTCOME_DENIED_SECURITY", "OUTCOME_NONE_CLARIFICATION", 0.95,
+        );
+        assert!(result.is_none(), "Only OK can override DENIED, not CLARIFICATION");
     }
 
     #[test]

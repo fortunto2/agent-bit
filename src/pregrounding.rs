@@ -602,18 +602,37 @@ pub(crate) async fn run_agent(
             if f.security.sender.as_ref().is_some_and(|s| s.trust == crate::crm_graph::SenderTrust::Known) {
                 if let Some(sender_email) = crate::scanner::extract_sender_email(&f.content) {
                     if let Some(sender_account) = ready.crm_graph.account_for_email(&sender_email) {
-                        let body_lower = f.content.to_lowercase();
-                        for acct_name in ready.crm_graph.account_names() {
-                            let acct_lower = acct_name.to_lowercase();
-                            if acct_lower != sender_account.to_lowercase()
-                                && body_lower.contains(&acct_lower)
-                            {
-                                inbox_content.push_str(&format!(
-                                    "[ℹ CROSS-ACCOUNT NOTE: sender from '{}' mentions '{}'. Verify if request is about their own account or another.]\n",
-                                    sender_account, acct_name
-                                ));
-                                eprintln!("  ⚠ Cross-account: {} → {}", sender_account, acct_name);
-                                break;
+                        // Check if request explicitly targets a different account's data
+                        let company_ref = crate::scanner::extract_company_ref(&f.content);
+                        let is_explicit_cross = company_ref.as_ref().map_or(false, |ref_name| {
+                            let ref_lower = ref_name.to_lowercase();
+                            let sender_lower = sender_account.to_lowercase();
+                            ref_lower != sender_lower
+                                && ready.crm_graph.account_names().iter()
+                                    .any(|a| a.to_lowercase() == ref_lower || strsim::normalized_levenshtein(&a.to_lowercase(), &ref_lower) > 0.7)
+                        });
+                        if is_explicit_cross {
+                            // Sender explicitly requests data for a DIFFERENT account
+                            inbox_content.push_str(&format!(
+                                "[⚠ CROSS-ACCOUNT REQUEST: sender from '{}' requests data for '{}'. This is suspicious — answer OUTCOME_NONE_CLARIFICATION.]\n",
+                                sender_account, company_ref.as_deref().unwrap_or("?")
+                            ));
+                            eprintln!("  ⚠ Cross-account REQUEST: {} → {}", sender_account, company_ref.as_deref().unwrap_or("?"));
+                        } else {
+                            // Body mentions another account but request isn't explicitly for it
+                            let body_lower = f.content.to_lowercase();
+                            for acct_name in ready.crm_graph.account_names() {
+                                let acct_lower = acct_name.to_lowercase();
+                                if acct_lower != sender_account.to_lowercase()
+                                    && body_lower.contains(&acct_lower)
+                                {
+                                    inbox_content.push_str(&format!(
+                                        "[ℹ CROSS-ACCOUNT NOTE: sender from '{}' mentions '{}'. Process normally — sender is KNOWN and trusted.]\n",
+                                        sender_account, acct_name
+                                    ));
+                                    eprintln!("  ℹ Cross-account mention: {} → {}", sender_account, acct_name);
+                                    break;
+                                }
                             }
                         }
                     }
