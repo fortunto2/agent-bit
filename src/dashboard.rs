@@ -186,17 +186,26 @@ fn run_app() -> io::Result<()> {
                     let mut scored = 0u32;
                     for (ti, trial) in td.trials.iter().enumerate() {
                         let is_col = is_sel && ti == trial_select.min(td.trials.len().saturating_sub(1));
+                        let has_log = std::path::Path::new(&format!(
+                            "benchmarks/tasks/{}/{}/run.log", tid, trial.trial_id
+                        )).exists() || std::path::Path::new(&format!(
+                            "benchmarks/tasks/{}/{}/pipeline.txt", tid, trial.trial_id
+                        )).exists();
+
                         let (ch, fg, bg) = if trial.score < 0.0 {
                             if is_col { ("?", Color::Black, Color::Yellow) }
                             else { ("?", Color::DarkGray, Color::Reset) }
                         } else if trial.score >= 1.0 {
                             pass += 1; scored += 1;
+                            // Dim green (▓) for score-only, bright green (█) for full data
                             if is_col { ("█", Color::Black, Color::Green) }
-                            else { ("█", Color::Green, Color::Reset) }
+                            else if has_log { ("█", Color::Green, Color::Reset) }
+                            else { ("▓", Color::DarkGray, Color::Green) }
                         } else {
                             scored += 1;
                             if is_col { ("█", Color::Black, Color::Red) }
-                            else { ("█", Color::Red, Color::Reset) }
+                            else if has_log { ("█", Color::Red, Color::Reset) }
+                            else { ("▓", Color::DarkGray, Color::Red) }
                         };
                         cells.push(Cell::from(ch).style(Style::default().fg(fg).bg(bg)));
                     }
