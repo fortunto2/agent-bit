@@ -286,11 +286,84 @@ impl InboxFeatureMatrix {
         if self.n_messages() == 0 { return; }
         eprintln!("  📊 Feature matrix: {} messages × {} features", self.n_messages(), N_FEATURES);
         for (name, mean, std, min, max) in self.summary() {
-            if std > 0.01 { // only log non-constant features
+            if std > 0.01 {
                 eprintln!("    {}: mean={:.2} std={:.2} [{:.2}..{:.2}]", name, mean, std, min, max);
             }
         }
     }
+}
+
+// ── Ridge regression calibration (from video-analyzer pattern) ──────────
+
+/// Result of ridge regression calibration.
+pub struct CalibrationResult {
+    pub weights: Weights,
+    pub r_squared: f32,
+    pub mse: f32,
+}
+
+/// Calibrate weights via ridge regression: X^T·X + λI)^{-1} · X^T·y
+/// teacher_scores: target value per message (e.g., 1.0=should deny, 0.0=should allow)
+/// lambda: regularization (higher = smoother weights, prevents overfitting)
+pub fn calibrate_ridge(
+    matrix: &InboxFeatureMatrix,
+    teacher_scores: &[f32],
+    lambda: f32,
+) -> Option<CalibrationResult> {
+    let x = matrix.usable();
+    let n = x.nrows();
+    if n < 3 || n != teacher_scores.len() { return None; }
+
+    let y = Array1::from(teacher_scores.to_vec());
+
+    // X^T · X + λI
+    let xt = x.t();
+    let mut xtx = xt.dot(&x);
+    for i in 0..N_FEATURES {
+        xtx[[i, i]] += lambda;
+    }
+
+    // Solve: w = (X^T·X + λI)^{-1} · X^T · y
+    // Use pseudo-inverse via Cholesky-like decomposition (simplified: iterative solve)
+    let xty = xt.dot(&y);
+
+    // Gauss-Seidel iterative solver (simple, no external linalg dep)
+    let mut w = Array1::<f32>::zeros(N_FEATURES);
+    for _iter in 0..100 {
+        for j in 0..N_FEATURES {
+            let mut sum = xty[j];
+            for k in 0..N_FEATURES {
+                if k != j { sum -= xtx[[j, k]] * w[k]; }
+            }
+            w[j] = sum / xtx[[j, j]];
+        }
+    }
+
+    // Compute R² and MSE
+    let predictions = x.dot(&w);
+    let residuals = &y - &predictions;
+    let mse = residuals.mapv(|r| r * r).mean().unwrap_or(0.0);
+    let y_mean = y.mean().unwrap_or(0.0);
+    let ss_tot: f32 = y.iter().map(|&yi| (yi - y_mean).powi(2)).sum();
+    let ss_res: f32 = residuals.iter().map(|r| r * r).sum();
+    let r_squared = if ss_tot > 0.0 { 1.0 - ss_res / ss_tot } else { 0.0 };
+
+    let mut values = [0.0f32; N_FEATURES];
+    for (i, &v) in w.iter().enumerate() { values[i] = v; }
+    let bias = 0.5 * (1.0 - values.iter().sum::<f32>());
+
+    eprintln!("  📊 Ridge calibration: R²={:.3} MSE={:.4} λ={}", r_squared, mse, lambda);
+    for (i, &v) in values.iter().enumerate() {
+        if v.abs() > 0.01 {
+            eprintln!("    {}: {:.3}", FEATURE_NAMES[i], v);
+        }
+    }
+
+    Some(CalibrationResult {
+        weights: Weights { values, bias, normalize: false },
+        r_squared,
+        mse,
+    })
 }
 
 #[cfg(test)]
@@ -473,6 +546,39 @@ mod tests {
         // Cross-account message should rank highest
         assert!(cross_scores[3] > cross_scores[0], "Cross > clean");
         assert!(cross_scores[3] > cross_scores[2], "Cross > attack (for cross weights)");
+    }
+
+    // ─── Ridge regression calibration ────────────────────────────────────
+
+    #[test]
+    fn calibrate_ridge_learns_injection_pattern() {
+        // 6 labeled examples: injection vs legit
+        //                    ml   struct sender domain otp  url  sent  cross nli_i nli_c chan
+        let rows = vec![
+            [0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.3, 0.5, 0.0, 0.0, 0.0, 0.0],  // legit
+            [0.6, 0.0, 1.0, 1.0, 0.0, 0.0, 0.4, 0.6, 0.0, 0.0, 0.0, 1.0],  // legit admin
+            [0.3, 0.5, 0.0, 0.0, 0.0, 1.0, 0.7, 0.2, 0.0, 0.5, 0.0, 0.0],  // injection
+            [0.2, 0.7, 0.0, 0.5, 0.0, 0.0, 0.8, 0.1, 0.0, 0.7, 0.0, 0.0],  // injection
+            [0.4, 0.0, 1.0, 1.0, 1.0, 0.0, 0.2, 0.4, 0.0, 0.0, 0.3, 0.7],  // legit otp
+            [0.1, 0.8, 0.0, 0.0, 1.0, 0.0, 0.6, 0.1, 0.0, 0.6, 0.5, 0.0],  // exfil
+        ];
+        let labels = vec![0.0, 0.0, 1.0, 1.0, 0.0, 1.0]; // 0=safe, 1=threat
+        let mat = matrix_from_rows(rows);
+
+        let result = calibrate_ridge(&mat, &labels, 0.1).unwrap();
+        eprintln!("  Ridge R²={:.3}", result.r_squared);
+
+        // Calibrated weights should give high score to injection features
+        let w = &result.weights;
+        let struct_w = w.values[column_index("structural_score").unwrap()];
+        let nli_w = w.values[column_index("nli_injection").unwrap()];
+        assert!(struct_w > 0.0, "structural_score weight should be positive: {}", struct_w);
+        assert!(nli_w > 0.0, "nli_injection weight should be positive: {}", nli_w);
+
+        // Score the same data with learned weights — injections should score higher
+        let scores = mat.score_all(&result.weights);
+        assert!(scores[2] > scores[0], "Injection ({:.2}) > legit ({:.2})", scores[2], scores[0]);
+        assert!(scores[3] > scores[1], "Injection2 ({:.2}) > legit admin ({:.2})", scores[3], scores[1]);
     }
 
     // ─── Realistic scenario: t23-like inbox (5 messages) ────────────────
