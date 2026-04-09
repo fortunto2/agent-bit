@@ -77,38 +77,31 @@ impl CrmGraph {
     pub async fn build_from_pcm(pcm: &PcmClient) -> Self {
         let mut g = Self::new();
 
-        // Read accounts FIRST (builds account_id_map for contact.account_id resolution)
-        match pcm.list("accounts").await {
-            Ok(listing) => {
-                for line in listing.lines() {
-                    let name = line.trim().trim_end_matches('/');
-                    if name.is_empty() || name.starts_with('$') || name.eq_ignore_ascii_case("README.MD") {
-                        continue;
-                    }
-                    let path = format!("accounts/{}", name);
-                    if let Ok(content) = pcm.read(&path, false, 0, 0).await {
-                        g.ingest_account(&content);
-                    }
-                }
-            }
-            Err(e) => eprintln!("  CRM graph: accounts/ list failed: {}", e),
+        // Helper: list directory, parallel-read all files, return contents
+        async fn read_all(pcm: &PcmClient, dir: &str) -> Vec<String> {
+            let Ok(listing) = pcm.list(dir).await else {
+                eprintln!("  CRM graph: {}/ list failed: PCM List failed: not_found: folder not found", dir);
+                return Vec::new();
+            };
+            let paths: Vec<String> = listing.lines()
+                .map(|l| l.trim().trim_end_matches('/'))
+                .filter(|n| !n.is_empty() && !n.starts_with('$') && !n.eq_ignore_ascii_case("README.MD"))
+                .map(|n| format!("{}/{}", dir, n))
+                .collect();
+            let futures: Vec<_> = paths.iter().map(|p| pcm.read(p, false, 0, 0)).collect();
+            futures::future::join_all(futures).await
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .collect()
         }
 
-        // Read contacts (account_id_map available for resolving account_id → name)
-        match pcm.list("contacts").await {
-            Ok(listing) => {
-                for line in listing.lines() {
-                    let name = line.trim().trim_end_matches('/');
-                    if name.is_empty() || name.starts_with('$') || name.eq_ignore_ascii_case("README.MD") {
-                        continue;
-                    }
-                    let path = format!("contacts/{}", name);
-                    if let Ok(content) = pcm.read(&path, false, 0, 0).await {
-                        g.ingest_contact(&content);
-                    }
-                }
-            }
-            Err(e) => eprintln!("  CRM graph: contacts/ list failed: {}", e),
+        // Accounts FIRST (builds account_id_map for contact.account_id resolution)
+        for content in read_all(pcm, "accounts").await {
+            g.ingest_account(&content);
+        }
+        // Contacts (account_id_map now available)
+        for content in read_all(pcm, "contacts").await {
+            g.ingest_contact(&content);
         }
 
         g
