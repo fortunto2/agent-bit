@@ -414,10 +414,12 @@ pub(crate) async fn run_agent(
     let instruction_intent = classified.intent.clone();
     let intent_confidence = classified.intent_confidence;
 
-    // ── Context assembly (tree, agents.md, CRM schema) ──────────────
-    let tree_out = pcm.tree("/", 2).await.unwrap_or_else(|e| format!("(error: {})", e));
-    let agents_md = pcm.read("AGENTS.md", false, 0, 0).await.unwrap_or_default();
-    let ctx_time = pcm.context().await.unwrap_or_default();
+    // ── Context assembly (tree, agents.md, CRM schema) — parallel IO ──
+    let (tree_out, agents_md, ctx_time) = tokio::join!(
+        async { pcm.tree("/", 2).await.unwrap_or_else(|e| format!("(error: {})", e)) },
+        async { pcm.read("AGENTS.md", false, 0, 0).await.unwrap_or_default() },
+        async { pcm.context().await.unwrap_or_default() },
+    );
 
     let crm_schema = {
         let mut readmes = String::new();
@@ -583,20 +585,38 @@ pub(crate) async fn run_agent(
         }
     }
 
-    // Build channel trust registry from docs/channels/ files
-    let channel_trust = {
-        let mut ct = crate::policy::ChannelTrust::new();
+    // Build channel trust registry + pre-read channel files (parallel IO, shared data)
+    let channel_files: Vec<(String, String)> = {
+        let mut files = Vec::new();
         if let Ok(channels_list) = pcm.list("docs/channels").await {
+            let mut paths = Vec::new();
+            let mut fnames = Vec::new();
             for line in channels_list.lines() {
                 let fname = line.trim().trim_end_matches('/');
                 if fname.is_empty() || fname.starts_with('$') || fname.contains("README")
                     || fname.contains("AGENTS") || fname == "otp.txt" {
                     continue;
                 }
-                if let Ok(content) = pcm.read(&format!("docs/channels/{}", fname), false, 0, 0).await {
-                    ct.ingest(&content);
+                paths.push(format!("docs/channels/{}", fname));
+                fnames.push(fname.to_string());
+            }
+            // Parallel read all channel files
+            let read_futures: Vec<_> = paths.iter()
+                .map(|p| pcm.read(p, false, 0, 0))
+                .collect();
+            let results = futures::future::join_all(read_futures).await;
+            for (fname, result) in fnames.into_iter().zip(results) {
+                if let Ok(content) = result {
+                    files.push((fname, content));
                 }
             }
+        }
+        files
+    };
+    let channel_trust = {
+        let mut ct = crate::policy::ChannelTrust::new();
+        for (_fname, content) in &channel_files {
+            ct.ingest(content);
         }
         ct
     };
@@ -731,33 +751,24 @@ pub(crate) async fn run_agent(
         }
     }
 
-    // Pre-load channel file stats
-    if let Ok(channels_list) = pcm.list("docs/channels").await {
+    // Pre-load channel file stats (reuse already-read channel_files — no extra IO)
+    {
         let mut channel_stats = String::new();
-        for line in channels_list.lines() {
-            let fname = line.trim().trim_end_matches('/');
-            if fname.is_empty() || fname.starts_with('$') || fname.eq_ignore_ascii_case("README.MD")
-                || fname.eq_ignore_ascii_case("AGENTS.MD") || fname == "otp.txt" {
-                continue;
-            }
-            let path = format!("docs/channels/{}", fname);
-            if let Ok(content) = pcm.read(&path, false, 0, 0).await {
-                let lines: Vec<&str> = content.lines().filter(|l| !l.starts_with("$ ")).collect();
-                let total = lines.len();
-                // Count by category (blacklist, verified, pending, etc.)
-                let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-                for l in &lines {
-                    if let Some(dash) = l.rfind(" - ") {
-                        let category = l[dash + 3..].trim();
-                        if !category.is_empty() {
-                            *counts.entry(category).or_insert(0) += 1;
-                        }
+        for (fname, content) in &channel_files {
+            let lines: Vec<&str> = content.lines().filter(|l| !l.starts_with("$ ")).collect();
+            let total = lines.len();
+            let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+            for l in &lines {
+                if let Some(dash) = l.rfind(" - ") {
+                    let category = l[dash + 3..].trim();
+                    if !category.is_empty() {
+                        *counts.entry(category).or_insert(0) += 1;
                     }
                 }
-                if !counts.is_empty() {
-                    let summary: Vec<String> = counts.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
-                    channel_stats.push_str(&format!("{}: {} entries total — {}\n", fname, total, summary.join(", ")));
-                }
+            }
+            if !counts.is_empty() {
+                let summary: Vec<String> = counts.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
+                channel_stats.push_str(&format!("{}: {} entries total — {}\n", fname, total, summary.join(", ")));
             }
         }
         if !channel_stats.is_empty() {
