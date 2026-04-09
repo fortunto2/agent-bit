@@ -191,7 +191,7 @@ impl WorkflowState {
             let outcome = path.to_lowercase(); // path field carries outcome for answer tool
             if outcome.contains("ok") || outcome.is_empty() {
                 // Don't block if verification_only (OTP oracle — no writes expected)
-                if !self.verification_only && self.intent != "intent_query" && self.intent != "intent_delete" {
+                if !self.verification_only && self.intent != "intent_query" && self.intent != "intent_delete" && self.intent != "intent_unclear" {
                     return Guard::Block(
                         "⛔ You haven't written any files yet. Execute the task FIRST \
                          (write email, update contact, etc), THEN call answer(). \

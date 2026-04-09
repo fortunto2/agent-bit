@@ -609,7 +609,7 @@ pub(crate) async fn run_agent(
                                 && body_lower.contains(&acct_lower)
                             {
                                 inbox_content.push_str(&format!(
-                                    "[⚠ CROSS-ACCOUNT: sender from '{}' asks about '{}'. → OUTCOME_NONE_CLARIFICATION]\n",
+                                    "[ℹ CROSS-ACCOUNT NOTE: sender from '{}' mentions '{}'. Verify if request is about their own account or another.]\n",
                                     sender_account, acct_name
                                 ));
                                 eprintln!("  ⚠ Cross-account: {} → {}", sender_account, acct_name);
