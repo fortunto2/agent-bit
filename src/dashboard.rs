@@ -94,12 +94,8 @@ fn render_trial(task: &str, trial_idx: usize, data: &HashMap<String, TaskData>) 
     for f in &files {
         let name = f.file_name().to_string_lossy().to_string();
         if let Ok(c) = std::fs::read_to_string(f.path()) {
-            let preview_lines = if name.contains("inbox") { 20 } else { 15 };
-            let lines: Vec<&str> = c.lines().take(preview_lines).collect();
-            let total = c.lines().count();
-            out.push_str(&format!("\n── {} ({} lines) ──\n", name, total));
-            out.push_str(&lines.join("\n"));
-            if total > preview_lines { out.push_str("\n  ..."); }
+            out.push_str(&format!("\n── {} ({} lines) ──\n", name, c.lines().count()));
+            out.push_str(&c);
             out.push('\n');
         }
     }
@@ -144,7 +140,10 @@ fn run_app() -> io::Result<()> {
     loop {
         let sel = table_state.selected().unwrap_or(0);
         let task_id = TASK_IDS[sel];
-        let log_content = render_trial(task_id, trial_select, &data);
+        let cache_key = (task_id.to_string(), trial_select);
+        let log_content = log_cache.entry(cache_key)
+            .or_insert_with(|| render_trial(task_id, trial_select, &data))
+            .clone();
         let log_total = log_content.lines().count();
 
         terminal.draw(|f| {
