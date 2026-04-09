@@ -1,14 +1,11 @@
 //! PAC1 Dashboard — TUI split view: heatmap + log viewer.
 //!
 //! Data: benchmarks/tasks/{task_id}/{trial_id}/score.txt + dump files
-//! Left: compact task×run heatmap
-//! Right: trial dump (pipeline, inbox, contacts, tree)
-//!
 //! Usage: cargo run --bin pac1-dash
 
-use std::{io, path::Path, collections::HashMap};
+use std::{io, collections::HashMap};
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyModifiers},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     execute,
 };
@@ -29,24 +26,13 @@ const TASK_IDS: &[&str] = &[
     "t41","t42","t43",
 ];
 
-/// One trial result for a task.
-struct Trial {
-    trial_id: String,
-    score: f32,     // -1 = no score yet
-    detail: String, // score_detail lines
-}
+struct Trial { trial_id: String, score: f32, detail: String }
+struct TaskData { trials: Vec<Trial> }
 
-/// All trials grouped by task.
-struct TaskData {
-    trials: Vec<Trial>,
-}
-
-/// Load all data from benchmarks/tasks/.
 fn load_task_data() -> HashMap<String, TaskData> {
     let mut data: HashMap<String, TaskData> = HashMap::new();
-    let base = Path::new("benchmarks/tasks");
+    let base = std::path::Path::new("benchmarks/tasks");
     if !base.exists() { return data; }
-
     for tid in TASK_IDS {
         let task_dir = base.join(tid);
         if !task_dir.exists() { continue; }
@@ -56,25 +42,17 @@ fn load_task_data() -> HashMap<String, TaskData> {
         dirs.sort_by_key(|e| e.file_name());
         for entry in dirs {
             let trial_id = entry.file_name().to_string_lossy().to_string();
-            let score_path = entry.path().join("score.txt");
-            let (score, detail) = if let Ok(content) = std::fs::read_to_string(&score_path) {
-                let mut lines = content.lines();
-                let s: f32 = lines.next().and_then(|l| l.parse().ok()).unwrap_or(-1.0);
-                let d: String = lines.collect::<Vec<_>>().join("\n");
-                (s, d)
-            } else {
-                (-1.0, String::new())
-            };
+            let (score, detail) = if let Ok(c) = std::fs::read_to_string(entry.path().join("score.txt")) {
+                let mut l = c.lines();
+                (l.next().and_then(|s| s.parse().ok()).unwrap_or(-1.0), l.collect::<Vec<_>>().join("\n"))
+            } else { (-1.0, String::new()) };
             trials.push(Trial { trial_id, score, detail });
         }
-        if !trials.is_empty() {
-            data.insert(tid.to_string(), TaskData { trials });
-        }
+        if !trials.is_empty() { data.insert(tid.to_string(), TaskData { trials }); }
     }
     data
 }
 
-/// Render trial dump for log panel.
 fn render_trial(task: &str, trial_idx: usize, data: &HashMap<String, TaskData>) -> String {
     let Some(td) = data.get(task) else {
         return format!("No trials for {}\nRun: cargo run -- --provider nemotron --task {}", task, task);
@@ -84,82 +62,63 @@ fn render_trial(task: &str, trial_idx: usize, data: &HashMap<String, TaskData>) 
     let dir = format!("benchmarks/tasks/{}/{}", task, trial.trial_id);
     let mut out = String::new();
 
-    // Header
     out.push_str(&format!("━━━ {} trial {}/{} ━━━\n", task, idx + 1, td.trials.len()));
     out.push_str(&format!("ID: {}\n", trial.trial_id));
     if trial.score >= 0.0 {
-        out.push_str(&format!("Score: {:.0}\n", trial.score));
+        let label = if trial.score >= 1.0 { "PASS" } else { "FAIL" };
+        out.push_str(&format!("Score: {} ({})\n", trial.score, label));
     }
-    if !trial.detail.is_empty() {
-        out.push_str(&format!("{}\n", trial.detail));
-    }
-
-    // BitGN URL
+    if !trial.detail.is_empty() { out.push_str(&trial.detail); out.push('\n'); }
     if let Ok(url) = std::fs::read_to_string(format!("{}/bitgn_log.url", dir)) {
-        out.push_str(&format!("\n🔗 {}\n", url.trim()));
+        out.push_str(&format!("🔗 {}\n", url.trim()));
     }
 
-    // Pipeline
+    // Full agent log (run.log) — primary view if available
+    if let Ok(c) = std::fs::read_to_string(format!("{}/run.log", dir)) {
+        out.push_str(&format!("\n── Agent Log ({} lines) ──\n", c.lines().count()));
+        out.push_str(&c);
+        return out; // run.log is complete — skip dump file rendering
+    }
+
+    // Fallback: render dump files
     if let Ok(c) = std::fs::read_to_string(format!("{}/pipeline.txt", dir)) {
-        out.push_str("\n── Pipeline ──\n");
-        out.push_str(&c);
+        out.push_str("\n── Pipeline ──\n"); out.push_str(&c); out.push('\n');
     }
-
-    // Inbox
-    let mut inbox: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten()
-        .filter(|e| e.file_name().to_string_lossy().starts_with("inbox_"))
+    // All dump files
+    let mut files: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten()
+        .filter(|e| e.path().is_file() && e.file_name().to_string_lossy() != "score.txt"
+            && e.file_name().to_string_lossy() != "bitgn_log.url"
+            && e.file_name().to_string_lossy() != "pipeline.txt")
         .collect();
-    inbox.sort_by_key(|e| e.file_name());
-    if !inbox.is_empty() {
-        out.push_str("\n── Inbox ──\n");
-        for f in &inbox {
-            if let Ok(c) = std::fs::read_to_string(f.path()) {
-                out.push_str(&c);
-                out.push_str("\n---\n");
-            }
+    files.sort_by_key(|e| e.file_name());
+    for f in &files {
+        let name = f.file_name().to_string_lossy().to_string();
+        if let Ok(c) = std::fs::read_to_string(f.path()) {
+            let preview_lines = if name.contains("inbox") { 20 } else { 15 };
+            let lines: Vec<&str> = c.lines().take(preview_lines).collect();
+            let total = c.lines().count();
+            out.push_str(&format!("\n── {} ({} lines) ──\n", name, total));
+            out.push_str(&lines.join("\n"));
+            if total > preview_lines { out.push_str("\n  ..."); }
+            out.push('\n');
         }
-    }
-
-    // Contacts
-    if let Ok(c) = std::fs::read_to_string(format!("{}/contacts.txt", dir)) {
-        let n = c.lines().count();
-        out.push_str(&format!("\n── Contacts ({}) ──\n", n));
-        for line in c.lines().take(10) { out.push_str(line); out.push('\n'); }
-        if n > 10 { out.push_str("  ...\n"); }
-    }
-
-    // Accounts
-    if let Ok(c) = std::fs::read_to_string(format!("{}/accounts.txt", dir)) {
-        let n = c.lines().count();
-        out.push_str(&format!("\n── Accounts ({}) ──\n", n));
-        for line in c.lines().take(10) { out.push_str(line); out.push('\n'); }
-        if n > 10 { out.push_str("  ...\n"); }
-    }
-
-    // Tree
-    if let Ok(c) = std::fs::read_to_string(format!("{}/tree.txt", dir)) {
-        out.push_str("\n── Tree ──\n");
-        out.push_str(&c);
-    }
-
-    if out.lines().count() < 5 {
-        out.push_str(&format!("\nDump dir: {}\n", dir));
     }
     out
 }
 
-fn colorize_line(line: &str) -> Style {
-    if line.contains("Score: 1") || line.contains("PASS") { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) }
-    else if line.contains("Score: 0") || line.contains("FAIL") { Style::default().fg(Color::Red).add_modifier(Modifier::BOLD) }
+fn colorize(line: &str) -> Style {
+    if line.contains("PASS") || line.contains("Score: 1") { Style::default().fg(Color::Green).add_modifier(Modifier::BOLD) }
+    else if line.contains("FAIL") || line.contains("Score: 0") { Style::default().fg(Color::Red).add_modifier(Modifier::BOLD) }
     else if line.starts_with("━") { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) }
-    else if line.starts_with("──") { Style::default().fg(Color::Yellow) }
+    else if line.starts_with("──") || line.starts_with("── ") { Style::default().fg(Color::Yellow) }
     else if line.starts_with("🔗") { Style::default().fg(Color::Blue) }
     else if line.contains("[⚠") || line.contains("⚠") { Style::default().fg(Color::Yellow) }
-    else if line.contains("[✓") { Style::default().fg(Color::Green) }
-    else if line.contains("CLASSIFICATION") || line.contains("sender:") { Style::default().fg(Color::Magenta) }
-    else if line.starts_with("instruction:") || line.starts_with("intent:") { Style::default().fg(Color::Cyan) }
-    else if line.starts_with("  -") || line.starts_with("- ") { Style::default().fg(Color::White) }
-    else { Style::default().fg(Color::DarkGray) }
+    else if line.contains("[✓") || line.contains("TRUSTED") { Style::default().fg(Color::Green) }
+    else if line.contains("CLASSIFICATION") || line.contains("sender:") || line.contains("injection") || line.contains("credential") { Style::default().fg(Color::Magenta) }
+    else if line.starts_with("instruction:") || line.starts_with("intent:") || line.starts_with("label:") { Style::default().fg(Color::Cyan) }
+    else if line.starts_with("$ cat") || line.starts_with("$ ls") || line.starts_with("$ tree") { Style::default().fg(Color::Blue) }
+    else if line.starts_with("ID:") || line.starts_with("inbox_files:") { Style::default().fg(Color::DarkGray) }
+    else { Style::default().fg(Color::White) }
 }
 
 fn run_app() -> io::Result<()> {
@@ -168,45 +127,54 @@ fn run_app() -> io::Result<()> {
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
     let mut table_state = TableState::default();
     table_state.select(Some(0));
     let mut trial_select: usize = 0;
-    let mut log_scroll: u16 = 0;
-    let mut focus_log = false; // Tab toggles focus between heatmap and log
+    let mut log_scroll: usize = 0;
 
     let data = load_task_data();
     let max_trials = data.values().map(|d| d.trials.len()).max().unwrap_or(0);
 
+    // Compute stats
+    let tasks_with_data = data.len();
+    let total_trials: usize = data.values().map(|d| d.trials.len()).sum();
+    let total_pass: usize = data.values().flat_map(|d| &d.trials).filter(|t| t.score >= 1.0).count();
+    let total_scored: usize = data.values().flat_map(|d| &d.trials).filter(|t| t.score >= 0.0).count();
+
     loop {
-        let selected_task = table_state.selected().unwrap_or(0);
-        let task_id = TASK_IDS[selected_task];
+        let sel = table_state.selected().unwrap_or(0);
+        let task_id = TASK_IDS[sel];
         let log_content = render_trial(task_id, trial_select, &data);
+        let log_total = log_content.lines().count();
 
         terminal.draw(|f| {
             let main = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
                 .split(f.area());
 
-            // ── LEFT: Heatmap ──
             let left = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Min(5), Constraint::Length(1)])
+                .constraints([Constraint::Length(2), Constraint::Min(5), Constraint::Length(2)])
                 .split(main[0]);
 
-            let tasks_with_data = data.len();
-            let focus_indicator = if focus_log { "LOG" } else { "MAP" };
-            let title = Paragraph::new(format!(
-                " PAC1 {}/{} tasks | Tab={} ↑↓←→ d/u q",
-                tasks_with_data, TASK_IDS.len(), focus_indicator
-            )).style(Style::default().fg(Color::Cyan));
-            f.render_widget(title, left[0]);
+            // ── Header with metrics ──
+            let pass_rate = if total_scored > 0 { total_pass * 100 / total_scored } else { 0 };
+            let header = Paragraph::new(vec![
+                Line::from(vec![
+                    Span::styled(" PAC1 ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("{}/{} tasks ", tasks_with_data, TASK_IDS.len()), Style::default().fg(Color::White)),
+                    Span::styled(format!("{}% pass ", pass_rate), Style::default().fg(if pass_rate > 90 { Color::Green } else { Color::Yellow })),
+                    Span::styled(format!("({}/{}) ", total_pass, total_scored), Style::default().fg(Color::DarkGray)),
+                    Span::styled("↑↓=task ←→=trial d/u=scroll q=quit", Style::default().fg(Color::DarkGray)),
+                ]),
+            ]);
+            f.render_widget(header, left[0]);
 
-            // Build rows
+            // ── Heatmap table ──
             let rows: Vec<Row> = TASK_IDS.iter().enumerate().map(|(idx, &tid)| {
-                let is_selected = idx == selected_task;
-                let tid_style = if is_selected {
+                let is_sel = idx == sel;
+                let tid_style = if is_sel {
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
@@ -215,39 +183,34 @@ fn run_app() -> io::Result<()> {
 
                 if let Some(td) = data.get(tid) {
                     let mut pass = 0u32;
-                    let mut total = 0u32;
+                    let mut scored = 0u32;
                     for (ti, trial) in td.trials.iter().enumerate() {
-                        let is_col_selected = is_selected && ti == trial_select.min(td.trials.len().saturating_sub(1));
+                        let is_col = is_sel && ti == trial_select.min(td.trials.len().saturating_sub(1));
                         let (ch, fg, bg) = if trial.score < 0.0 {
-                            // No score yet — show as yellow "?"
-                            if is_col_selected { ("?", Color::Black, Color::Yellow) }
-                            else { ("?", Color::Yellow, Color::Reset) }
+                            if is_col { ("?", Color::Black, Color::Yellow) }
+                            else { ("?", Color::DarkGray, Color::Reset) }
                         } else if trial.score >= 1.0 {
-                            pass += 1; total += 1;
-                            if is_col_selected { ("█", Color::Black, Color::Green) }
+                            pass += 1; scored += 1;
+                            if is_col { ("█", Color::Black, Color::Green) }
                             else { ("█", Color::Green, Color::Reset) }
                         } else {
-                            total += 1;
-                            if is_col_selected { ("█", Color::Black, Color::Red) }
+                            scored += 1;
+                            if is_col { ("█", Color::Black, Color::Red) }
                             else { ("█", Color::Red, Color::Reset) }
                         };
                         cells.push(Cell::from(ch).style(Style::default().fg(fg).bg(bg)));
                     }
-                    // Rate
-                    let rate = if total > 0 { pass * 100 / total } else { 0 };
+                    let rate = if scored > 0 { pass * 100 / scored } else { 0 };
                     let rc = match rate { 100 => Color::Green, 75..=99 => Color::Yellow, 50..=74 => Color::Magenta, _ => Color::Red };
                     cells.push(Cell::from(format!("{:3}%", rate)).style(Style::default().fg(rc)));
-                } else {
-                    cells.push(Cell::from("no data").style(Style::default().fg(Color::DarkGray)));
                 }
+                // no data → empty row, just task id
 
                 Row::new(cells)
             }).collect();
 
-            // Dynamic widths: task(4) + N trial cols(1 each) + rate(5)
-            let trial_cols = max_trials.min(30);
             let mut widths = vec![Constraint::Length(4)];
-            for _ in 0..trial_cols { widths.push(Constraint::Length(1)); }
+            for _ in 0..max_trials.min(30) { widths.push(Constraint::Length(1)); }
             widths.push(Constraint::Length(5));
 
             let table = Table::new(rows, widths)
@@ -255,31 +218,27 @@ fn run_app() -> io::Result<()> {
                 .row_highlight_style(Style::default());
             f.render_stateful_widget(table, left[1], &mut table_state);
 
-            // Status
+            // ── Status bar ──
             let n_trials = data.get(task_id).map(|d| d.trials.len()).unwrap_or(0);
-            let status = Paragraph::new(format!(" {} trial {}/{}", task_id, trial_select + 1, n_trials))
-                .style(Style::default().fg(Color::DarkGray));
+            let status = Paragraph::new(Line::from(vec![
+                Span::styled(format!(" {} ", task_id), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("trial {}/{} ", trial_select.min(n_trials) + 1, n_trials), Style::default().fg(Color::White)),
+            ]));
             f.render_widget(status, left[2]);
 
             // ── RIGHT: Log viewer ──
-            let total_lines = log_content.lines().count();
-            let visible_lines = main[1].height.saturating_sub(2) as usize;
-            let log_lines: Vec<Line> = log_content.lines()
-                .skip(log_scroll as usize)
-                .take(visible_lines)
-                .map(|l| Line::from(Span::styled(l, colorize_line(l))))
+            let vis = main[1].height.saturating_sub(2) as usize;
+            let lines: Vec<Line> = log_content.lines()
+                .skip(log_scroll)
+                .take(vis)
+                .map(|l| Line::from(Span::styled(l, colorize(l))))
                 .collect();
 
-            let log_border_style = if focus_log {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-            let log_widget = Paragraph::new(log_lines)
+            let log_widget = Paragraph::new(lines)
                 .block(Block::default()
                     .borders(Borders::ALL)
-                    .border_style(log_border_style)
-                    .title(format!(" {} [{}/{}] ", task_id, log_scroll, total_lines))
+                    .border_style(Style::default().fg(Color::DarkGray))
+                    .title(format!(" {} [{}/{}] d=↓ u=↑ ", task_id, log_scroll, log_total))
                 )
                 .wrap(Wrap { trim: false });
             f.render_widget(log_widget, main[1]);
@@ -287,42 +246,38 @@ fn run_app() -> io::Result<()> {
 
         if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
+                let max_scroll = log_total.saturating_sub(5);
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Tab => { focus_log = !focus_log; }
+                    // d/u ALWAYS scroll log
+                    KeyCode::Char('d') => { log_scroll = (log_scroll + 20).min(max_scroll); }
+                    KeyCode::Char('u') => { log_scroll = log_scroll.saturating_sub(20); }
+                    KeyCode::PageDown => { log_scroll = (log_scroll + 20).min(max_scroll); }
+                    KeyCode::PageUp => { log_scroll = log_scroll.saturating_sub(20); }
+                    // Ctrl+Down/Up = scroll log by 1 line
+                    KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        log_scroll = (log_scroll + 1).min(max_scroll);
+                    }
+                    KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        log_scroll = log_scroll.saturating_sub(1);
+                    }
+                    // ↑↓ = navigate tasks
                     KeyCode::Down | KeyCode::Char('j') => {
-                        if focus_log {
-                            let max = log_content.lines().count().saturating_sub(5) as u16;
-                            log_scroll = (log_scroll + 1).min(max);
-                        } else {
-                            let i = table_state.selected().unwrap_or(0);
-                            table_state.select(Some((i + 1).min(TASK_IDS.len() - 1)));
-                            log_scroll = 0;
-                        }
+                        let i = table_state.selected().unwrap_or(0);
+                        table_state.select(Some((i + 1).min(TASK_IDS.len() - 1)));
+                        log_scroll = 0;
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
-                        if focus_log {
-                            log_scroll = log_scroll.saturating_sub(1);
-                        } else {
-                            let i = table_state.selected().unwrap_or(0);
-                            table_state.select(Some(i.saturating_sub(1)));
-                            log_scroll = 0;
-                        }
-                    }
-                    KeyCode::Right | KeyCode::Char('l') => {
-                        trial_select += 1;
+                        let i = table_state.selected().unwrap_or(0);
+                        table_state.select(Some(i.saturating_sub(1)));
                         log_scroll = 0;
+                    }
+                    // ←→ = navigate trials
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        trial_select += 1; log_scroll = 0;
                     }
                     KeyCode::Left | KeyCode::Char('h') => {
-                        trial_select = trial_select.saturating_sub(1);
-                        log_scroll = 0;
-                    }
-                    KeyCode::PageDown | KeyCode::Char('d') => {
-                        let max = log_content.lines().count().saturating_sub(5) as u16;
-                        log_scroll = (log_scroll + 20).min(max);
-                    }
-                    KeyCode::PageUp | KeyCode::Char('u') => {
-                        log_scroll = log_scroll.saturating_sub(20);
+                        trial_select = trial_select.saturating_sub(1); log_scroll = 0;
                     }
                     _ => {}
                 }
@@ -336,7 +291,5 @@ fn run_app() -> io::Result<()> {
 }
 
 fn main() {
-    if let Err(e) = run_app() {
-        eprintln!("Dashboard error: {}", e);
-    }
+    if let Err(e) = run_app() { eprintln!("Error: {}", e); }
 }
