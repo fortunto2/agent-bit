@@ -217,7 +217,9 @@ fn run_app() -> io::Result<()> {
                     for (ti, trial) in td.trials.iter().enumerate() {
                         let is_col_selected = is_selected && ti == trial_select.min(td.trials.len().saturating_sub(1));
                         let (ch, fg, bg) = if trial.score < 0.0 {
-                            ("░", Color::DarkGray, Color::Reset)
+                            // No score yet — show as yellow "?"
+                            if is_col_selected { ("?", Color::Black, Color::Yellow) }
+                            else { ("?", Color::Yellow, Color::Reset) }
                         } else if trial.score >= 1.0 {
                             pass += 1; total += 1;
                             if is_col_selected { ("█", Color::Black, Color::Green) }
@@ -297,8 +299,13 @@ fn run_app() -> io::Result<()> {
                         trial_select = trial_select.saturating_sub(1);
                         log_scroll = 0;
                     }
-                    KeyCode::PageDown => { log_scroll = log_scroll.saturating_add(20); }
-                    KeyCode::PageUp => { log_scroll = log_scroll.saturating_sub(20); }
+                    KeyCode::PageDown | KeyCode::Char('d') => {
+                        let max = log_content.lines().count().saturating_sub(10) as u16;
+                        log_scroll = (log_scroll + 20).min(max);
+                    }
+                    KeyCode::PageUp | KeyCode::Char('u') => {
+                        log_scroll = log_scroll.saturating_sub(20);
+                    }
                     _ => {}
                 }
             }
