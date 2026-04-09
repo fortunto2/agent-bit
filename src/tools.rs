@@ -18,6 +18,18 @@ fn pcm_err(e: anyhow::Error) -> ToolError {
     ToolError::Execution(e.to_string())
 }
 
+/// Apply workflow guard result: Block → return error, Warn → append to output, Allow → noop.
+fn apply_guard(guard: Option<crate::workflow::Guard>, output: &mut String) -> Option<ToolOutput> {
+    match guard {
+        Some(crate::workflow::Guard::Block(msg)) => Some(ToolOutput::text(msg)),
+        Some(crate::workflow::Guard::Warn(msg)) => {
+            output.push_str(&format!("\n\n⚠ {}", msg));
+            None
+        }
+        _ => None,
+    }
+}
+
 /// Post-read security guard: append warning if content contains injection patterns.
 /// Advisory only — pipeline classification is authoritative (annotations in context).
 /// Guard catches injection in non-inbox files discovered during execution.
@@ -185,8 +197,9 @@ impl Tool for WriteTool {
 
         // Workflow pre_action guard (policy + capture-write)
         let guard = self.workflow.as_ref().map(|wf| wf.lock().unwrap().pre_action("write", &a.path));
-        if let Some(crate::workflow::Guard::Block(msg)) = guard {
-            return Ok(ToolOutput::text(msg));
+        let mut warn_suffix = String::new();
+        if let Some(out) = apply_guard(guard, &mut warn_suffix) {
+            return Ok(out);
         }
 
         // Outbox validation: if writing JSON to outbox/, validate + auto-fix
@@ -237,6 +250,7 @@ impl Tool for WriteTool {
             }
         }
 
+        msg.push_str(&warn_suffix);
         Ok(ToolOutput::text(msg))
     }
 }
@@ -270,19 +284,9 @@ impl Tool for DeleteTool {
 
         // Workflow pre_action guard (capture guard: block delete before write)
         let guard = self.workflow.as_ref().map(|wf| wf.lock().unwrap().pre_action("delete", &a.path));
-        match guard {
-            Some(crate::workflow::Guard::Block(msg)) => return Ok(ToolOutput::text(msg)),
-            Some(crate::workflow::Guard::Warn(warning)) => {
-                self.pcm.delete(&a.path).await.map_err(pcm_err)?;
-                let mut out = format!("Deleted {}\n{}", a.path, warning);
-                if let Some(ref wf) = self.workflow {
-                    for hook_msg in wf.lock().unwrap().post_action("delete", &a.path) {
-                        out.push_str(&format!("\n{}", hook_msg));
-                    }
-                }
-                return Ok(ToolOutput::text(out));
-            }
-            _ => {}
+        let mut warn_suffix = String::new();
+        if let Some(out) = apply_guard(guard, &mut warn_suffix) {
+            return Ok(out);
         }
 
         self.pcm.delete(&a.path).await.map_err(pcm_err)?;
@@ -295,6 +299,7 @@ impl Tool for DeleteTool {
             }
         }
 
+        out.push_str(&warn_suffix);
         Ok(ToolOutput::text(out))
     }
 }
@@ -675,6 +680,72 @@ impl Tool for ContextTool {
 
 // ─── skill introspection — re-export from sgr-agent ─────────────────────────
 pub use sgr_agent::{GetSkillTool, ListSkillsTool};
+
+// ─── CRM graph query ────────────────────────────────────────────────────────
+
+/// Query the CRM knowledge graph directly — faster than search+read for known entities.
+pub struct QueryCrmTool(pub Arc<CrmGraph>);
+
+#[derive(Deserialize, JsonSchema)]
+struct QueryCrmArgs {
+    /// Query type: "contacts_at" (account), "account_for" (contact), "email_of" (contact name), "manager_of" (account)
+    query: String,
+    /// Entity name to look up
+    name: String,
+}
+
+#[async_trait]
+impl Tool for QueryCrmTool {
+    fn name(&self) -> &str { "query_crm" }
+    fn description(&self) -> &str {
+        "Query CRM knowledge graph. Faster than search+read for contacts/accounts. \
+         query: 'contacts_at' (account name), 'account_for' (contact name), \
+         'email_of' (contact name), 'manager_of' (account name), 'all_contacts', 'all_accounts'."
+    }
+    fn is_read_only(&self) -> bool { true }
+    fn parameters_schema(&self) -> Value { json_schema_for::<QueryCrmArgs>() }
+    async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: QueryCrmArgs = parse_args(&args)?;
+        let result = match a.query.as_str() {
+            "contacts_at" => {
+                let contacts = self.0.contacts_for_account(&a.name);
+                if contacts.is_empty() {
+                    format!("No contacts found for account '{}'", a.name)
+                } else {
+                    contacts.join("\n")
+                }
+            }
+            "account_for" => {
+                self.0.account_for_contact(&a.name)
+                    .unwrap_or_else(|| format!("No account found for contact '{}'", a.name))
+            }
+            "email_of" => {
+                let matches = self.0.find_all_matching_contacts(&a.name);
+                if matches.is_empty() {
+                    format!("No contact matching '{}'", a.name)
+                } else {
+                    // Return matching contact names with similarity score
+                    // Agent should then read the contact file for email
+                    matches.iter()
+                        .map(|(name, score)| format!("{} (match: {:.0}%)", name, score * 100.0))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            }
+            "manager_of" => {
+                self.0.accounts_summary()
+                    .lines()
+                    .find(|l| l.to_lowercase().contains(&a.name.to_lowercase()))
+                    .map(|l| l.to_string())
+                    .unwrap_or_else(|| format!("Account '{}' not found", a.name))
+            }
+            "all_contacts" => self.0.contacts_summary(),
+            "all_accounts" => self.0.accounts_summary(),
+            _ => format!("Unknown query type '{}'. Use: contacts_at, account_for, email_of, manager_of, all_contacts, all_accounts", a.query),
+        };
+        Ok(ToolOutput::text(result))
+    }
+}
 
 // ─── answer ──────────────────────────────────────────────────────────────────
 
