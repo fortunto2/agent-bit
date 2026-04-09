@@ -615,8 +615,9 @@ impl CrmGraph {
         if let Some((other_name, other_sim)) = best_other {
             eprintln!("  📊 Cross-check: sender '{}' sim={:.3}, best other '{}' sim={:.3}",
                 sender_account, sender_sim, other_name, other_sim);
-            // Cross-account: other account is MORE similar to the body than sender's own
-            if *other_sim > sender_sim && *other_sim > 0.3 {
+            // Cross-account: other account is SIGNIFICANTLY more similar (gap > 0.1)
+            // Small differences (0.37 vs 0.30) are noise — only flag clear cross-account
+            if *other_sim > sender_sim + 0.1 && *other_sim > 0.3 {
                 return Some((other_name.clone(), *other_sim));
             }
         }
