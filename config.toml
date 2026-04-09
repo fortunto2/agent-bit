@@ -62,6 +62,7 @@ planning_temperature = 0.15
 sgr_mode = false  # experimental: multi-action works but Nemotron loops on complex tasks
 [providers.nemotron.headers]
 cf-aig-request-timeout = "300000"
+cf-aig-cache-ttl = "3600"
 x-session-affinity = "pac1-agent"
 
 [providers.nemotron-v2]
