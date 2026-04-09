@@ -301,6 +301,7 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF
 **Run 7:** 86.0% (37/43) — skills v1
 **Run 8:** 90.7% (39/43) — all fixes applied
 **Run 9:** 90.5% (38/42) — ML retrain + feature matrix + ONNX cross-account (t04 timeout)
+**Run 11:** **93.0%** (40/43) — prescan fix + classifier retrain + pre-execute + LLM fallback
 
 #### Code quality pass
 - Removed keyword hack `inbox-word override` → retrained ML classifier (7 new intent_inbox examples)
