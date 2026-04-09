@@ -71,7 +71,7 @@ fn parse_run_files() -> Vec<RunData> {
         let fname = e.path().file_stem()?.to_str()?.to_string();
         let parts: Vec<&str> = fname.split("__").collect();
         let day = parts.first().and_then(|d| d.split('-').last()).unwrap_or("?");
-        let prov = parts.get(1).unwrap_or(&"?");
+        let _prov = parts.get(1).unwrap_or(&"?");
         let mut tasks = HashMap::new();
         for line in content.lines() {
             if line.starts_with("| t") {
@@ -178,7 +178,7 @@ fn run_app() -> io::Result<()> {
 
             let mut hdr = vec![Cell::from("").style(Style::default())];
             for (i, run) in visible.iter().enumerate() {
-                let lbl = &run.label[..run.label.len().min(3)];
+                let lbl: String = run.label.chars().take(4).collect();
                 let style = if start + i == col_select {
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
                 } else {
