@@ -236,7 +236,7 @@ fn run_app() -> io::Result<()> {
                 .block(Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::DarkGray))
-                    .title(format!(" {} [{}/{}] d=↓ u=↑ ", task_id, log_scroll, log_total))
+                    .title(format!(" {} [line {}/{}] Space=↓ b=↑ ", task_id, log_scroll + 1, log_total))
                 )
                 .scroll((log_scroll as u16, 0));
             f.render_widget(log_widget, main[1]);
@@ -258,9 +258,11 @@ fn run_app() -> io::Result<()> {
                 let max_scroll = log_total.saturating_sub(5);
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
+                    // Space = scroll down one page
+                    KeyCode::Char(' ') => { log_scroll = (log_scroll + 30).min(max_scroll); }
                     // d/u ALWAYS scroll log
-                    KeyCode::Char('d') => { log_scroll = (log_scroll + 20).min(max_scroll); }
-                    KeyCode::Char('u') => { log_scroll = log_scroll.saturating_sub(20); }
+                    KeyCode::Char('d') | KeyCode::Char('f') => { log_scroll = (log_scroll + 20).min(max_scroll); }
+                    KeyCode::Char('u') | KeyCode::Char('b') => { log_scroll = log_scroll.saturating_sub(20); }
                     KeyCode::PageDown => { log_scroll = (log_scroll + 20).min(max_scroll); }
                     KeyCode::PageUp => { log_scroll = log_scroll.saturating_sub(20); }
                     // Ctrl+Down/Up = scroll log by 1 line
