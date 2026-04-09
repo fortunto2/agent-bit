@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Feature matrix for inbox classification — inspired by video-analyzer FeatureMatrix.
 //!
 //! Each inbox message = row of features. Enables:
@@ -76,6 +77,7 @@ pub fn threat_weights() -> Weights {
 }
 
 /// Cross-account detection weights.
+#[allow(dead_code)]
 pub fn cross_account_weights() -> Weights {
     Weights::from_named(&[
         ("cross_account_sim", 0.50),

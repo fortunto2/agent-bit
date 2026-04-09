@@ -158,6 +158,7 @@ pub(crate) fn extract_company_ref(text: &str) -> Option<String> {
 
 /// Average sentence length (normalized). Short imperative sentences → low value → suspicious.
 /// Long descriptive text → high value → likely legitimate.
+#[allow(dead_code)]
 pub(crate) fn avg_sentence_length_norm(text: &str) -> f32 {
     let sentences: Vec<&str> = text.split(|c: char| c == '.' || c == '!' || c == '?' || c == '\n')
         .filter(|s| s.split_whitespace().count() > 1)
@@ -524,7 +525,7 @@ pub(crate) fn check_sender_domain_match(
 
     // Fallback: no CRM account matched. Check if sender domain stem matches
     // any company name mentioned in the email BODY (self-consistency check).
-    let body: String = content.lines()
+    let _body: String = content.lines()
         .filter(|l| {
             let t = l.trim().to_lowercase();
             !t.starts_with("from:") && !t.starts_with("to:") && !t.starts_with("subject:")
@@ -533,7 +534,7 @@ pub(crate) fn check_sender_domain_match(
         .join(" ")
         .to_lowercase();
     // Extract potential company names from body (words >2 chars)
-    let stem_words: Vec<&str> = sender_stem.split_whitespace()
+    let _stem_words: Vec<&str> = sender_stem.split_whitespace()
         .filter(|w| w.len() > 2)
         .collect();
     // No CRM account matched — sender is unknown to the system

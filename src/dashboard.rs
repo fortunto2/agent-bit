@@ -14,7 +14,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Terminal,
 };
 
@@ -137,7 +137,7 @@ fn run_app() -> io::Result<()> {
 
     // Compute stats
     let tasks_with_data = data.len();
-    let total_trials: usize = data.values().map(|d| d.trials.len()).sum();
+    let _total_trials: usize = data.values().map(|d| d.trials.len()).sum();
     let total_pass: usize = data.values().flat_map(|d| &d.trials).filter(|t| t.score >= 1.0).count();
     let total_scored: usize = data.values().flat_map(|d| &d.trials).filter(|t| t.score >= 0.0).count();
 
