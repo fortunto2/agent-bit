@@ -152,7 +152,24 @@ Before ANY fix, check these in order:
 8. **skills/** — LLM workflow guidance? → Edit skill .md file (hot-reload, no rebuild)
 9. **prompts.rs** — system prompt / decision tree → LAST resort
 
-**Step 7 checklist**: when fixing LLM behavior, FIRST check if the right skill is selected (grep `🎯 Skill:` in logs). If wrong skill → adjust triggers/keywords. If right skill but wrong behavior → edit the skill's SKILL.md file. Adding a rule to a skill is less invasive than editing the system prompt decision tree.
+**Step 7 checklist**: when fixing LLM behavior, FIRST check if the right skill is selected (grep `🎯 Skill:` in logs). If wrong skill → adjust triggers/keywords. If right skill but wrong behavior → edit the skill's SKILL.md file.
+
+### Classifier Upgrade Loop (the #1 pattern for fixing failures)
+
+Most "non-deterministic" failures are actually **classifier misclassification** — the ML intent
+classifier hasn't seen a particular instruction wording. Fix cycle:
+
+1. Read `pipeline.txt` → check `intent:` field
+2. Wrong intent? → add instruction to correct class in `scripts/export_model.py`
+3. `uv run --with numpy,transformers,tokenizers,torch,onnxruntime,sentence-transformers scripts/export_model.py`
+4. `cargo build && cargo run -- --provider nemotron --task tXX` — verify
+5. Low-confidence fallback: if conf < 0.25 AND inbox_files > 0 → auto-force intent_inbox
+
+**Auto-collect new variants:** all instructions saved to `benchmarks/tasks/{task}/*/instruction.txt`.
+After competition runs, scan dumps and add new wordings to training:
+```bash
+find benchmarks/tasks -name "instruction.txt" -exec cat {} \; | sort -u
+```
 
 ### Feature Matrix (src/feature_matrix.rs) — Batch Inbox Scoring
 
