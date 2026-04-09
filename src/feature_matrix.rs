@@ -21,7 +21,7 @@ pub const FEATURE_NAMES: &[&str] = &[
     "has_otp",            // 1.0 if OTP/credential content detected
     "has_url",            // 1.0 if contains external URL
     "word_count_norm",    // word count / 500 (clamped to 1.0)
-    "imperative_ratio",   // fraction of imperative verbs in text
+    "sentence_length",    // avg sentence length normalized [0..1] — short commands = suspicious
     "cross_account_sim",  // best non-sender account similarity [0..1]
     "nli_injection",      // NLI entailment score for injection hypothesis
     "nli_credential",     // NLI entailment score for credential hypothesis
@@ -71,7 +71,7 @@ pub fn threat_weights() -> Weights {
         ("domain_match", -0.20),  // mismatch (0.0) increases threat
         ("sender_trust", -0.15),  // unknown (0.0) increases threat
         ("has_url", 0.10),
-        ("imperative_ratio", 0.10),
+        ("sentence_length", -0.10),  // short sentences = more suspicious
     ])
 }
 
@@ -120,7 +120,7 @@ impl InboxFeatureMatrix {
             let has_otp = if lower.contains("otp") || lower.contains("verification code") { 1.0 } else { 0.0 };
             let has_url = if lower.contains("http://") || lower.contains("https://") { 1.0 } else { 0.0 };
             let word_count = (f.content.split_whitespace().count() as f32 / 500.0).min(1.0);
-            let imperative_ratio = crate::scanner::imperative_ratio(&f.content);
+            let sentence_length = crate::scanner::avg_sentence_length_norm(&f.content);
 
             // Cross-account similarity (from pre-computed graph embeddings)
             let cross_sim = if sender_trust > 0.5 {
@@ -144,7 +144,7 @@ impl InboxFeatureMatrix {
 
             flat.extend_from_slice(&[
                 ml_conf, structural, sender_trust, domain_match,
-                has_otp, has_url, word_count, imperative_ratio,
+                has_otp, has_url, word_count, sentence_length,
                 cross_sim, nli_injection, nli_credential,
             ]);
 

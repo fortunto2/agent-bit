@@ -156,17 +156,18 @@ pub(crate) fn extract_company_ref(text: &str) -> Option<String> {
     None
 }
 
-/// Fraction of imperative-style verbs in text (feature for threat scoring).
-pub(crate) fn imperative_ratio(text: &str) -> f32 {
-    let words: Vec<&str> = text.split_whitespace().collect();
-    if words.is_empty() { return 0.0; }
-    let imperatives = ["send", "forward", "delete", "remove", "ignore", "override",
-        "bypass", "upload", "download", "execute", "run", "apply", "update",
-        "replace", "overwrite", "install", "deploy", "export", "relay"];
-    let count = words.iter()
-        .filter(|w| imperatives.iter().any(|imp| w.to_lowercase().starts_with(imp)))
-        .count();
-    count as f32 / words.len() as f32
+/// Average sentence length (normalized). Short imperative sentences → low value → suspicious.
+/// Long descriptive text → high value → likely legitimate.
+pub(crate) fn avg_sentence_length_norm(text: &str) -> f32 {
+    let sentences: Vec<&str> = text.split(|c: char| c == '.' || c == '!' || c == '?' || c == '\n')
+        .filter(|s| s.split_whitespace().count() > 1)
+        .collect();
+    if sentences.is_empty() { return 0.5; }
+    let avg_words: f32 = sentences.iter()
+        .map(|s| s.split_whitespace().count() as f32)
+        .sum::<f32>() / sentences.len() as f32;
+    // Normalize: 5 words = 0.25, 10 = 0.5, 20+ = 1.0
+    (avg_words / 20.0).min(1.0)
 }
 
 // AI-NOTE: Cross-account paraphrase detection uses ONNX embeddings in crm_graph.rs.
