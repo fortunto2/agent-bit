@@ -17,7 +17,10 @@ EXAMPLE — CRM lookup:
 
 EXAMPLE — Counting (how many X):
   search({"pattern": "blacklist", "path": "docs/channels/Telegram.txt"}) → [788 matching lines]
+  The number in brackets [N matching lines] IS the answer. Do NOT recount manually.
   answer({"message": "788", "outcome": "OUTCOME_OK"})
+  IMPORTANT: Use the EXACT keyword from the question (e.g. "blacklist" not " - blacklist").
+  The search count = the answer. Trust search results, do NOT re-search or re-count.
 
 EXAMPLE — Find captured article (by date or keyword):
   list({"path": "01_capture/influential"}) → [files with dates in filenames]
