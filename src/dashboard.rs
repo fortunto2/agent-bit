@@ -1,12 +1,11 @@
-//! PAC1 Dashboard — TUI heatmap of benchmark runs.
+//! PAC1 Dashboard — TUI split view: heatmap + log viewer.
 //!
-//! Data sources:
-//! 1. benchmarks/runs/*.md — per-task results from each run
-//! 2. LOG.md — benchmark history summary
+//! Left: compact task×run heatmap (block chars)
+//! Right: full log for selected task+run
 //!
 //! Usage: cargo run --bin pac1-dash
 
-use std::{io, path::Path};
+use std::{io, path::Path, collections::HashMap};
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -17,7 +16,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
     Terminal,
 };
 
@@ -30,103 +29,108 @@ const TASK_IDS: &[&str] = &[
 ];
 
 struct RunData {
-    label: String,  // "04-01 nemotron"
-    score: String,  // "50% (15/30)"
-    tasks: std::collections::HashMap<String, f32>,  // task_id → score
-}
-
-fn parse_run_file(path: &Path) -> Option<RunData> {
-    let content = std::fs::read_to_string(path).ok()?;
-    let filename = path.file_stem()?.to_str()?;
-    // Format: 2026-04-01__nemotron__3cf84f2
-    let parts: Vec<&str> = filename.split("__").collect();
-    let date = parts.first().map(|d| &d[5..]).unwrap_or("?"); // strip year
-    let provider = parts.get(1).unwrap_or(&"?");
-    let label = format!("{} {}", date, provider);
-
-    let mut score_line = String::new();
-    let mut tasks = std::collections::HashMap::new();
-
-    for line in content.lines() {
-        if line.starts_with("**Score:**") {
-            score_line = line.replace("**Score:**", "").trim().to_string();
-        }
-        if line.starts_with("| t") {
-            let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
-            if cols.len() >= 3 {
-                let task_id = cols[1].to_string();
-                let score: f32 = cols[2].parse().unwrap_or(-1.0);
-                tasks.insert(task_id, score);
-            }
-        }
-    }
-
-    Some(RunData { label, score: score_line, tasks })
+    label: String,
+    tasks: HashMap<String, f32>,
 }
 
 fn parse_log_md_runs() -> Vec<RunData> {
     let content = std::fs::read_to_string("LOG.md").unwrap_or_default();
     let mut runs = Vec::new();
-
     for line in content.lines() {
         if line.starts_with("| ") && line.contains('`') && line.contains('%') {
             let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
             if cols.len() >= 6 {
-                let date = cols[1];
-                let score = cols[4];
+                let date = cols[1]; // "04-09"
+                let day = date.split('-').last().unwrap_or(date).trim_start_matches('0');
+                let score_pct = cols[4].split('(').next().unwrap_or("").trim();
                 let failures_str = cols[5];
                 let failures: Vec<&str> = failures_str.split(", ")
                     .filter(|s| s.starts_with('t'))
                     .map(|s| s.split_whitespace().next().unwrap_or(s))
                     .collect();
-
-                let mut tasks = std::collections::HashMap::new();
+                let mut tasks = HashMap::new();
                 for tid in TASK_IDS {
-                    if failures.contains(tid) {
-                        tasks.insert(tid.to_string(), 0.0);
-                    } else {
-                        tasks.insert(tid.to_string(), 1.0);
-                    }
+                    tasks.insert(tid.to_string(), if failures.contains(tid) { 0.0 } else { 1.0 });
                 }
-
-                runs.push(RunData {
-                    label: format!("{} {}", date, &score[..score.len().min(12)]),
-                    score: score.to_string(),
-                    tasks,
-                });
+                runs.push(RunData { label: format!("{}·{}", day, score_pct), tasks });
             }
         }
     }
     runs
 }
 
-fn load_all_runs() -> Vec<RunData> {
-    // Try benchmarks/runs/ first
-    let runs_dir = Path::new("benchmarks/runs");
-    let mut runs: Vec<RunData> = if runs_dir.exists() {
-        let mut entries: Vec<_> = std::fs::read_dir(runs_dir)
-            .into_iter().flatten().flatten()
-            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
-            .collect();
-        entries.sort_by_key(|e| e.file_name());
-        entries.iter().filter_map(|e| parse_run_file(&e.path())).collect()
-    } else {
-        Vec::new()
-    };
+fn parse_run_files() -> Vec<RunData> {
+    let dir = Path::new("benchmarks/runs");
+    if !dir.exists() { return Vec::new(); }
+    let mut entries: Vec<_> = std::fs::read_dir(dir).into_iter().flatten().flatten()
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+    entries.iter().filter_map(|e| {
+        let content = std::fs::read_to_string(e.path()).ok()?;
+        let fname = e.path().file_stem()?.to_str()?.to_string();
+        let parts: Vec<&str> = fname.split("__").collect();
+        let day = parts.first().and_then(|d| d.split('-').last()).unwrap_or("?");
+        let prov = parts.get(1).unwrap_or(&"?");
+        let mut tasks = HashMap::new();
+        for line in content.lines() {
+            if line.starts_with("| t") {
+                let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
+                if cols.len() >= 3 {
+                    tasks.insert(cols[1].to_string(), cols[2].parse().unwrap_or(-1.0));
+                }
+            }
+        }
+        let pass = tasks.values().filter(|&&v| v >= 1.0).count();
+        let total = tasks.len();
+        Some(RunData { label: format!("{}·{}", day, if total > 0 { format!("{}", pass) } else { "?".into() }), tasks })
+    }).collect()
+}
 
-    // Supplement with LOG.md benchmark history
-    let log_runs = parse_log_md_runs();
-    if runs.is_empty() {
-        runs = log_runs;
-    } else {
-        // Append LOG.md runs that aren't in benchmarks/runs/
-        for lr in log_runs {
-            if !runs.iter().any(|r| r.score == lr.score) {
-                runs.push(lr);
+fn load_runs() -> Vec<RunData> {
+    let file_runs = parse_run_files();
+    if !file_runs.is_empty() { return file_runs; }
+    parse_log_md_runs()
+}
+
+/// Find log file for task+run combination.
+fn find_log(task: &str, run_idx: usize) -> String {
+    // Try /tmp/evolve-{task}.log, /tmp/{task}.log, benchmarks/tasks/{task}/*/run.log
+    let candidates = [
+        format!("/tmp/evolve-{}.log", task),
+        format!("/tmp/{}.log", task),
+        format!("/tmp/{}v2.log", task),
+    ];
+    for c in &candidates {
+        if Path::new(c).exists() {
+            if let Ok(content) = std::fs::read_to_string(c) {
+                return content;
             }
         }
     }
-    runs
+    // Try benchmarks/tasks/{task}/*/run.log
+    let task_dir = format!("benchmarks/tasks/{}", task);
+    if let Ok(entries) = std::fs::read_dir(&task_dir) {
+        let mut dirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
+        dirs.sort_by_key(|e| e.file_name());
+        if let Some(latest) = dirs.last() {
+            let log_path = latest.path().join("run.log");
+            if let Ok(content) = std::fs::read_to_string(&log_path) {
+                return content;
+            }
+            // Try bitgn_log.url
+            let url_path = latest.path().join("bitgn_log.url");
+            if let Ok(url) = std::fs::read_to_string(&url_path) {
+                return format!("BitGN log: {}\n\nDump files:\n{}", url.trim(),
+                    std::fs::read_dir(latest.path())
+                        .into_iter().flatten().flatten()
+                        .map(|e| format!("  {}", e.file_name().to_string_lossy()))
+                        .collect::<Vec<_>>().join("\n")
+                );
+            }
+        }
+    }
+    format!("No log found for {} (run #{})\n\nTried:\n  /tmp/evolve-{t}.log\n  /tmp/{t}.log\n  benchmarks/tasks/{t}/*/run.log", task, run_idx, t=task)
 }
 
 fn run_app() -> io::Result<()> {
@@ -135,131 +139,153 @@ fn run_app() -> io::Result<()> {
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+
     let mut table_state = TableState::default();
     table_state.select(Some(0));
-    let mut scroll_x: usize = 0;
+    let mut col_select: usize = 0;
+    let mut log_scroll: u16 = 0;
 
-    let runs = load_all_runs();
-    let max_visible_runs = 10;
+    let runs = load_runs();
 
     loop {
+        let selected_task = table_state.selected().unwrap_or(0);
+        let task_id = TASK_IDS[selected_task];
+        let log_content = find_log(task_id, col_select);
+
         terminal.draw(|f| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Min(10),
-                    Constraint::Length(3),
-                ])
+            // Split: left 55% heatmap, right 45% log
+            let main = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
                 .split(f.area());
 
-            // Header
-            let latest_score = runs.last().map(|r| r.score.as_str()).unwrap_or("?");
-            let header = Paragraph::new(format!(
-                " PAC1 Heatmap — {} runs | Latest: {} | q=quit ↑↓=scroll ←→=pan runs",
-                runs.len(), latest_score
-            ))
-            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-            .block(Block::default().borders(Borders::BOTTOM));
-            f.render_widget(header, chunks[0]);
+            // ── LEFT: Heatmap ──
+            let left = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(5), Constraint::Length(1)])
+                .split(main[0]);
 
-            // Visible runs window
-            let end = runs.len().min(scroll_x + max_visible_runs);
-            let start = end.saturating_sub(max_visible_runs);
-            let visible: Vec<&RunData> = runs[start..end].iter().collect();
+            // Title
+            let title = Paragraph::new(format!(" PAC1 — {} runs | q=quit ↑↓=task ←→=run", runs.len()))
+                .style(Style::default().fg(Color::Cyan));
+            f.render_widget(title, left[0]);
 
             // Header row
-            let mut hdr_cells = vec![
-                Cell::from("Task").style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            ];
-            for run in &visible {
-                let label = if run.label.len() > 14 { &run.label[..14] } else { &run.label };
-                hdr_cells.push(Cell::from(label.to_string()).style(Style::default().fg(Color::DarkGray)));
+            let max_cols = ((left[1].width as usize).saturating_sub(8)) / 4;
+            let end = runs.len().min(col_select.saturating_add(max_cols));
+            let start = end.saturating_sub(max_cols);
+            let visible: Vec<&RunData> = runs[start..end].iter().collect();
+
+            let mut hdr = vec![Cell::from("").style(Style::default())];
+            for (i, run) in visible.iter().enumerate() {
+                let lbl = &run.label[..run.label.len().min(3)];
+                let style = if start + i == col_select {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                hdr.push(Cell::from(lbl.to_string()).style(style));
             }
-            hdr_cells.push(Cell::from("Rate").style(Style::default().fg(Color::Yellow)));
+            hdr.push(Cell::from("%").style(Style::default().fg(Color::DarkGray)));
 
-            // Task rows
-            let rows: Vec<Row> = TASK_IDS.iter().map(|&tid| {
-                let mut cells = vec![
-                    Cell::from(tid).style(Style::default().fg(Color::White)),
-                ];
+            let rows: Vec<Row> = TASK_IDS.iter().enumerate().map(|(idx, &tid)| {
+                let tid_style = if idx == selected_task {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                let mut cells = vec![Cell::from(tid).style(tid_style)];
 
-                let mut pass_count = 0;
-                let mut total_count = 0;
-
-                for run in &visible {
+                let mut pass = 0u32;
+                let mut total = 0u32;
+                for (i, run) in visible.iter().enumerate() {
                     let score = run.tasks.get(tid).copied().unwrap_or(-1.0);
-                    let (block, color) = if score < 0.0 {
-                        ("·", Color::DarkGray) // no data
+                    let is_selected = idx == selected_task && start + i == col_select;
+                    let (ch, fg, bg) = if score < 0.0 {
+                        ("·", Color::DarkGray, Color::Reset)
                     } else if score >= 1.0 {
-                        pass_count += 1;
-                        total_count += 1;
-                        ("██", Color::Green)
+                        pass += 1; total += 1;
+                        if is_selected { ("█", Color::Black, Color::Green) }
+                        else { ("█", Color::Green, Color::Reset) }
                     } else {
-                        total_count += 1;
-                        ("██", Color::Red)
+                        total += 1;
+                        if is_selected { ("█", Color::Black, Color::Red) }
+                        else { ("█", Color::Red, Color::Reset) }
                     };
-                    cells.push(Cell::from(block).style(Style::default().fg(color)));
+                    cells.push(Cell::from(ch).style(Style::default().fg(fg).bg(bg)));
                 }
 
-                // Pass rate
-                let rate = if total_count > 0 {
-                    let pct = pass_count * 100 / total_count;
-                    let color = if pct == 100 { Color::Green }
-                        else if pct >= 75 { Color::Yellow }
-                        else if pct >= 50 { Color::Magenta }
-                        else { Color::Red };
-                    Cell::from(format!("{:3}%", pct)).style(Style::default().fg(color))
-                } else {
-                    Cell::from("  -").style(Style::default().fg(Color::DarkGray))
+                let rate = if total > 0 { pass * 100 / total } else { 0 };
+                let rate_color = match rate {
+                    100 => Color::Green,
+                    75..=99 => Color::Yellow,
+                    50..=74 => Color::Magenta,
+                    _ => Color::Red,
                 };
-                cells.push(rate);
-
+                cells.push(Cell::from(format!("{}", rate)).style(Style::default().fg(rate_color)));
                 Row::new(cells)
             }).collect();
 
             let mut widths = vec![Constraint::Length(4)];
-            for _ in &visible { widths.push(Constraint::Length(15)); }
-            widths.push(Constraint::Length(5));
+            for _ in &visible { widths.push(Constraint::Length(2)); }
+            widths.push(Constraint::Length(4));
 
             let table = Table::new(rows, widths)
-                .header(Row::new(hdr_cells).height(1))
-                .block(Block::default().borders(Borders::ALL).title(" ██ Pass  ██ Fail  · No data "))
-                .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-            f.render_stateful_widget(table, chunks[1], &mut table_state);
+                .header(Row::new(hdr))
+                .block(Block::default().borders(Borders::RIGHT))
+                .row_highlight_style(Style::default());
+            f.render_stateful_widget(table, left[1], &mut table_state);
 
-            // Summary line
-            let total_tasks = TASK_IDS.len();
-            let always_pass = TASK_IDS.iter().filter(|&&tid| {
-                visible.iter().all(|r| r.tasks.get(tid).copied().unwrap_or(0.0) >= 1.0)
-            }).count();
-            let summary = Paragraph::new(Line::from(vec![
-                Span::styled(format!(" Always pass: {}/{} ", always_pass, total_tasks),
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("| Runs {}-{} of {} ", start+1, end, runs.len()),
-                    Style::default().fg(Color::DarkGray)),
-            ])).block(Block::default().borders(Borders::TOP));
-            f.render_widget(summary, chunks[2]);
+            // Bottom status
+            let status = Paragraph::new(format!(" {} col:{}", task_id, col_select))
+                .style(Style::default().fg(Color::DarkGray));
+            f.render_widget(status, left[2]);
+
+            // ── RIGHT: Log viewer ──
+            let log_lines: Vec<Line> = log_content.lines().skip(log_scroll as usize).take(main[1].height as usize - 2).map(|l| {
+                let style = if l.contains("Score: 1") { Style::default().fg(Color::Green) }
+                    else if l.contains("Score: 0") { Style::default().fg(Color::Red) }
+                    else if l.contains("⚠") || l.contains("⛔") { Style::default().fg(Color::Yellow) }
+                    else if l.contains("🎯") || l.contains("Skill") { Style::default().fg(Color::Cyan) }
+                    else if l.contains("→ ") { Style::default().fg(Color::Blue) }
+                    else { Style::default().fg(Color::White) };
+                Line::from(Span::styled(l, style))
+            }).collect();
+
+            let total_lines = log_content.lines().count();
+            let log_widget = Paragraph::new(log_lines)
+                .block(Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(" {} log ({}/{} lines) PgUp/PgDn ", task_id, log_scroll, total_lines))
+                )
+                .wrap(Wrap { trim: false });
+            f.render_widget(log_widget, main[1]);
         })?;
 
-        if event::poll(std::time::Duration::from_millis(100))? {
+        if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Down | KeyCode::Char('j') => {
                         let i = table_state.selected().unwrap_or(0);
                         table_state.select(Some((i + 1).min(TASK_IDS.len() - 1)));
+                        log_scroll = 0;
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         let i = table_state.selected().unwrap_or(0);
                         table_state.select(Some(i.saturating_sub(1)));
+                        log_scroll = 0;
                     }
                     KeyCode::Right | KeyCode::Char('l') => {
-                        if scroll_x + max_visible_runs < runs.len() { scroll_x += 1; }
+                        if col_select + 1 < runs.len() { col_select += 1; }
+                        log_scroll = 0;
                     }
                     KeyCode::Left | KeyCode::Char('h') => {
-                        scroll_x = scroll_x.saturating_sub(1);
+                        col_select = col_select.saturating_sub(1);
+                        log_scroll = 0;
                     }
+                    KeyCode::PageDown => { log_scroll = log_scroll.saturating_add(20); }
+                    KeyCode::PageUp => { log_scroll = log_scroll.saturating_sub(20); }
                     _ => {}
                 }
             }
