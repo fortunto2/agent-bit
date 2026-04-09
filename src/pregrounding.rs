@@ -573,15 +573,15 @@ pub(crate) async fn run_agent(
         eprintln!("  Accounts pre-loaded: {} entries", accounts_summary.lines().count());
     }
 
-    // Hint when CRM is empty — email/inbox tasks need contacts to function
+    // Hint when CRM is empty — email tasks need contacts UNLESS email is in instruction
     if contacts_summary.is_empty() && accounts_summary.is_empty() {
-        if ready.intent == "intent_email" {
+        if ready.intent == "intent_email" && !instruction.contains('@') {
             messages.push(Message::user(
                 "⚠ NO CONTACTS OR ACCOUNTS found in CRM. You cannot email anyone. \
                  Answer OUTCOME_NONE_UNSUPPORTED — the CRM lacks the data needed for this task."
                     .to_string(),
             ));
-            eprintln!("  ⚠ Empty CRM + intent_email → UNSUPPORTED hint injected");
+            eprintln!("  ⚠ Empty CRM + intent_email (no @ in instruction) → UNSUPPORTED hint injected");
         }
     }
 

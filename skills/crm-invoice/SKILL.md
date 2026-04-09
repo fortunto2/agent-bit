@@ -1,7 +1,7 @@
 ---
 name: crm-invoice
 description: Resend or forward invoices — MUST include attachments field
-triggers: [intent_inbox, intent_email]
+triggers: [intent_inbox]
 priority: 20
 keywords: [invoice, resend, forward, INV-]
 ---
