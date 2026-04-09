@@ -275,9 +275,9 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         tools: &ToolRegistry,
         previous_response_id: Option<&str>,
     ) -> Result<(Decision, Option<String>), AgentError> {
-        // Prepare messages — smart trim by type, not position
-        // Keep ALL user messages (pre-grounding, inbox, instruction — always critical)
-        // Trim old assistant messages (reasoning, plans — action ledger has summary)
+        // Prepare messages — smart trim using Message.compactable flag
+        // compactable=false (default) → critical, never dropped
+        // compactable=true → safe to drop when context overflows
         let mut msgs = Vec::with_capacity(messages.len() + 1);
         let has_system = messages.iter().any(|m| m.role == Role::System);
         if !has_system && !self.system_prompt.is_empty() {
@@ -285,22 +285,25 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         }
         let est_tokens: usize = messages.iter().map(|m| m.content.len() / 4).sum();
         if est_tokens > 12000 {
-            // Keep all user messages (inbox, instruction, tool results — critical context)
-            // Keep only last 6 assistant messages (recent reasoning — old ones in ledger)
-            let mut assistant_count = 0;
-            let total_assistant = messages.iter().filter(|m| m.role == Role::Assistant).count();
-            let skip_assistant = total_assistant.saturating_sub(6);
+            let mut dropped = 0usize;
+            let compactable_count = messages.iter().filter(|m| m.compactable).count();
+            let keep_recent = 6; // always keep last N compactable
+            let skip = compactable_count.saturating_sub(keep_recent);
+            let mut compact_seen = 0;
             for m in messages {
-                if m.role == Role::Assistant {
-                    assistant_count += 1;
-                    if assistant_count <= skip_assistant {
-                        continue; // drop old assistant reasoning
+                if m.compactable {
+                    compact_seen += 1;
+                    if compact_seen <= skip {
+                        dropped += 1;
+                        continue;
                     }
                 }
                 msgs.push(m.clone());
             }
-            eprintln!("  📐 Context trim: dropped {} old assistant messages ({} → {} est tokens)",
-                skip_assistant, est_tokens, msgs.iter().map(|m| m.content.len() / 4).sum::<usize>());
+            if dropped > 0 {
+                eprintln!("  📐 Context trim: dropped {} compactable messages ({} → {} est tokens)",
+                    dropped, est_tokens, msgs.iter().map(|m| m.content.len() / 4).sum::<usize>());
+            }
         } else {
             msgs.extend_from_slice(messages);
         }
@@ -501,7 +504,7 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
                 security_suffix
             )
         };
-        action_msgs.push(Message::assistant(&reasoning_context));
+        action_msgs.push(Message::assistant(&reasoning_context).compactable());
         action_msgs.push(Message::user(
             "Now execute the next step from your plan using the available tools.",
         ));
