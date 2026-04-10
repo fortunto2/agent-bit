@@ -32,6 +32,11 @@
 max_steps = 20
 benchmark = "bitgn/pac1-dev"
 
+[defaults]
+temperature = 0.05
+planning_temperature = 0.15
+prompt_cache_key = "pac1-v1"
+
 [llm]
 provider = "openai"
 
@@ -41,10 +46,6 @@ provider = "openai"
 model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key_env = "CF_AI_API_KEY"
-prompt_mode = "v2"
-temperature = 0.05
-planning_temperature = 0.15
-sgr_mode = false  # experimental: multi-action works but Nemotron loops on complex tasks
 [providers.nemotron.headers]
 cf-aig-request-timeout = "300000"
 cf-aig-cache-ttl = "3600"
@@ -62,29 +63,19 @@ api_key_env = "OPENAI_API_KEY"
 model = "MiniMaxAI/MiniMax-M2.5"
 base_url = "https://api.deepinfra.com/v1/openai"
 api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
 use_chat_api = true
-# $0.27/$0.95 per 1M, 80.2% SWE-bench
 
 [providers.seed2]
 model = "ByteDance/Seed-2.0-pro"
 base_url = "https://api.deepinfra.com/v1/openai"
 api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
 use_chat_api = true
-prompt_cache_key = "pac1-v1"
-# $0.05/$0.30 per 1M, ByteDance new
-
-# AI-NOTE: kimi-turbo removed — 58% full bench, unstable
 
 [providers.kimi-k2]
 model = "moonshotai/Kimi-K2-Instruct"
 base_url = "https://api.deepinfra.com/v1/openai"
 api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
 use_chat_api = true
-prompt_cache_key = "pac1-v1"
-# $0.05/$0.20 per 1M, base K2
 
 # AI-NOTE: rejected — seed18 (t01 fail), ds-turbo (t01 fail), mistral-med (t16 fail), hermes405 (no FC)
 

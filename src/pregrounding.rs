@@ -605,11 +605,7 @@ pub(crate) async fn run_agent(
         eprintln!("  📁 Trial data dumped to {}", dump_dir);
     }
 
-    let template = if prompt_mode == "v2" {
-        prompts::SYSTEM_PROMPT_V2
-    } else {
-        prompts::SYSTEM_PROMPT_EXPLICIT
-    };
+    let template = prompts::SYSTEM_PROMPT_V2;
     // Skill-based prompt injection (replaces examples_for_class)
     let skill_registry = crate::skills::load(std::path::Path::new("."));
     let effective_label = if ready.intent == "intent_query" && instruction_label == "non_work" {

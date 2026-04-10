@@ -8,7 +8,16 @@ use std::collections::HashMap;
 pub struct Config {
     pub agent: AgentSection,
     pub llm: LlmSection,
+    #[serde(default)]
+    pub defaults: DefaultsSection,
     pub providers: HashMap<String, ProviderSection>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct DefaultsSection {
+    pub temperature: Option<f32>,
+    pub planning_temperature: Option<f32>,
+    pub prompt_cache_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,9 +105,9 @@ impl Config {
         };
 
         let headers: Vec<(String, String)> = p.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let prompt_mode = p.prompt_mode.clone().unwrap_or_else(|| "explicit".into());
-        let temperature = p.temperature.unwrap_or(0.2);
-        let planning_temperature = p.planning_temperature.unwrap_or(0.4);
+        let prompt_mode = p.prompt_mode.clone().unwrap_or_else(|| "v2".into());
+        let temperature = p.temperature.or(self.defaults.temperature).unwrap_or(0.05);
+        let planning_temperature = p.planning_temperature.or(self.defaults.planning_temperature).unwrap_or(0.15);
 
         let sgr_mode = p.sgr_mode.unwrap_or(false);
 
