@@ -582,7 +582,7 @@ fn apply_override_policy(
     // - If no tool calls (planner-only / auto-answer fallback) → allow override.
     //   Planner sometimes hallucinates injection alerts without reading inbox (t19).
     if proposed_outcome == "OUTCOME_DENIED_SECURITY" {
-        if tool_call_count > 1 {
+        if tool_call_count >= 1 {
             eprintln!("  🛡️ Agent DENIED after {} tool calls — never overridden", tool_call_count);
             return None;
         }
@@ -848,10 +848,9 @@ mod tests {
         assert_eq!(result.as_deref(), Some("OUTCOME_OK"),
             "Planner-only DENIED (0 steps) can be overridden");
 
-        // 1 step = just answer() call, no investigation
+        // 1 step = agent called answer() — trust agent's decision
         let result = apply_override_policy("OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.95, 1);
-        assert_eq!(result.as_deref(), Some("OUTCOME_OK"),
-            "Single-step DENIED (just answer) can be overridden");
+        assert!(result.is_none(), "1 tool call = agent acted, don't override DENIED");
 
         // But not with low confidence
         let result = apply_override_policy("OUTCOME_DENIED_SECURITY", "OUTCOME_OK", 0.80, 0);
