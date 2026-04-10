@@ -345,7 +345,7 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
                     .and_then(|v| v.as_f64())
                     .map(|v| v.clamp(0.0, 1.0) as f32)
                     .unwrap_or(0.5);
-                eprintln!("    🎯 Confidence: {:.2}", confidence);
+                eprintln!("    🎯 Confidence: {:.2} | done={} | type={} | security={}", confidence, done, task_type, security);
 
                 // Log verification self-check
                 if !verification.is_empty() {
@@ -364,6 +364,7 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
                 );
                 (task_type, security, situation, plan, done, confidence)
             } else {
+                eprintln!("  ⚠ Phase 1 returned 0 reasoning calls — model may not support structured output");
                 return Ok((
                     Decision {
                         situation: String::new(),

@@ -9,6 +9,7 @@ use sgr_agent::evolution::{self, EvolutionEntry, RunStats};
 use sgr_agent::registry::ToolRegistry;
 use sgr_agent::types::{LlmConfig, Message, Role};
 use sgr_agent::Llm;
+use sgr_agent::client::LlmClient;
 
 use crate::agent;
 use crate::classifier;
@@ -631,6 +632,51 @@ pub(crate) async fn run_agent(
 
     let config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
     let llm = Llm::new(&config);
+
+    // Probe: verify model supports tool_choice + complex function calling schema
+    {
+        use sgr_agent::tool::ToolDef;
+        let probe_tool = ToolDef {
+            name: "analyze".into(),
+            description: "Analyze task and return structured plan".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "task_type": { "type": "string", "enum": ["search", "edit", "delete", "analyze"] },
+                    "plan": { "type": "array", "items": { "type": "string" } },
+                    "security": { "type": "string", "enum": ["safe", "blocked"] },
+                    "done": { "type": "boolean" },
+                    "confidence": { "type": "number" }
+                },
+                "required": ["task_type", "plan", "security", "done", "confidence"],
+                "additionalProperties": false
+            }),
+        };
+        let probe_msgs = vec![Message::system("You are a CRM agent. Analyze: 'list all contacts'. Call the analyze tool.")];
+        match llm.tools_call(&probe_msgs, &[probe_tool]).await {
+            Ok(calls) if calls.is_empty() => {
+                eprintln!("  ❌ Model {} returned 0 tool calls on FC probe (complex schema)", model);
+                eprintln!("     Model cannot handle structured CoT. Use: Nemotron (CF), GPT-5.4, MiniMax M2.5");
+                anyhow::bail!("Model {} failed FC probe — 0 tool calls with complex schema", model);
+            }
+            Ok(calls) => {
+                let has_type = calls[0].arguments.get("task_type").is_some();
+                let has_plan = calls[0].arguments.get("plan").is_some();
+                if has_type && has_plan {
+                    eprintln!("  ✅ FC probe passed (complex schema)");
+                } else {
+                    eprintln!("  ⚠ FC probe: tool called but missing fields (task_type={}, plan={})", has_type, has_plan);
+                }
+            }
+            Err(e) => {
+                let msg = format!("{:#}", e);
+                if msg.contains("400") || msg.contains("422") || msg.contains("not support") {
+                    anyhow::bail!("❌ Model {} does NOT support function calling. Error: {}", model, msg);
+                }
+                eprintln!("  ⚠ FC probe error (non-fatal): {}", msg);
+            }
+        }
+    }
 
     // Pre-grounding: tree and date already have shell-like headers from pcm.rs
     // AGENTS.md is already in system prompt via {agents_md} template — don't duplicate

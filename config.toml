@@ -1,5 +1,20 @@
 # PAC1 Agent Configuration
 # Switch provider: change llm.provider to any key from [providers.*]
+#
+# REQUIRES: response_format: json_schema (strict) for Phase 1 structured CoT.
+# Models that support this (tested):
+#   ✅ Nemotron 120B (CF Workers AI) — primary, FREE
+#   ✅ GPT-5.4 / GPT-5.4-mini (OpenAI) — paid
+#   ✅ MiniMax M2.5 (DeepInfra) — best backup, $0.27/M
+#   ✅ DeepSeek V3.x (DeepInfra) — FC works, reasoning weaker
+#   ✅ Cerebras Qwen3 — FC works, multi-step weaker
+#
+# Models that DO NOT support strict json_schema (0 tool calls):
+#   ❌ Kimi K2.5 — Phase 1 returns 0 reasoning calls
+#   ❌ GLM-5.1 (reasoning model) — inconsistent, needs reasoning_effort=none
+#   ❌ Step-3.5-Flash — no structured output support
+#   ❌ Qwen3.5-397B — 0 tool calls on multi-step
+#   ❌ gpt-oss-120b (Cerebras) — model not found / access denied
 
 [agent]
 max_steps = 20
@@ -135,6 +150,20 @@ api_key_env = "CEREBRAS_API_KEY"
 temperature = 0.1
 use_chat_api = true
 # FREE up to 1M tokens, ~0.66s per call, FC native
+
+[providers.glm51-di]
+model = "zai-org/GLM-5.1"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+
+[providers.cerebras-gpt]
+model = "gpt-oss-120b"
+base_url = "https://api.cerebras.ai/v1"
+api_key_env = "CEREBRAS_API_KEY"
+temperature = 0.1
+use_chat_api = true
 
 [providers.cerebras-glm]
 model = "zai-glm-4.7"
