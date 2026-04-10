@@ -106,8 +106,8 @@ fn load_task_data() -> HashMap<String, TaskData> {
                 model.rsplit('/').next().unwrap_or(&model).to_string()
             } else if trial_id.contains("_vm-") {
                 trial_id.split("_vm-").next().unwrap_or(&trial_id).to_string()
-            } else if trial_id.starts_with("vm-") {
-                // AI-NOTE: old dirs without model prefix were all Nemotron runs
+            } else if trial_id.starts_with("vm-") || trial_id.contains("backfill") || trial_id.starts_with("run") {
+                // AI-NOTE: old dirs (vm-*, run*-backfill, runN) were all Nemotron runs
                 "nemotron-3-120b-a12b".to_string()
             } else {
                 trial_id.clone()
