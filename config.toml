@@ -70,6 +70,7 @@ model = "ByteDance/Seed-2.0-pro"
 base_url = "https://api.deepinfra.com/v1/openai"
 api_key_env = "DEEPINFRA_API_KEY"
 use_chat_api = true
+reasoning_effort = "none"
 
 [providers.kimi-k2]
 model = "moonshotai/Kimi-K2-Instruct"
