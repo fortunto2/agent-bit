@@ -271,8 +271,6 @@ async fn main() -> Result<()> {
                 &model, base_url.as_deref(), &llm_api_key, &extra_headers, temperature,
             ).await;
             let total_elapsed = t0.elapsed();
-            eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Steps: {} | Tools: {}",
-                agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), steps, tool_calls);
 
             let score = match h.end_trial(&trial.trial_id).await {
                 Ok(result) => {
@@ -305,11 +303,10 @@ async fn main() -> Result<()> {
                     0.0
                 }
             };
-            // Write metrics to dump dir
-            let _ = std::fs::write(format!("{}/metrics.txt", dump_dir), format!(
-                "model: {}\nscore: {:.2}\nsteps: {}\ntool_calls: {}\nagent_secs: {:.1}\ntotal_secs: {:.1}\n",
-                model, score, steps, tool_calls, agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(),
-            ));
+            write_trial_metrics(
+                &dump_dir, &model, score, steps, tool_calls,
+                agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), &[],
+            );
 
             res.lock().await.push((task_id, score));
         });
@@ -410,24 +407,12 @@ async fn run_leaderboard(
         let result = harness.end_trial(&trial.trial_id).await?;
         if let Some(score) = result.score {
             eprintln!("  {} Score: {:.2}", trial.task_id, score);
-            // Save score + structured diagnosis for fast debugging
-            let _ = std::fs::write(
-                format!("{}/score.txt", dump_dir),
-                format!("{:.2}\n{}\n", score, result.score_detail.join("\n")),
+            let total_elapsed_final = t0.elapsed();
+            write_trial_metrics(
+                &dump_dir, model, score as f32, steps, tool_calls,
+                agent_elapsed.as_secs_f64(), total_elapsed_final.as_secs_f64(),
+                &result.score_detail,
             );
-            // Append score details to pipeline.txt for unified diagnosis
-            let _ = std::fs::OpenOptions::new().append(true).open(format!("{}/pipeline.txt", dump_dir))
-                .and_then(|mut f| {
-                    use std::io::Write;
-                    let total_elapsed = t0.elapsed();
-                    writeln!(f, "\nscore: {:.2}", score)?;
-                    writeln!(f, "tool_calls: {}", tool_calls)?;
-                    writeln!(f, "agent_secs: {:.1}", agent_elapsed.as_secs_f64())?;
-                    writeln!(f, "total_secs: {:.1}", total_elapsed.as_secs_f64())?;
-                    writeln!(f, "retry: {}", should_retry)?;
-                    for d in &result.score_detail { writeln!(f, "detail: {}", d)?; }
-                    Ok(())
-                });
             // Score-gated learning: only learn from confirmed correct answers
             if score >= 1.0 {
                 if let Some(ref v) = outcome_validator {
@@ -450,6 +435,22 @@ async fn run_leaderboard(
     harness.submit_run(&run.run_id).await?;
     eprintln!("[pac1] Submitted! Run ID: {}", run.run_id);
     Ok(())
+}
+
+/// Write unified metrics + score to dump dir. Used by both single-task and parallel modes.
+fn write_trial_metrics(
+    dump_dir: &str, model: &str, score: f32, steps: usize, tool_calls: usize,
+    agent_secs: f64, total_secs: f64, score_detail: &[String],
+) {
+    let _ = std::fs::write(format!("{}/metrics.txt", dump_dir), format!(
+        "model: {}\nscore: {:.2}\nsteps: {}\ntool_calls: {}\nagent_secs: {:.1}\ntotal_secs: {:.1}\n",
+        model, score, steps, tool_calls, agent_secs, total_secs,
+    ));
+    let _ = std::fs::write(format!("{}/score.txt", dump_dir), format!(
+        "{:.2}\n{}\n", score, score_detail.join("\n"),
+    ));
+    eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Steps: {} | Tools: {}",
+        agent_secs, total_secs, steps, tool_calls);
 }
 
 // ─── Shared ──────────────────────────────────────────────────────────────────
