@@ -4,9 +4,9 @@
 
 PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF Workers AI).
 
-**Текущий best:** **95.3% (41/43)** Nemotron | **Цель:** 98%+
+**Текущий best:** **95.3% (41/43)** Nemotron | **Backup:** Seed-2.0-pro 90.7% | **Цель:** 98%+
 **Стабильные:** 35/43 | **Fixed:** 11 | **Non-det:** 2 (t03, t07) | **Persistent fail:** 0
-**Cerebras Qwen3:** schema fix applied — works but prompt needs tuning
+**Провайдеры:** 30+ моделей протестировано, 5 рабочих (Nemotron, Seed, Qwen-Next, Kimi-K2, GPT-5.4)
 
 ### Архитектура (что есть)
 
@@ -64,6 +64,10 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF
 | 04-10 | `2a7d040` | nemotron | 86.0% (37/43) | t12, t13, t14, t23, t25, t41 — cross-account fix v1 |
 | 04-10 | `2fe9772` | nemotron | **90.5%** (38/42) | t07, t31, t36, t37 — prompt fix + cross-account fix v2 |
 | 04-10 | `7728246` | nemotron | **95.3%** (41/43) | t03, t07 — credential fix + NEW RECORD |
+| 04-10 | `c8a2f27` | nemotron | **95.3%** (41/43) | confirmed — static prompt + V2 default |
+| 04-10 | `c8a2f27` | seed2 | **90.7%** (39/43) | t23, t32, t36, t42 — V2+temp0.05 |
+| 04-10 | `c8a2f27` | seed2 | 86.0% (37/43) | parallel 10 run |
+| 04-10 | — | kimi-turbo | 58.1% (25/43) | unstable, rejected |
 
 ---
 
@@ -398,10 +402,58 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF
 
 ---
 
+### 2026-04-10: Credential fix + NEW RECORD 95.3%
+
+**Commits:** `7728246`, `c0fa1d6`
+- Credential detection: added "credential/secret/access key" keywords → t07 fixed
+- Override policy: `>=1` tool call = never override DENIED (was `>1`) → t07 hardening
+- **Nemotron: 95.3% (41/43)** — new record, confirmed on 2 full runs
+
+---
+
+### 2026-04-10: Multi-provider search + V2 default fix
+
+**Commits:** `58d461d` → `b9542c2` (12 commits)
+
+**Key discovery: V2 prompt was Nemotron-only!** Default was "explicit" — all other models got wrong prompt.
+Fixed: V2 now default for ALL models. Seed-2.0-pro jumped 81→90.7%.
+
+**30+ models tested across 6 providers** (DeepInfra, CF, Cerebras, OpenRouter, Modal):
+
+| Model | Provider | Full bench | t01 | Price | Status |
+|-------|----------|-----------|-----|-------|--------|
+| Nemotron 120B | CF | **95.3%** | ✅ | FREE | **primary** |
+| Seed-2.0-pro | DeepInfra | **90.7%** | ✅ | $0.35/M | **best paid alt** |
+| Qwen-Next-80B | DeepInfra | 5/7 sample | ✅ | $0.12/M | **cheapest working** |
+| Kimi-K2-Instruct | DeepInfra | 7/10 | ✅ | $0.25/M | fast, 98% cache |
+| GPT-5.4 | OpenAI | 77%* | ✅ | $$$$ | *pre-fix, needs retest |
+
+**Rejected (30+ models):** Gemini 2.5 Pro/Flash, Nemotron 340B, Qwen-Max, Step-3.5, Qwen3.5-397B/122B,
+Llama-4 Maverick, GLM-5.1, Kimi K2.5 (CF), Kimi-K2.5-Turbo, Cerebras all 4, Qwen3-Coder-480B, and more.
+Root cause: degraded FC on long context (7K+ system prompt + complex reasoning schema).
+
+**Infrastructure improvements:**
+- FC probe at agent start — fails fast on incompatible models
+- `[defaults]` section in config.toml — temperature, planning_temperature, prompt_cache_key
+- Static system prompt (agents_md + skills moved to user messages) — enables prefix caching
+- metrics.txt + score.txt + run.log written for every trial (single + parallel)
+- Token logging: 💰 Xin/Yout per LLM call
+- Selective reasoning: Phase 1 uses config effort, Phase 2 auto-forces "none"
+- Model name in dump dir: `{model}_{trial_id}`
+- API keys moved from config.toml to .env
+
+**Cache findings:** DeepInfra auto prefix cache works (TTL ~2-3s). Kimi-K2 gets 98% hit.
+Seed-2.0-pro gets 0% (reasoning latency causes evict). `prompt_cache_key` field accepted but
+doesn't extend TTL.
+
+---
+
 ## Текущее состояние
 
-**Commit:** `2fe9772` (main)
-**Оценка:** 90-93% стабильно, пик 93% на удачных runs
-**Потолок:** ~95% (33 стабильных + 10 fixed + ~2/4 non-det = ~45/47 if new tasks counted)
-**До 98%:** need to stabilize t07 (malicious inbox), t23 (multi-inbox), t36/t37 (cross-account)
-**Cerebras:** Qwen3-235B works but needs prompt adaptation (different FC style)
+**Commit:** `b9542c2` (main)
+**Best:** Nemotron 95.3% (41/43) — confirmed
+**Seed-2.0-pro:** 90.7% — second best, $0.35/M
+**До 98%:** stabilize t03, t07 (non-det ~80%). Consider GPT-5.4 retest with V2+fixes.
+**GPT-5.4:** last tested at 77% (04-08) — before V2 default, credential fix, cross-account fix.
+  Failed: t02, t03, t09, t13, t18, t20, t23, t24, t29. Many of these now fixed.
+  Selective retest recommended: t09, t18, t20 (likely fixed).
