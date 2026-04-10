@@ -212,18 +212,22 @@ impl Tool for WriteTool {
                         ));
                     }
                 }
+                // AI-NOTE: t23 fix — llm_json crate repairs malformed LLM JSON (trailing commas,
+                //   unescaped newlines, missing quotes, etc). Prevents outbox write failures.
+                // AI-NOTE: t23 fix — llm_json::repair_json fixes malformed LLM JSON
+                //   (trailing commas, unescaped newlines, missing quotes, etc)
                 Err(_) => {
-                    // Auto-fix: escape newlines in JSON strings and retry
-                    let fixed = a.content.replace('\n', "\\n").replace('\r', "\\r");
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&fixed) {
-                        // Re-serialize properly
-                        let proper = serde_json::to_string_pretty(&json).unwrap_or(fixed);
-                        a = WriteArgs { path: a.path, content: proper, start_line: a.start_line, end_line: a.end_line };
-                        eprintln!("    🔧 Auto-fixed JSON newlines in {}", a.path);
-                    } else {
-                        return Ok(ToolOutput::text(
-                            "⚠ VALIDATION: Invalid JSON in outbox file. Check for unescaped newlines in string values. Use \\n instead of literal newlines.".to_string()
-                        ));
+                    let opts = llm_json::RepairOptions::default();
+                    match llm_json::repair_json(&a.content, &opts) {
+                        Ok(fixed) => {
+                            a = WriteArgs { path: a.path, content: fixed, start_line: a.start_line, end_line: a.end_line };
+                            eprintln!("    🔧 Auto-fixed JSON via llm_json in {}", a.path);
+                        }
+                        Err(_) => {
+                            return Ok(ToolOutput::text(
+                                "⚠ VALIDATION: Invalid JSON in outbox file — could not repair.".to_string()
+                            ));
+                        }
                     }
                 }
             }
@@ -1092,5 +1096,59 @@ mod tests {
             "Should annotate multiple accounts. Got: {}", result);
         assert!(result.contains("John Smith"), "Should show linked contact for Acme");
         assert!(result.contains("Bob Wilson"), "Should show linked contact for Globex");
+    }
+
+    // AI-NOTE: llm_json repair tests — common LLM JSON mistakes that must be auto-fixed
+    #[test]
+    fn llm_json_trailing_comma() {
+        let broken = r#"{"to": "alex@co.com", "subject": "Hi", "sent": false,}"#;
+        let opts = llm_json::RepairOptions::default();
+        let fixed = llm_json::repair_json(broken, &opts).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&fixed).unwrap();
+        assert_eq!(v["to"], "alex@co.com");
+    }
+
+    #[test]
+    fn llm_json_unescaped_newlines() {
+        let broken = "{\"to\": \"a@b.com\", \"body\": \"line1\nline2\", \"sent\": false}";
+        let opts = llm_json::RepairOptions::default();
+        let fixed = llm_json::repair_json(broken, &opts).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&fixed).unwrap();
+        assert!(v["body"].as_str().unwrap().contains("line"));
+    }
+
+    #[test]
+    fn llm_json_single_quotes() {
+        let broken = "{'to': 'alex@co.com', 'sent': false}";
+        let opts = llm_json::RepairOptions::default();
+        let fixed = llm_json::repair_json(broken, &opts).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&fixed).unwrap();
+        assert_eq!(v["to"], "alex@co.com");
+    }
+
+    #[test]
+    fn llm_json_missing_quotes_on_keys() {
+        let broken = r#"{to: "alex@co.com", sent: false}"#;
+        let opts = llm_json::RepairOptions::default();
+        let fixed = llm_json::repair_json(broken, &opts).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&fixed).unwrap();
+        assert_eq!(v["to"], "alex@co.com");
+    }
+
+    #[test]
+    fn llm_json_markdown_wrapped() {
+        let broken = "```json\n{\"to\": \"a@b.com\", \"sent\": false}\n```";
+        let opts = llm_json::RepairOptions::default();
+        let fixed = llm_json::repair_json(broken, &opts).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&fixed).unwrap();
+        assert_eq!(v["to"], "a@b.com");
+    }
+
+    #[test]
+    fn llm_json_valid_passes_through() {
+        let valid = r#"{"to": "alex@co.com", "subject": "Hi", "sent": false}"#;
+        let opts = llm_json::RepairOptions::default();
+        let fixed = llm_json::repair_json(valid, &opts).unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&fixed).unwrap()["to"], "alex@co.com");
     }
 }

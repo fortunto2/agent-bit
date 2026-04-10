@@ -49,6 +49,7 @@ strsim = "0.11"
 dotenvy = "0.15.7"
 ratatui = "0.29"
 crossterm = "0.28"
+llm_json = { path = "../../shared/rust-code/crates/llm-json" }
 
 [patch.crates-io]
 openai-oxide = { path = "../../active/openai-rust" }
