@@ -82,7 +82,14 @@ fn load_task_data() -> HashMap<String, TaskData> {
                 (m, s, st, tc, secs, det)
             } else if pipeline_path.exists() {
                 let (m, s, st, tc, secs) = parse_metrics(&pipeline_path);
-                (m, s, st, tc, secs, String::new())
+                // Old pipeline.txt may not have score — try score.txt
+                let (score, det) = if s < 0.0 {
+                    if let Ok(c) = std::fs::read_to_string(entry.path().join("score.txt")) {
+                        let mut l = c.lines();
+                        (l.next().and_then(|v| v.parse().ok()).unwrap_or(-1.0), l.collect::<Vec<_>>().join("\n"))
+                    } else { (s, String::new()) }
+                } else { (s, String::new()) };
+                (m, score, st, tc, secs, det)
             } else if let Ok(c) = std::fs::read_to_string(entry.path().join("score.txt")) {
                 let mut l = c.lines();
                 let s = l.next().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
@@ -94,11 +101,16 @@ fn load_task_data() -> HashMap<String, TaskData> {
             // Skip trials with no score data
             if score < 0.0 { continue; }
 
-            // Extract model short name from trial_id (e.g. "Seed-2.0-pro_vm-xxx" → "Seed-2.0-pro")
+            // Extract model short name: metrics model field → dir name → fallback "nemotron" for old vm-* dirs
             let model_short = if !model.is_empty() {
                 model.rsplit('/').next().unwrap_or(&model).to_string()
-            } else {
+            } else if trial_id.contains("_vm-") {
                 trial_id.split("_vm-").next().unwrap_or(&trial_id).to_string()
+            } else if trial_id.starts_with("vm-") {
+                // AI-NOTE: old dirs without model prefix were all Nemotron runs
+                "nemotron-3-120b-a12b".to_string()
+            } else {
+                trial_id.clone()
             };
 
             trials.push(Trial { trial_id, model: model_short, score, steps, tool_calls, agent_secs, detail });
