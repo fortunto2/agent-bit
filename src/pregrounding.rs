@@ -447,7 +447,7 @@ pub(crate) async fn run_agent(
     shared_nli: &SharedNliClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
     sgr_mode: bool,
-) -> Result<(String, String, usize)> {
+) -> Result<(String, String, usize, usize)> {
     use crate::pipeline;
 
     // ── Pipeline Stage 1: Classify instruction ──────────────────────
@@ -457,7 +457,7 @@ pub(crate) async fn run_agent(
         Err(block) => {
             eprintln!("  ⛔ [STAGE:{}] {}", block.stage, block.message);
             pcm.answer(&block.message, block.outcome, &[]).await.ok();
-            return Ok((block.message, String::new(), 0));
+            return Ok((block.message, String::new(), 0, 0));
         }
     };
     let instruction_label = classified.instruction_label.clone();
@@ -510,7 +510,7 @@ pub(crate) async fn run_agent(
         Err(block) => {
             eprintln!("  ⛔ [STAGE:{}] {}", block.stage, block.message);
             pcm.answer(&block.message, block.outcome, &[]).await.ok();
-            return Ok((block.message, String::new(), 0));
+            return Ok((block.message, String::new(), 0, 0));
         }
     };
 
@@ -520,7 +520,7 @@ pub(crate) async fn run_agent(
         Err(block) => {
             eprintln!("  ⛔ [STAGE:{}] {}", block.stage, block.message);
             pcm.answer(&block.message, block.outcome, &[]).await.ok();
-            return Ok((block.message, String::new(), 0));
+            return Ok((block.message, String::new(), 0, 0));
         }
     };
 
@@ -1140,7 +1140,7 @@ pub(crate) async fn run_agent(
             .collect::<Vec<_>>()
             .join("\n");
 
-        return Ok((last_msg, history, 0)); // SGR mode — no step tracking
+        return Ok((last_msg, history, 0, 0)); // SGR mode — no step tracking
     }
 
     let loop_config = LoopConfig {
@@ -1244,6 +1244,9 @@ pub(crate) async fn run_agent(
         eprintln!("  💡 [P{}] {}: {}", imp.priority, imp.title, imp.reason);
     }
 
+    let tool_call_count = run_stats.successful_calls;
+    let step_count = run_stats.steps;
+
     // Log to evolution.jsonl
     let _ = evolution::log_evolution(".agent", &EvolutionEntry {
         ts: {
@@ -1272,14 +1275,12 @@ pub(crate) async fn run_agent(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let tool_call_count = ctx.iteration; // steps completed = proxy for tool calls
-
     if let Err(e) = result {
         eprintln!("  ⚠ Agent error: agent loop: {:#}", e);
-        return Ok((last_assistant, history, tool_call_count));
+        return Ok((last_assistant, history, tool_call_count, step_count));
     }
 
-    Ok((last_assistant, history, tool_call_count))
+    Ok((last_assistant, history, tool_call_count, step_count))
 }
 
 /// Build a compact execution summary for the verifier from message history.

@@ -260,7 +260,7 @@ async fn main() -> Result<()> {
 
             let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
             let t0 = std::time::Instant::now();
-            let (last_msg, history, tool_calls) = run_trial(
+            let (last_msg, history, tool_calls, steps) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature,
                 &clf, &nli, ov.clone(), sgr_mode,
@@ -271,8 +271,8 @@ async fn main() -> Result<()> {
                 &model, base_url.as_deref(), &llm_api_key, &extra_headers, temperature,
             ).await;
             let total_elapsed = t0.elapsed();
-            eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Tools: {}",
-                agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), tool_calls);
+            eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Steps: {} | Tools: {}",
+                agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), steps, tool_calls);
 
             let score = match h.end_trial(&trial.trial_id).await {
                 Ok(result) => {
@@ -306,11 +306,9 @@ async fn main() -> Result<()> {
                 }
             };
             // Write metrics to dump dir
-            let steps: usize = history.lines().count();
-            let efficiency = if tool_calls > 0 { 1.0 } else { 0.0 };
             let _ = std::fs::write(format!("{}/metrics.txt", dump_dir), format!(
-                "model: {}\nscore: {:.2}\ntool_calls: {}\nsteps: {}\nagent_secs: {:.1}\ntotal_secs: {:.1}\nefficiency: {:.2}\n",
-                model, score, tool_calls, steps, agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), efficiency,
+                "model: {}\nscore: {:.2}\nsteps: {}\ntool_calls: {}\nagent_secs: {:.1}\ntotal_secs: {:.1}\n",
+                model, score, steps, tool_calls, agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(),
             ));
 
             res.lock().await.push((task_id, score));
@@ -386,7 +384,7 @@ async fn run_leaderboard(
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
         let t0 = std::time::Instant::now();
-        let (last_msg, history, tool_calls) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
+        let (last_msg, history, tool_calls, steps) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
         let agent_elapsed = t0.elapsed();
 
         // Self-consistency retry: if verifier disagrees, re-run agent with different temperature
@@ -399,7 +397,7 @@ async fn run_leaderboard(
             eprintln!("  🔄 Self-consistency retry: verifier disagrees, re-running with temp={:.2}", temperature + 0.1);
             let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
             let retry_temp = temperature + 0.1;
-            let (last_msg2, history2, tool_calls2) = run_trial(&pcm2, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
+            let (last_msg2, history2, tool_calls2, _steps2) = run_trial(&pcm2, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
             verify_and_submit(
                 &pcm2, &trial.instruction, &last_msg2, &history2, tool_calls2,
                 model, base_url, llm_api_key, extra_headers, retry_temp,
@@ -467,12 +465,12 @@ async fn run_trial(
     shared_nli: &scanner::SharedNliClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
     sgr_mode: bool,
-) -> (String, String, usize) {
+) -> (String, String, usize, usize) {
     match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator, sgr_mode).await {
-        Ok((last_msg, history, tool_calls)) => (last_msg, history, tool_calls),
+        Ok((last_msg, history, tool_calls, steps)) => (last_msg, history, tool_calls, steps),
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);
-            (String::new(), String::new(), 0)
+            (String::new(), String::new(), 0, 0)
         }
     }
 }
