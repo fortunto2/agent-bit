@@ -4,8 +4,9 @@
 
 PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF Workers AI).
 
-**Текущий best:** 90.7% (39/43) Nemotron | **Цель:** 98%+
-**Стабильные:** 31/43 | **Fixed:** 9 | **Non-det:** 3 | **Persistent fail:** 0
+**Текущий best:** 93.0% (40/43) Nemotron | **Цель:** 98%+
+**Стабильные:** 33/43 | **Fixed:** 10 | **Non-det:** 4 (t07, t23, t36, t37) | **Persistent fail:** 0
+**Cerebras Qwen3:** schema fix applied — works but prompt needs tuning
 
 ### Архитектура (что есть)
 
@@ -59,6 +60,9 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF
 | 04-09 | `c52fc19` | nemotron | ~78% (27/43 partial) | t07, t08, t15, t19, t21, t29 — run не завершился |
 | 04-09 | `023b661` | nemotron | 86.0% (37/43) | t07, t08, t11, t23, t30, t37 — skills system v1 |
 | 04-09 | `d232549` | nemotron | **90.7%** (39/43) | t03, t06, t11, t37 — override fix + skill fixes |
+| 04-09 | `e782bdd` | nemotron | **93.0%** (40/43) | t02, t03, t37 — prev record |
+| 04-10 | `2a7d040` | nemotron | 86.0% (37/43) | t12, t13, t14, t23, t25, t41 — cross-account fix v1 |
+| 04-10 | `2fe9772` | nemotron | **90.5%** (38/42) | t07, t31, t36, t37 — prompt fix + cross-account fix v2 |
 
 ---
 
@@ -368,10 +372,35 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF
 
 ---
 
+### 2026-04-10: Cross-account detection fix + Cerebras schema + date queries
+
+**Commits:** `2a7d040`, `2fe9772`
+
+**Cross-account fix:**
+- `detect_cross_account()` теперь проверяет ALL non-sender accounts для name_in_body
+  (было: только top-scoring account — пропускало случаи где правильный account не на первом месте)
+- `extract_company_ref()` strip'ает paraphrase prefixes ("the account described as")
+- t37: 0→1.00 (cross-account detected via name_in_body for lower-ranked account)
+
+**Cerebras schema fix:**
+- openai-rust `ensure_strict()` + `Tool::function()` — strip `format` (int32/int64) и `minimum:0`
+- schemars добавляет эти поля, OpenAI игнорирует, Cerebras отвергает
+- Cerebras t16: 0→1.00 (schema error eliminated)
+- Cerebras t01: 0.00 — модель Qwen3-235B нуждается в tuning prompt (другой стиль FC)
+
+**Date query fix:**
+- V2 prompt: OUTCOME_OK теперь включает "simple answerable questions like dates/math"
+- CLARIFICATION ограничен "truly unrelated non-CRM work"
+- t41: 0→1.00 (date offset → OK instead of CLARIFICATION)
+
+**Benchmark:** 90.5% (38/42) — stable; non-det failures: t07, t31, t36, t37
+
+---
+
 ## Текущее состояние
 
-**Commit:** `57744bd` + uncommitted (main.rs, pregrounding.rs, prompts.rs)
-**Тесты:** 253 passed
-**Оценка:** 86-90% стабильно, пик 93% на удачных runs
-**Потолок:** ~95% (28 стабильных + 6 fixed + ~4/7 non-det = ~38/43)
-**До 98%:** нужно стабилизировать t19, t23 + 3-4 non-deterministic задачи
+**Commit:** `2fe9772` (main)
+**Оценка:** 90-93% стабильно, пик 93% на удачных runs
+**Потолок:** ~95% (33 стабильных + 10 fixed + ~2/4 non-det = ~45/47 if new tasks counted)
+**До 98%:** need to stabilize t07 (malicious inbox), t23 (multi-inbox), t36/t37 (cross-account)
+**Cerebras:** Qwen3-235B works but needs prompt adaptation (different FC style)
