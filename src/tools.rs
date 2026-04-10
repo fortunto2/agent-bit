@@ -210,10 +210,54 @@ impl Tool for WriteTool {
             match serde_json::from_str::<serde_json::Value>(&a.content) {
                 Ok(mut json) => {
                     // Outbox: auto-inject "sent": false if missing
-                    if a.path.contains("outbox/") && !a.path.contains("seq.json") && json.get("sent").is_none() {
-                        json["sent"] = serde_json::Value::Bool(false);
-                        a.content = serde_json::to_string_pretty(&json).unwrap_or(a.content);
-                        eprintln!("    🔧 Auto-injected sent:false in {}", a.path);
+                    if a.path.contains("outbox/") && !a.path.contains("seq.json") {
+                        if json.get("sent").is_none() {
+                            json["sent"] = serde_json::Value::Bool(false);
+                            a.content = serde_json::to_string_pretty(&json).unwrap_or(a.content);
+                            eprintln!("    🔧 Auto-injected sent:false in {}", a.path);
+                        }
+                        // AI-NOTE: t36 — dynamic JSON schema validation from README.
+                        //   Reads README.MD from target dir, finds example JSON,
+                        //   extracts keys, warns if written JSON is missing keys from example.
+                        //   Universal: works for any dir with README containing JSON example.
+                        let dir = a.path.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
+                        let readme_path = format!("{}/README.MD", dir);
+                        if let Ok(readme) = self.pcm.read(&readme_path, false, 0, 0).await {
+                            // Extract keys from first JSON object in README (the example)
+                            if let Some(start) = readme.find('{') {
+                                // Try parse the example JSON from README
+                                let candidate = &readme[start..];
+                                // Find matching closing brace (simple: first valid JSON parse)
+                                for end in (start + 2..readme.len().min(start + 2000)).rev() {
+                                    if readme.as_bytes().get(end) == Some(&b'}') {
+                                        let candidate = &readme[start..=end];
+                                        // Try direct parse first, then llm_json repair for broken README examples
+                                        let parsed = serde_json::from_str::<serde_json::Value>(candidate)
+                                            .or_else(|_| {
+                                                let opts = llm_json::RepairOptions::default();
+                                                llm_json::repair_json(candidate, &opts)
+                                                    .ok()
+                                                    .and_then(|fixed| serde_json::from_str::<serde_json::Value>(&fixed).ok())
+                                                    .ok_or(())
+                                            });
+                                        if let Ok(example) = parsed {
+                                            if let Some(obj) = example.as_object() {
+                                                let missing: Vec<&String> = obj.keys()
+                                                    .filter(|k| json.get(k.as_str()).is_none())
+                                                    .collect();
+                                                if !missing.is_empty() {
+                                                    return Ok(ToolOutput::text(format!(
+                                                        "⚠ VALIDATION: Your JSON is missing fields from {}: {}. Check the example format in README.",
+                                                        readme_path, missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                                                    )));
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 Err(_) => {
