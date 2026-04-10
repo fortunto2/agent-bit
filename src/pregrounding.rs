@@ -719,14 +719,18 @@ pub(crate) async fn run_agent(
     }
 
     // Hint when CRM is empty — email tasks need contacts UNLESS email is in instruction
+    // AI-NOTE: t11 fix — empty CRM = UNSUPPORTED for email tasks even if @ in instruction.
+    //   Previously skipped hint when instruction contained '@' (priya@example.com).
+    //   But harness expects UNSUPPORTED regardless — no CRM contacts to verify recipient.
     if contacts_summary.is_empty() && accounts_summary.is_empty() {
-        if ready.intent == "intent_email" && !instruction.contains('@') {
+        if ready.intent == "intent_email" {
             messages.push(Message::user(
                 "⚠ NO CONTACTS OR ACCOUNTS found in CRM. You cannot email anyone. \
-                 Answer OUTCOME_NONE_UNSUPPORTED — the CRM lacks the data needed for this task."
+                 Answer OUTCOME_NONE_UNSUPPORTED — the CRM lacks the data needed for this task. \
+                 Do NOT write to outbox. Do NOT create any files."
                     .to_string(),
             ));
-            eprintln!("  ⚠ Empty CRM + intent_email (no @ in instruction) → UNSUPPORTED hint injected");
+            eprintln!("  ⚠ Empty CRM + intent_email → UNSUPPORTED hint injected");
         }
     }
 
