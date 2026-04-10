@@ -69,6 +69,22 @@ x-session-affinity = "pac1-agent"
 
 # AI-NOTE: nemotron-fast (Super) and nemotron-70b removed — reasoning models don't do multi-step FC
 
+[providers.step]
+model = "stepfun-ai/Step-3.5-Flash"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+# $0.10/$0.30 per 1M, 256K context, 74% SWE-bench
+
+[providers.qwen397]
+model = "Qwen/Qwen3.5-397B-A17B"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+# $0.54/$3.40 per 1M, 262K, SOTA reasoning
+
 [providers.qwen35]
 model = "Qwen/Qwen3.5-122B-A10B"
 base_url = "https://api.deepinfra.com/v1/openai"
