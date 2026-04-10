@@ -23,11 +23,26 @@ pub fn load(project_dir: &Path) -> SkillRegistry {
 
 /// Select skill body for prompt injection.
 /// Wraps SkillRegistry::select with PAC1-specific fallback logic.
+/// Security labels (injection, social_engineering, credential) take priority.
+/// For benign labels (crm, non_work): intent-first to avoid security skill hijacking.
 pub fn select_body<'a>(registry: &'a SkillRegistry, security_label: &str, intent: &str, instruction: &str) -> &'a str {
-    // Try push-model selection (trigger match + keyword + priority)
-    if let Some(skill) = registry.select(&[security_label, intent], instruction) {
-        eprintln!("  🎯 Skill: {} (priority={})", skill.name, skill.priority);
-        return &skill.body;
+    let is_security_label = matches!(security_label, "injection" | "social_engineering" | "credential");
+    if is_security_label {
+        // Security label → security skill first, intent as fallback
+        if let Some(skill) = registry.select(&[security_label, intent], instruction) {
+            eprintln!("  🎯 Skill: {} (priority={})", skill.name, skill.priority);
+            return &skill.body;
+        }
+    } else {
+        // Benign label → intent first (prevents security-injection hijacking cleanup/delete tasks)
+        if let Some(skill) = registry.select(&[intent], instruction) {
+            eprintln!("  🎯 Skill: {} (priority={}, via intent)", skill.name, skill.priority);
+            return &skill.body;
+        }
+        if let Some(skill) = registry.select(&[security_label], instruction) {
+            eprintln!("  🎯 Skill: {} (priority={}, via label)", skill.name, skill.priority);
+            return &skill.body;
+        }
     }
     // Fallback: crm-default
     if let Some(skill) = registry.get("crm-default") {
