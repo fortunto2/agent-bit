@@ -5,6 +5,8 @@ use anyhow::Result;
 use bitgn_sdk::harness::{self as proto, HarnessServiceClient};
 use connectrpc::client::HttpClient;
 
+// AI-NOTE: Clone needed for parallel leaderboard (tokio::spawn shares client)
+#[derive(Clone)]
 pub struct HarnessClient {
     inner: HarnessServiceClient<HttpClient>,
 }

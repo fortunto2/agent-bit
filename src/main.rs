@@ -379,14 +379,42 @@ async fn run_leaderboard(
         }
     };
 
+    // AI-NOTE: parallel leaderboard — concurrency from --parallel flag (default 1 for safety)
+    let concurrency = std::env::var("LEADERBOARD_PARALLEL")
+        .ok().and_then(|v| v.parse().ok()).unwrap_or(1usize);
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
+    let lb_results: Arc<tokio::sync::Mutex<Vec<(String, f32)>>> = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let harness = Arc::new((*harness).clone());
+    let mut handles = Vec::new();
+
     for (i, trial_id) in run.trial_ids.iter().enumerate() {
-        let trial = harness.start_trial(trial_id).await?;
+        let sem = semaphore.clone();
+        let harness = harness.clone();
+        let trial_id = trial_id.clone();
+        let model = model.to_string();
+        let base_url = base_url.map(|s| s.to_string());
+        let llm_api_key = llm_api_key.to_string();
+        let extra_headers = extra_headers.to_vec();
+        let prompt_mode = prompt_mode.to_string();
+        let shared_clf = shared_clf.clone();
+        let shared_nli = shared_nli.clone();
+        let outcome_validator = outcome_validator.clone();
+        let fallbacks: Vec<FallbackProvider> = fallbacks.to_vec();
+        let lb_results = lb_results.clone();
+        let total_trials = run.trial_ids.len();
+
+        let handle = tokio::spawn(async move {
+        let _permit = sem.acquire().await.unwrap();
+        let Ok(trial) = harness.start_trial(&trial_id).await else {
+            eprintln!("  ⚠ Failed to start trial {}", trial_id);
+            return;
+        };
         eprintln!("\n━━━ Trial {}/{}: {} (task {}) ━━━",
-            i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
+            i + 1, total_trials, trial.trial_id, trial.task_id);
 
         // Auto-dump trial data for dashboard
         // Extract short provider name from model path for dump dir
-        let short_model = model.rsplit('/').next().unwrap_or(model);
+        let short_model = model.rsplit('/').next().unwrap_or(&model);
         let dump_dir = format!("benchmarks/tasks/{}/{}_{}", trial.task_id, short_model, trial.trial_id);
         let _ = std::fs::create_dir_all(&dump_dir);
         let log_url = format!("https://{}.eu.bitgn.com", trial.trial_id);
@@ -397,13 +425,12 @@ async fn run_leaderboard(
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
         let t0 = std::time::Instant::now();
-        let (last_msg, history, tool_calls, steps) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
+        let (last_msg, history, tool_calls, steps) = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
         let agent_elapsed = t0.elapsed();
 
-        // Self-consistency retry: if verifier disagrees, re-run agent with different temperature
         let should_retry = check_verifier_agreement(
             &pcm, &trial.instruction, &last_msg, &history, tool_calls,
-            model, base_url, llm_api_key, extra_headers, temperature,
+            &model, base_url.as_deref(), &llm_api_key, &extra_headers, temperature,
         ).await;
 
         if should_retry {
@@ -412,7 +439,7 @@ async fn run_leaderboard(
                 let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
                 let (last_msg2, history2, tool_calls2, _steps2) = run_trial(
                     &pcm2, &trial.instruction, fb_model, fb_base.as_deref(), fb_key, fb_headers,
-                    max_steps, prompt_mode, *fb_temp, *fb_plan_temp,
+                    max_steps, &prompt_mode, *fb_temp, *fb_plan_temp,
                     &shared_clf, &shared_nli, outcome_validator.clone(), false,
                 ).await;
                 verify_and_submit(
@@ -420,22 +447,23 @@ async fn run_leaderboard(
                     fb_model, fb_base.as_deref(), fb_key, fb_headers, *fb_temp,
                 ).await;
             } else {
-                // No fallbacks — retry same model with higher temp
                 eprintln!("  🔄 Self-consistency retry: temp={:.2}", temperature + 0.1);
                 let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
                 let retry_temp = temperature + 0.1;
-                let (last_msg2, history2, tool_calls2, _steps2) = run_trial(&pcm2, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
+                let (last_msg2, history2, tool_calls2, _steps2) = run_trial(&pcm2, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
                 verify_and_submit(
                     &pcm2, &trial.instruction, &last_msg2, &history2, tool_calls2,
-                    model, base_url, llm_api_key, extra_headers, retry_temp,
+                    &model, base_url.as_deref(), &llm_api_key, &extra_headers, retry_temp,
                 ).await;
             }
         } else {
-            // First attempt accepted — submit
             let _ = pcm.submit_proposed(None).await;
         }
 
-        let result = harness.end_trial(&trial.trial_id).await?;
+        let result = harness.end_trial(&trial.trial_id).await.unwrap_or_else(|e| {
+            eprintln!("  ⚠ EndTrial error: {}", e);
+            bitgn::EndTrialResponse { trial_id: trial_id.clone(), score: Some(0.0), score_detail: vec![format!("error: {}", e)] }
+        });
         let score = result.score.unwrap_or(0.0);
         eprintln!("  {} Score: {:.2}", trial.task_id, score);
         for detail in &result.score_detail {
@@ -443,17 +471,21 @@ async fn run_leaderboard(
         }
         let total_elapsed_final = t0.elapsed();
         write_trial_metrics(
-            &dump_dir, model, score as f32, steps, tool_calls,
+            &dump_dir, &model, score as f32, steps, tool_calls,
             agent_elapsed.as_secs_f64(), total_elapsed_final.as_secs_f64(),
             &result.score_detail, &history,
         );
-        // Score-gated learning: only learn from confirmed correct answers
         if score >= 1.0 {
             if let Some(ref v) = outcome_validator {
                 v.learn_last();
             }
         }
+        lb_results.lock().await.push((trial.task_id.clone(), score));
+        });
+        handles.push(handle);
     }
+
+    futures::future::join_all(handles).await;
 
     let run_status = harness.get_run(&run.run_id).await?;
     eprintln!("\n[pac1] Run state: {}", run_status.state);
