@@ -454,14 +454,18 @@ Agent uses two-phase function calling: Phase 1 = reasoning tool (8-field schema 
 | Nemotron 120B | CF Workers AI | ✅ | ✅ | 47s | **primary (FREE)** |
 | GPT-5.4 | OpenAI | ✅ | ✅ | ~30s | paid, final validation only |
 | MiniMax M2.5 | DeepInfra | ✅ | ✅ | 39s | **best backup ($0.27/M)** |
+| Seed-2.0-pro | DeepInfra | ✅ | ✅ | 106s | **10/10 sample, $0.35/M** |
+| Kimi-K2.5-Turbo | DeepInfra | ✅ | ✅ | 35s | **9/10 sample, $0.36/M, fast** |
 | DeepSeek V3.2 | DeepInfra | ❌ | ✅ | — | FC ok, reasoning weak |
 | Cerebras Qwen3 | Cerebras | ❌ | ✅ | fast | multi-step weak |
 | Kimi K2.5 | CF Workers AI | ❌ | non-det | 53s | Phase 1 unreliable on long ctx |
 | GLM-5.1 | DeepInfra | ❌ | ✅ | 287s | reasoning model, very slow |
 | Step-3.5-Flash | DeepInfra | ❌ | ❌ | — | no strict schema support |
 | Qwen3.5-397B | DeepInfra | ❌ | non-det | — | 0 tool calls on multi-step |
-| Qwen3.5-122B | DeepInfra | ❌ | — | — | reasoning weak |
-| Llama-4 Maverick | DeepInfra | ❌ | — | — | reasoning weak |
+| Gemini 2.5 Pro | DeepInfra | ❌ | ❌ | — | FC broken on long context |
+| Gemini 2.5 Flash | DeepInfra | ❌ | ❌ | — | FC broken on long context |
+| Nemotron 340B | DeepInfra | ❌ | ❌ | — | FC broken |
+| Qwen3-Max | DeepInfra | ❌ | ✅ | — | multi-step weak |
 
 **Root cause for failures**: not missing FC support, but **degraded tool calling on long context**. Models pass simple FC probe but fail when system prompt is 7K+ with complex reasoning schema. Only Nemotron, GPT-5.4, and MiniMax handle this reliably.
 

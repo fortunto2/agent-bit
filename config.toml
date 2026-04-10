@@ -1,20 +1,32 @@
 # PAC1 Agent Configuration
 # Switch provider: change llm.provider to any key from [providers.*]
 #
-# REQUIRES: response_format: json_schema (strict) for Phase 1 structured CoT.
-# Models that support this (tested):
-#   ✅ Nemotron 120B (CF Workers AI) — primary, FREE
-#   ✅ GPT-5.4 / GPT-5.4-mini (OpenAI) — paid
-#   ✅ MiniMax M2.5 (DeepInfra) — best backup, $0.27/M
-#   ✅ DeepSeek V3.x (DeepInfra) — FC works, reasoning weaker
-#   ✅ Cerebras Qwen3 — FC works, multi-step weaker
+# REQUIRES: two-phase FC with complex tool schemas on 7K+ context.
+# FC probe at agent start validates compatibility. Quick test: --task t01 + --task t16.
 #
-# Models that DO NOT support strict json_schema (0 tool calls):
-#   ❌ Kimi K2.5 — Phase 1 returns 0 reasoning calls
-#   ❌ GLM-5.1 (reasoning model) — inconsistent, needs reasoning_effort=none
-#   ❌ Step-3.5-Flash — no structured output support
-#   ❌ Qwen3.5-397B — 0 tool calls on multi-step
-#   ❌ gpt-oss-120b (Cerebras) — model not found / access denied
+# Working models (pass t01+t16):
+#   ✅ Nemotron 120B (CF) — 95% full bench, FREE, primary
+#   ✅ GPT-5.4 (OpenAI) — paid, final validation only
+#   ✅ MiniMax M2.5 (DeepInfra) — 64% sample, $0.27/M
+#   ✅ Seed-2.0-pro (DeepInfra) — 81-88% full bench, $0.35/M
+#   ✅ DeepSeek V3.2 (DeepInfra) — t16 ok, t01 fails, $0.26/M
+#   ✅ Cerebras Qwen3 — t16 ok, t01 fails
+#
+# Rejected models (tested 2026-04-10, DO NOT re-test):
+#   ❌ Kimi K2.5 (CF) — Phase 1 unreliable on long context
+#   ❌ Kimi-K2.5-Turbo (DeepInfra) — 58% full bench, unstable
+#   ❌ GLM-5.1 (DeepInfra/Modal/OpenRouter) — 287s/call, too slow
+#   ❌ Step-3.5-Flash (DeepInfra) — 0 tool calls, no strict schema
+#   ❌ Qwen3.5-397B (DeepInfra) — 0 tool calls on multi-step
+#   ❌ Qwen3.5-122B (DeepInfra) — t01 fails
+#   ❌ Qwen3-Max (DeepInfra) — t01 fails, $0.72/M
+#   ❌ Llama-4 Maverick (DeepInfra) — t01 fails
+#   ❌ Nemotron 340B (DeepInfra) — 0 tool calls
+#   ❌ Gemini 2.5 Pro/Flash (DeepInfra) — 0 tool calls
+#   ❌ gpt-oss-120b (Cerebras) — model not found
+#   ❌ GLM-4.7 (Cerebras) — t01+t16 fail
+#   ❌ Mistral Medium 3.1 (OpenRouter) — probe ok, t16 fails
+#   ❌ Hermes-4-405B (OpenRouter) — no FC endpoint support
 
 [agent]
 max_steps = 20
@@ -23,51 +35,7 @@ benchmark = "bitgn/pac1-dev"
 [llm]
 provider = "openai"
 
-# --- Providers ---
-
-[providers.openai]
-model = "gpt-5.4-mini"
-api_key_env = "OPENAI_API_KEY"
-
-
-[providers.openai-full]
-model = "gpt-5.4"
-api_key_env = "OPENAI_API_KEY"
-
-[providers.kimi]
-model = "@cf/moonshotai/kimi-k2.5"
-base_url = "https://api.cloudflare.com/client/v4/accounts/33dec9645c443eef5859b1e10ce71e01/ai/v1"
-api_key_env = "CF_AI_API_KEY"
-
-
-[providers.kimi-gateway]
-model = "workers-ai/@cf/moonshotai/kimi-k2.5"
-base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
-api_key_env = "CF_AI_API_KEY"
-temperature = 0.1
-planning_temperature = 0.4
-
-[providers.kimi-gateway.headers]
-cf-aig-request-timeout = "300000"
-x-session-affinity = "pac1-agent"
-
-[providers.llama]
-model = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
-base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
-api_key_env = "CF_AI_API_KEY"
-
-[providers.glm]
-model = "workers-ai/@cf/zai-org/glm-4.7-flash"
-base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
-api_key_env = "CF_AI_API_KEY"
-
-[providers.glm5]
-model = "zai-org/GLM-5.1-FP8"
-base_url = "https://api.us-west-2.modal.direct/v1"
-api_key_env = "MODAL_API_KEY"
-temperature = 0.1
-use_chat_api = true
-reasoning_effort = "none"
+# --- Working Providers ---
 
 [providers.nemotron]
 model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
@@ -82,39 +50,13 @@ cf-aig-request-timeout = "300000"
 cf-aig-cache-ttl = "3600"
 x-session-affinity = "pac1-agent"
 
-# AI-NOTE: nemotron-fast (Super) and nemotron-70b removed — reasoning models don't do multi-step FC
+[providers.openai]
+model = "gpt-5.4-mini"
+api_key_env = "OPENAI_API_KEY"
 
-[providers.step]
-model = "stepfun-ai/Step-3.5-Flash"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-# $0.10/$0.30 per 1M, 256K context, 74% SWE-bench
-
-[providers.qwen397]
-model = "Qwen/Qwen3.5-397B-A17B"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-# $0.54/$3.40 per 1M, 262K, SOTA reasoning
-
-[providers.qwen35]
-model = "Qwen/Qwen3.5-122B-A10B"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-# $0.29/$2.90 per 1M, 262K context, SOTA reasoning
-
-[providers.llama4]
-model = "meta-llama/Llama-4-Maverick-17B-128E-Instruct-Turbo"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-# $0.50/$0.50 per 1M, 1M context, 128 experts
+[providers.openai-full]
+model = "gpt-5.4"
+api_key_env = "OPENAI_API_KEY"
 
 [providers.minimax]
 model = "MiniMaxAI/MiniMax-M2.5"
@@ -124,155 +66,42 @@ temperature = 0.1
 use_chat_api = true
 # $0.27/$0.95 per 1M, 80.2% SWE-bench
 
-[providers.deepseek]
-model = "deepseek-ai/DeepSeek-V3.2"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-# $0.26/$0.38 per 1M, 163K context, optimized for agents
-
-# AI-NOTE: deepseek-terminus, gpt-oss, mistral-small removed — all failed t01 (wrong file deletion)
-
-[providers.qwen3]
-model = "Qwen/Qwen3-235B-A22B-Instruct-2507"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-prompt_cache_key = "pac1-v1"
-reasoning_effort = "none"  # $0.071/$0.10 per 1M, 262K context
-
-[providers.cerebras]
-model = "qwen-3-235b-a22b-instruct-2507"
-base_url = "https://api.cerebras.ai/v1"
-api_key_env = "CEREBRAS_API_KEY"
-temperature = 0.1
-use_chat_api = true
-# FREE up to 1M tokens, ~0.66s per call, FC native
-
-[providers.glm51-di]
-model = "zai-org/GLM-5.1"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-
-[providers.cerebras-gpt]
-model = "gpt-oss-120b"
-base_url = "https://api.cerebras.ai/v1"
-api_key_env = "CEREBRAS_API_KEY"
-temperature = 0.1
-use_chat_api = true
-
-[providers.cerebras-glm]
-model = "zai-glm-4.7"
-base_url = "https://api.cerebras.ai/v1"
-api_key_env = "CEREBRAS_API_KEY"
-temperature = 0.1
-use_chat_api = true
-reasoning_effort = "none"
-# GLM-4.7 on Cerebras, ~1000 tok/s
-
-[providers.nemotron-v2]
-model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
-base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
-api_key_env = "CF_AI_API_KEY"
-prompt_mode = "v2"
-temperature = 0.1
-planning_temperature = 0.4
-[providers.nemotron-v2.headers]
-cf-aig-request-timeout = "300000"
-x-session-affinity = "pac1-agent"
-
-# AI-NOTE: Keychain auth uses Claude Code subscription OAuth token (sk-ant-oat01-...).
-# Haiku works. Sonnet/opus get 429 (subscription rate limit on premium models).
-# Token expires ~8h — restart agent if you get 401. See sgr-agent/providers/CLAUDE_PROXY_RESEARCH.md.
-[providers.claude]
-model = "claude-sonnet-4-6"
-auth = "keychain"
-
-[providers.claude-haiku]
-model = "claude-haiku-4-5-20251001"
-auth = "keychain"
-
-
-[providers.gemma4]
-model = "workers-ai/@cf/google/gemma-4-26b-a4b-it"
-base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
-api_key_env = "CF_AI_API_KEY"
-
-temperature = 0.1
-[providers.gemma4.headers]
-cf-aig-request-timeout = "300000"
-
-[providers.qwen36]
-model = "qwen/qwen3.6-plus:free"
-base_url = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"
-temperature = 0.1
-use_chat_api = true
-
-[providers.glm51]
-model = "z-ai/glm-5.1"
-base_url = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"
-temperature = 0.1
-use_chat_api = true
-
-[providers.gemini]
-model = "gemini-3.1-pro-preview"
-api_key_env = "GEMINI_API_KEY"
-
-[providers.openai-v2]
-model = "gpt-5.4"
-api_key_env = "OPENAI_API_KEY"
-prompt_mode = "v2"
-
-[providers.gemini-pro]
-model = "google/gemini-2.5-pro"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-# $0.12/$1.00 per 1M, Google flagship
-
-[providers.gemini-flash]
-model = "google/gemini-2.5-flash"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-# $0.03/$0.25 per 1M, fast
-
-[providers.qwen-max]
-model = "Qwen/Qwen3-Max"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-# $0.12/$0.60 per 1M, Alibaba flagship
-
-[providers.nemotron-340b]
-model = "nvidia/Nemotron-4-340B-Instruct"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-# $0.42/$0.42 per 1M, bigger Nemotron
-
 [providers.seed2]
 model = "ByteDance/Seed-2.0-pro"
 base_url = "https://api.deepinfra.com/v1/openai"
 api_key_env = "DEEPINFRA_API_KEY"
 temperature = 0.1
 use_chat_api = true
+prompt_cache_key = "pac1-v1"
 # $0.05/$0.30 per 1M, ByteDance new
 
-[providers.kimi-turbo]
-model = "moonshotai/Kimi-K2.5-Turbo"
+# AI-NOTE: kimi-turbo removed — 58% full bench, unstable
+
+[providers.kimi-k2]
+model = "moonshotai/Kimi-K2-Instruct"
 base_url = "https://api.deepinfra.com/v1/openai"
 api_key_env = "DEEPINFRA_API_KEY"
 temperature = 0.1
 use_chat_api = true
-# $0.06/$0.30 per 1M, Kimi turbo variant
+prompt_cache_key = "pac1-v1"
+# $0.05/$0.20 per 1M, base K2
+
+[providers.seed18]
+model = "ByteDance/Seed-1.8"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+prompt_cache_key = "pac1-v1"
+# $0.03/$0.20 per 1M
+
+[providers.ds-turbo]
+model = "deepseek-ai/DeepSeek-V3-0324-Turbo"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+prompt_cache_key = "pac1-v1"
+# $0.10/$0.30 per 1M, turbo FC
+
+# AI-NOTE: mistral-med (probe ok, t16 fail), hermes405 (no FC endpoint) removed
