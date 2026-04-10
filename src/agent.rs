@@ -402,8 +402,10 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
                     let new_plan = extract_str_array(args, "plan");
                     let new_type = extract_str(args, "task_type");
                     let new_sec = extract_str(args, "security_assessment");
-                    // Check if reflexion changed the assessment
-                    if new_type != task_type || new_sec != security {
+                    // AI-NOTE: t02 fix — reflexion cannot escalate "delete" to "edit" (adds write privilege).
+                    //   ML forced intent is the safety constraint. Reflexion can only narrow, not widen.
+                    let type_escalation = task_type == "delete" && new_type != "delete";
+                    if (new_type != task_type || new_sec != security) && !type_escalation {
                         self.reflexion_count.fetch_add(1, Ordering::SeqCst);
                         eprintln!("  🔄 Reflexion: revised {}→{}, {}→{}", task_type, new_type, security, new_sec);
                         let new_known = extract_str_array(args, "known_facts");
@@ -455,15 +457,21 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
                     let new_plan = extract_str_array(args, "plan");
                     let new_done = args.get("done").and_then(|d| d.as_bool()).unwrap_or(false);
                     let new_confidence = args.get("confidence").and_then(|v| v.as_f64()).map(|v| v.clamp(0.0, 1.0) as f32).unwrap_or(confidence);
-                    if new_type != task_type || new_sec != security {
+                    // AI-NOTE: same t02 guard — confidence reflection cannot escalate delete→edit
+                    let final_type = if task_type == "delete" && new_type != "delete" {
+                        task_type.clone()
+                    } else {
+                        new_type
+                    };
+                    if final_type != task_type || new_sec != security {
                         eprintln!("  🔄 Confidence reflection revised: {}→{}, {}→{} (conf {:.2}→{:.2})",
-                            task_type, new_type, security, new_sec, confidence, new_confidence);
+                            task_type, final_type, security, new_sec, confidence, new_confidence);
                     }
                     let new_situation = format!(
                         "Type: {} | Security: {} | Confidence: {:.2}",
-                        new_type, new_sec, new_confidence
+                        final_type, new_sec, new_confidence
                     );
-                    (new_type, new_sec, new_situation, new_plan, new_done)
+                    (final_type, new_sec, new_situation, new_plan, new_done)
                 } else {
                     (task_type, security, situation, plan, done)
                 }
