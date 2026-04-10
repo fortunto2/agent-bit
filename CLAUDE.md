@@ -439,6 +439,34 @@ Providers in `config.toml`. Key fields per provider:
 - Single prompt for all models (explicit decision tree). No prompt_mode needed.
 - `headers` -- extra HTTP headers (e.g. CF Gateway timeout)
 
+### Model Compatibility (Two-Phase FC)
+
+Agent uses two-phase function calling: Phase 1 = reasoning tool (8-field schema via `tools_call` with `tool_choice: required`), Phase 2 = action tools. Models must handle complex tool schemas on long context (7K+ system prompt).
+
+**FC probe** runs at agent start — calls `tools_call` with 5-field schema. Fails fast if model can't do FC at all. But passing probe ≠ working agent — some models pass probe but fail on real tasks (long context degrades FC quality).
+
+**Quick model test**: `cargo run --release -- --provider NAME --task t01 && cargo run --release -- --provider NAME --task t16`. t01 = multi-step cleanup (hard), t16 = simple lookup (easy). Both must pass.
+
+**Tested models (2026-04-10):**
+
+| Model | Provider | t01 | t16 | Speed | Status |
+|-------|----------|-----|-----|-------|--------|
+| Nemotron 120B | CF Workers AI | ✅ | ✅ | 47s | **primary (FREE)** |
+| GPT-5.4 | OpenAI | ✅ | ✅ | ~30s | paid, final validation only |
+| MiniMax M2.5 | DeepInfra | ✅ | ✅ | 39s | **best backup ($0.27/M)** |
+| DeepSeek V3.2 | DeepInfra | ❌ | ✅ | — | FC ok, reasoning weak |
+| Cerebras Qwen3 | Cerebras | ❌ | ✅ | fast | multi-step weak |
+| Kimi K2.5 | CF Workers AI | ❌ | non-det | 53s | Phase 1 unreliable on long ctx |
+| GLM-5.1 | DeepInfra | ❌ | ✅ | 287s | reasoning model, very slow |
+| Step-3.5-Flash | DeepInfra | ❌ | ❌ | — | no strict schema support |
+| Qwen3.5-397B | DeepInfra | ❌ | non-det | — | 0 tool calls on multi-step |
+| Qwen3.5-122B | DeepInfra | ❌ | — | — | reasoning weak |
+| Llama-4 Maverick | DeepInfra | ❌ | — | — | reasoning weak |
+
+**Root cause for failures**: not missing FC support, but **degraded tool calling on long context**. Models pass simple FC probe but fail when system prompt is 7K+ with complex reasoning schema. Only Nemotron, GPT-5.4, and MiniMax handle this reliably.
+
+**Adding new models**: add to config.toml, run `--task t01` + `--task t16`, check metrics.txt in dump dir.
+
 ## Evolution Log — ОБЯЗАТЕЛЬНО ОБНОВЛЯТЬ
 
 **`LOG.md`** (корень репо) — единый лог эволюции агента. Структура:

@@ -228,3 +228,51 @@ api_key_env = "GEMINI_API_KEY"
 model = "gpt-5.4"
 api_key_env = "OPENAI_API_KEY"
 prompt_mode = "v2"
+
+[providers.gemini-pro]
+model = "google/gemini-2.5-pro"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+# $0.12/$1.00 per 1M, Google flagship
+
+[providers.gemini-flash]
+model = "google/gemini-2.5-flash"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+# $0.03/$0.25 per 1M, fast
+
+[providers.qwen-max]
+model = "Qwen/Qwen3-Max"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+# $0.12/$0.60 per 1M, Alibaba flagship
+
+[providers.nemotron-340b]
+model = "nvidia/Nemotron-4-340B-Instruct"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+# $0.42/$0.42 per 1M, bigger Nemotron
+
+[providers.seed2]
+model = "ByteDance/Seed-2.0-pro"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+# $0.05/$0.30 per 1M, ByteDance new
+
+[providers.kimi-turbo]
+model = "moonshotai/Kimi-K2.5-Turbo"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key_env = "DEEPINFRA_API_KEY"
+temperature = 0.1
+use_chat_api = true
+# $0.06/$0.30 per 1M, Kimi turbo variant
