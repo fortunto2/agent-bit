@@ -618,9 +618,8 @@ pub(crate) async fn run_agent(
     let skill_registry = std::sync::Arc::new(skill_registry);
     let skill_body = crate::skills::select_body(&skill_registry, effective_label, &instruction_intent, instruction);
     let hint = std::env::var("HINT").unwrap_or_default();
-    let mut system_prompt = template
-        .replace("{agents_md}", if agents_md.is_empty() { "" } else { &agents_md })
-        .replace("{examples}", skill_body);
+    // System prompt is now STATIC (cacheable) — dynamic parts go into user messages
+    let mut system_prompt = template.to_string();
     if !hint.is_empty() {
         system_prompt.push_str(&format!("\n\n{}", hint));
     }
@@ -674,12 +673,16 @@ pub(crate) async fn run_agent(
         }
     }
 
-    // Pre-grounding: tree and date already have shell-like headers from pcm.rs
-    // AGENTS.md is already in system prompt via {agents_md} template — don't duplicate
-    let mut messages = vec![
-        Message::user(&tree_out),
-        Message::user(&format!("$ date\n{}", ctx_time)),
-    ];
+    // Pre-grounding: dynamic context as user messages (system prompt is static for caching)
+    let mut messages = Vec::new();
+    if !agents_md.is_empty() {
+        messages.push(Message::user(&format!("AGENTS.MD (workspace rules):\n{}", agents_md)));
+    }
+    if !skill_body.is_empty() {
+        messages.push(Message::user(&format!("SKILL WORKFLOW:\n{}", skill_body)));
+    }
+    messages.push(Message::user(&tree_out));
+    messages.push(Message::user(&format!("$ date\n{}", ctx_time)));
 
     // SGR: inject CRM schema from README.md files
     if !crm_schema.is_empty() {

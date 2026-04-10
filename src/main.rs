@@ -408,23 +408,22 @@ async fn run_leaderboard(
         }
 
         let result = harness.end_trial(&trial.trial_id).await?;
-        if let Some(score) = result.score {
-            eprintln!("  {} Score: {:.2}", trial.task_id, score);
-            let total_elapsed_final = t0.elapsed();
-            write_trial_metrics(
-                &dump_dir, model, score as f32, steps, tool_calls,
-                agent_elapsed.as_secs_f64(), total_elapsed_final.as_secs_f64(),
-                &result.score_detail,
-            );
-            // Score-gated learning: only learn from confirmed correct answers
-            if score >= 1.0 {
-                if let Some(ref v) = outcome_validator {
-                    v.learn_last();
-                }
-            }
-        }
+        let score = result.score.unwrap_or(0.0);
+        eprintln!("  {} Score: {:.2}", trial.task_id, score);
         for detail in &result.score_detail {
             eprintln!("    {}", detail);
+        }
+        let total_elapsed_final = t0.elapsed();
+        write_trial_metrics(
+            &dump_dir, model, score as f32, steps, tool_calls,
+            agent_elapsed.as_secs_f64(), total_elapsed_final.as_secs_f64(),
+            &result.score_detail,
+        );
+        // Score-gated learning: only learn from confirmed correct answers
+        if score >= 1.0 {
+            if let Some(ref v) = outcome_validator {
+                v.learn_last();
+            }
         }
     }
 
@@ -452,6 +451,20 @@ fn write_trial_metrics(
     let _ = std::fs::write(format!("{}/score.txt", dump_dir), format!(
         "{:.2}\n{}\n", score, score_detail.join("\n"),
     ));
+    // Append metrics to pipeline.txt for unified diagnosis
+    let _ = std::fs::OpenOptions::new()
+        .append(true).create(true)
+        .open(format!("{}/pipeline.txt", dump_dir))
+        .and_then(|mut f| {
+            use std::io::Write;
+            writeln!(f, "\nscore: {:.2}", score)?;
+            writeln!(f, "steps: {}", steps)?;
+            writeln!(f, "tool_calls: {}", tool_calls)?;
+            writeln!(f, "agent_secs: {:.1}", agent_secs)?;
+            writeln!(f, "total_secs: {:.1}", total_secs)?;
+            for d in score_detail { writeln!(f, "detail: {}", d)?; }
+            Ok(())
+        });
     eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Steps: {} | Tools: {}",
         agent_secs, total_secs, steps, tool_calls);
 }
