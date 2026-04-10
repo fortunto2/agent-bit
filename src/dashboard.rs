@@ -87,6 +87,9 @@ fn load_task_data() -> HashMap<String, TaskData> {
                 continue; // skip dirs without any result files
             };
 
+            // Skip trials with no score data
+            if score < 0.0 { continue; }
+
             // Extract model short name from trial_id (e.g. "Seed-2.0-pro_vm-xxx" → "Seed-2.0-pro")
             let model_short = if !model.is_empty() {
                 model.rsplit('/').next().unwrap_or(&model).to_string()
@@ -101,16 +104,22 @@ fn load_task_data() -> HashMap<String, TaskData> {
     data
 }
 
-fn render_trial(task: &str, trial_idx: usize, data: &HashMap<String, TaskData>) -> String {
+fn render_trial(task: &str, trial_idx: usize, data: &HashMap<String, TaskData>, models: &[String]) -> String {
     let Some(td) = data.get(task) else {
         return format!("No trials for {}\nRun: cargo run -- --provider nemotron --task {}", task, task);
     };
-    let idx = trial_idx.min(td.trials.len().saturating_sub(1));
-    let trial = &td.trials[idx];
+    // Find trial for selected model (column = model index)
+    let sel_model = models.get(trial_idx.min(models.len().saturating_sub(1)));
+    let trial = sel_model
+        .and_then(|m| td.trials.iter().find(|t| &t.model == m))
+        .or_else(|| td.trials.first());
+    let Some(trial) = trial else {
+        return format!("No matching trial for {}", task);
+    };
     let dir = format!("benchmarks/tasks/{}/{}", task, trial.trial_id);
     let mut out = String::new();
 
-    out.push_str(&format!("━━━ {} trial {}/{} ━━━\n", task, idx + 1, td.trials.len()));
+    out.push_str(&format!("━━━ {} | {} ━━━\n", task, trial.model));
     out.push_str(&format!("ID: {}\n", trial.trial_id));
     if trial.score >= 0.0 {
         let label = if trial.score >= 1.0 { "PASS" } else { "FAIL" };
@@ -177,18 +186,29 @@ fn run_app() -> io::Result<()> {
     let mut log_scroll: usize = 0;
 
     let data = load_task_data();
-    let max_trials = data.values().map(|d| d.trials.len()).max().unwrap_or(0);
 
-    // Compute stats
+    // Extract unique model names (ordered by frequency)
+    let mut model_counts: HashMap<String, usize> = HashMap::new();
+    for td in data.values() {
+        for t in &td.trials {
+            if !t.model.is_empty() {
+                *model_counts.entry(t.model.clone()).or_default() += 1;
+            }
+        }
+    }
+    let mut models: Vec<String> = model_counts.keys().cloned().collect();
+    models.sort_by(|a, b| model_counts[b].cmp(&model_counts[a]));
+    if models.is_empty() { models.push("?".into()); }
+
+    let max_trials = data.values().map(|d| d.trials.len()).max().unwrap_or(0);
     let tasks_with_data = data.len();
-    let _total_trials: usize = data.values().map(|d| d.trials.len()).sum();
     let total_pass: usize = data.values().flat_map(|d| &d.trials).filter(|t| t.score >= 1.0).count();
     let total_scored: usize = data.values().flat_map(|d| &d.trials).filter(|t| t.score >= 0.0).count();
 
     loop {
         let sel = table_state.selected().unwrap_or(0);
         let task_id = TASK_IDS[sel];
-        let log_content = render_trial(task_id, trial_select, &data);
+        let log_content = render_trial(task_id, trial_select, &data, &models);
         let log_total = log_content.lines().count();
 
         terminal.draw(|f| {
@@ -215,7 +235,20 @@ fn run_app() -> io::Result<()> {
             ]);
             f.render_widget(header, left[0]);
 
-            // ── Heatmap table ──
+            // ── Heatmap table: rows=tasks, columns=models (latest trial per model) ──
+            let model_headers: Vec<String> = models.iter()
+                .map(|m| {
+                    // Shorten model name for column header: "nemotron-3-120b-a12b" → "nem"
+                    let s = m.as_str();
+                    if s.contains("nemotron") { "nem".into() }
+                    else if s.contains("Seed") { "sed".into() }
+                    else if s.contains("gpt-5") { "gpt".into() }
+                    else if s.contains("Kimi") { "kim".into() }
+                    else if s.len() > 4 { s[..3].to_string() }
+                    else { s.to_string() }
+                })
+                .collect();
+
             let rows: Vec<Row> = TASK_IDS.iter().enumerate().map(|(idx, &tid)| {
                 let is_sel = idx == sel;
                 let tid_style = if is_sel {
@@ -226,65 +259,55 @@ fn run_app() -> io::Result<()> {
                 let mut cells = vec![Cell::from(tid).style(tid_style)];
 
                 if let Some(td) = data.get(tid) {
-                    let mut pass = 0u32;
-                    let mut scored = 0u32;
-                    for (ti, trial) in td.trials.iter().enumerate() {
-                        let is_col = is_sel && ti == trial_select.min(td.trials.len().saturating_sub(1));
-                        let has_log = std::path::Path::new(&format!(
-                            "benchmarks/tasks/{}/{}/run.log", tid, trial.trial_id
-                        )).exists() || std::path::Path::new(&format!(
-                            "benchmarks/tasks/{}/{}/pipeline.txt", tid, trial.trial_id
-                        )).exists();
-
-                        let (ch, fg, bg) = if trial.score < 0.0 {
-                            if is_col { ("?", Color::Black, Color::Yellow) }
-                            else { ("?", Color::DarkGray, Color::Reset) }
-                        } else if trial.score >= 1.0 {
-                            pass += 1; scored += 1;
-                            // Dim green (▓) for score-only, bright green (█) for full data
-                            if is_col { ("█", Color::Black, Color::Green) }
-                            else if has_log { ("█", Color::Green, Color::Reset) }
-                            else { ("▓", Color::DarkGray, Color::Green) }
-                        } else {
-                            scored += 1;
-                            if is_col { ("█", Color::Black, Color::Red) }
-                            else if has_log { ("█", Color::Red, Color::Reset) }
-                            else { ("▓", Color::DarkGray, Color::Red) }
+                    // One cell per model: latest trial for that model
+                    for (mi, model_name) in models.iter().enumerate() {
+                        let latest = td.trials.iter().find(|t| &t.model == model_name);
+                        let is_col = is_sel && mi == trial_select.min(models.len().saturating_sub(1));
+                        let (ch, fg, bg) = match latest {
+                            Some(t) if t.score >= 1.0 => {
+                                if is_col { ("█", Color::Black, Color::Green) }
+                                else { ("█", Color::Green, Color::Reset) }
+                            }
+                            Some(t) if t.score >= 0.0 => {
+                                if is_col { ("█", Color::Black, Color::Red) }
+                                else { ("█", Color::Red, Color::Reset) }
+                            }
+                            _ => {
+                                if is_col { ("·", Color::Black, Color::Yellow) }
+                                else { ("·", Color::DarkGray, Color::Reset) }
+                            }
                         };
                         cells.push(Cell::from(ch).style(Style::default().fg(fg).bg(bg)));
                     }
-                    // Show rate only when enough data (3+ trials)
-                    if scored >= 3 {
-                        let rate = pass * 100 / scored;
-                        let rc = match rate { 100 => Color::Green, 75..=99 => Color::Yellow, 50..=74 => Color::Magenta, _ => Color::Red };
-                        cells.push(Cell::from(format!("{:3}%", rate)).style(Style::default().fg(rc)));
-                    }
                 }
-                // no data → empty row, just task id
 
                 Row::new(cells)
             }).collect();
 
+            // Header row with model short names
+            let header_cells: Vec<Cell> = std::iter::once(Cell::from("task").style(Style::default().fg(Color::DarkGray)))
+                .chain(model_headers.iter().map(|h| Cell::from(h.as_str()).style(Style::default().fg(Color::Cyan))))
+                .collect();
+            let header_row = Row::new(header_cells).style(Style::default().add_modifier(Modifier::BOLD));
+
             let mut widths = vec![Constraint::Length(4)];
-            for _ in 0..max_trials.min(30) { widths.push(Constraint::Length(1)); }
-            widths.push(Constraint::Length(5));
+            for _ in &models { widths.push(Constraint::Length(3)); }
 
             let table = Table::new(rows, widths)
+                .header(header_row)
                 .block(Block::default().borders(Borders::RIGHT))
                 .row_highlight_style(Style::default());
             f.render_stateful_widget(table, left[1], &mut table_state);
 
             // ── Status bar with model + metrics ──
-            let n_trials = data.get(task_id).map(|d| d.trials.len()).unwrap_or(0);
+            let sel_model = models.get(trial_select.min(models.len().saturating_sub(1))).cloned().unwrap_or_default();
             let trial_info = data.get(task_id)
-                .and_then(|td| td.trials.get(trial_select.min(td.trials.len().saturating_sub(1))))
-                .map(|t| format!("{} | {:.0}s {}steps {}tools",
-                    if t.model.is_empty() { "?" } else { &t.model },
-                    t.agent_secs, t.steps, t.tool_calls))
-                .unwrap_or_default();
+                .and_then(|td| td.trials.iter().find(|t| t.model == sel_model))
+                .map(|t| format!("{} | score={:.2} {:.0}s {}steps {}tools",
+                    t.model, t.score, t.agent_secs, t.steps, t.tool_calls))
+                .unwrap_or_else(|| format!("{} | no data", sel_model));
             let status = Paragraph::new(Line::from(vec![
                 Span::styled(format!(" {} ", task_id), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("{}/{} ", trial_select.min(n_trials) + 1, n_trials), Style::default().fg(Color::White)),
                 Span::styled(trial_info, Style::default().fg(Color::Cyan)),
             ]));
             f.render_widget(status, left[2]);
