@@ -202,30 +202,40 @@ impl Tool for WriteTool {
             return Ok(out);
         }
 
-        // Outbox validation: if writing JSON to outbox/, validate + auto-fix
-        if a.path.contains("outbox/") && !a.path.contains("seq.json") && !a.path.contains("README") {
+        // AI-NOTE: JSON auto-repair for ALL .json writes via llm_json fork.
+        //   Fixes: trailing commas, unescaped newlines, single quotes, missing key quotes,
+        //   markdown wrapping. Outbox gets "sent":false auto-inject.
+        //   Generalized from outbox-only (t23) to all JSON files for robustness on new tasks.
+        if a.path.ends_with(".json") && !a.path.contains("README") {
             match serde_json::from_str::<serde_json::Value>(&a.content) {
-                Ok(json) => {
-                    if json.get("sent").is_none() {
-                        return Ok(ToolOutput::text(
-                            "⚠ VALIDATION: Outbox email JSON missing 'sent' field. Add \"sent\": false. Read outbox/README.MD for format.".to_string()
-                        ));
+                Ok(mut json) => {
+                    // Outbox: auto-inject "sent": false if missing
+                    if a.path.contains("outbox/") && !a.path.contains("seq.json") && json.get("sent").is_none() {
+                        json["sent"] = serde_json::Value::Bool(false);
+                        a.content = serde_json::to_string_pretty(&json).unwrap_or(a.content);
+                        eprintln!("    🔧 Auto-injected sent:false in {}", a.path);
                     }
                 }
-                // AI-NOTE: t23 fix — llm_json crate repairs malformed LLM JSON (trailing commas,
-                //   unescaped newlines, missing quotes, etc). Prevents outbox write failures.
-                // AI-NOTE: t23 fix — llm_json::repair_json fixes malformed LLM JSON
-                //   (trailing commas, unescaped newlines, missing quotes, etc)
                 Err(_) => {
                     let opts = llm_json::RepairOptions::default();
                     match llm_json::repair_json(&a.content, &opts) {
                         Ok(fixed) => {
-                            a = WriteArgs { path: a.path, content: fixed, start_line: a.start_line, end_line: a.end_line };
+                            // After repair, also inject "sent" for outbox
+                            let mut repaired = fixed;
+                            if a.path.contains("outbox/") && !a.path.contains("seq.json") {
+                                if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&repaired) {
+                                    if json.get("sent").is_none() {
+                                        json["sent"] = serde_json::Value::Bool(false);
+                                    }
+                                    repaired = serde_json::to_string_pretty(&json).unwrap_or(repaired);
+                                }
+                            }
+                            a = WriteArgs { path: a.path, content: repaired, start_line: a.start_line, end_line: a.end_line };
                             eprintln!("    🔧 Auto-fixed JSON via llm_json in {}", a.path);
                         }
                         Err(_) => {
                             return Ok(ToolOutput::text(
-                                "⚠ VALIDATION: Invalid JSON in outbox file — could not repair.".to_string()
+                                "⚠ VALIDATION: Invalid JSON — could not repair. Check format.".to_string()
                             ));
                         }
                     }
