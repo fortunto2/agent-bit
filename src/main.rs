@@ -277,7 +277,7 @@ async fn main() -> Result<()> {
             let (last_msg, history, tool_calls, steps) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature,
-                &clf, &nli, ov.clone(), sgr_mode,
+                &clf, &nli, ov.clone(), sgr_mode, Some(&dump_dir),
             ).await;
             let agent_elapsed = t0.elapsed();
             verify_and_submit(
@@ -420,12 +420,11 @@ async fn run_leaderboard(
         let log_url = format!("https://{}.eu.bitgn.com", trial.trial_id);
         let _ = std::fs::write(format!("{}/bitgn_log.url", dump_dir), format!("{}\n", log_url));
         let _ = std::fs::write(format!("{}/instruction.txt", dump_dir), &trial.instruction);
-        // SAFETY: env var for child code in pregrounding dump
-        unsafe { std::env::set_var("DUMP_TRIAL", &dump_dir); }
+        // AI-NOTE: dump_dir passed as argument to run_trial (not env var) — parallel-safe
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
         let t0 = std::time::Instant::now();
-        let (last_msg, history, tool_calls, steps) = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
+        let (last_msg, history, tool_calls, steps) = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir)).await;
         let agent_elapsed = t0.elapsed();
 
         let should_retry = check_verifier_agreement(
@@ -440,7 +439,7 @@ async fn run_leaderboard(
                 let (last_msg2, history2, tool_calls2, _steps2) = run_trial(
                     &pcm2, &trial.instruction, fb_model, fb_base.as_deref(), fb_key, fb_headers,
                     max_steps, &prompt_mode, *fb_temp, *fb_plan_temp,
-                    &shared_clf, &shared_nli, outcome_validator.clone(), false,
+                    &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir),
                 ).await;
                 verify_and_submit(
                     &pcm2, &trial.instruction, &last_msg2, &history2, tool_calls2,
@@ -450,7 +449,7 @@ async fn run_leaderboard(
                 eprintln!("  🔄 Self-consistency retry: temp={:.2}", temperature + 0.1);
                 let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
                 let retry_temp = temperature + 0.1;
-                let (last_msg2, history2, tool_calls2, _steps2) = run_trial(&pcm2, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
+                let (last_msg2, history2, tool_calls2, _steps2) = run_trial(&pcm2, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir)).await;
                 verify_and_submit(
                     &pcm2, &trial.instruction, &last_msg2, &history2, tool_calls2,
                     &model, base_url.as_deref(), &llm_api_key, &extra_headers, retry_temp,
@@ -540,7 +539,7 @@ fn write_trial_metrics(
 
 use scanner::SharedClassifier;
 
-/// Returns (last_assistant_msg, full_history_text).
+/// Returns (last_assistant_msg, full_history_text, tool_calls, steps).
 async fn run_trial(
     pcm: &Arc<pcm::PcmClient>, instruction: &str,
     model: &str, base_url: Option<&str>, api_key: &str,
@@ -549,8 +548,9 @@ async fn run_trial(
     shared_nli: &scanner::SharedNliClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
     sgr_mode: bool,
+    dump_dir: Option<&str>,
 ) -> (String, String, usize, usize) {
-    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator, sgr_mode).await {
+    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator, sgr_mode, dump_dir).await {
         Ok((last_msg, history, tool_calls, steps)) => (last_msg, history, tool_calls, steps),
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);

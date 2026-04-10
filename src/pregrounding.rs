@@ -448,6 +448,7 @@ pub(crate) async fn run_agent(
     shared_nli: &SharedNliClassifier,
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
     sgr_mode: bool,
+    dump_dir: Option<&str>,
 ) -> Result<(String, String, usize, usize)> {
     use crate::pipeline;
 
@@ -548,8 +549,11 @@ pub(crate) async fn run_agent(
         }
     }
 
-    // Dump trial data for offline analysis (when DUMP_TRIAL dir is set)
-    if let Ok(dump_dir) = std::env::var("DUMP_TRIAL") {
+    // AI-NOTE: dump_dir passed as argument (not env var) — safe for parallel execution.
+    //   Previously used DUMP_TRIAL env var which caused race conditions in parallel mode.
+    let dump_dir_resolved = dump_dir.map(|s| s.to_string())
+        .or_else(|| std::env::var("DUMP_TRIAL").ok());
+    if let Some(dump_dir) = dump_dir_resolved {
         let _ = std::fs::create_dir_all(&dump_dir);
         // Tree
         let _ = std::fs::write(format!("{}/tree.txt", dump_dir), &tree_out);
