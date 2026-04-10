@@ -605,7 +605,12 @@ pub(crate) async fn run_agent(
         eprintln!("  📁 Trial data dumped to {}", dump_dir);
     }
 
-    let template = prompts::SYSTEM_PROMPT_V2;
+    // AI-NOTE: system prompt loaded from prompts/system.md at runtime (hot-reload, no rebuild).
+    //   Fallback to compiled-in SYSTEM_PROMPT_V2 if file not found.
+    //   Enables ShinkaEvolve optimization without cargo build cycle.
+    let template = std::fs::read_to_string("prompts/system.md")
+        .unwrap_or_else(|_| prompts::SYSTEM_PROMPT_V2.to_string());
+    let template = template.as_str();
     // Skill-based prompt injection (replaces examples_for_class)
     let skill_registry = crate::skills::load(std::path::Path::new("."));
     let effective_label = if ready.intent == "intent_query" && instruction_label == "non_work" {
