@@ -248,8 +248,9 @@ async fn main() -> Result<()> {
             eprintln!("  📋 Log: {}", log_url);
 
             // Auto-create dump dir if DUMP_TRIAL set, or auto-generate for single-task runs
+            let short_model = model.rsplit('/').next().unwrap_or(&model);
             let dump_dir = std::env::var("DUMP_TRIAL").ok().unwrap_or_else(|| {
-                format!("benchmarks/tasks/{}/{}", task_id, trial.trial_id)
+                format!("benchmarks/tasks/{}/{}_{}", task_id, short_model, trial.trial_id)
             });
             let _ = std::fs::create_dir_all(&dump_dir);
             let _ = std::fs::write(format!("{}/bitgn_log.url", dump_dir), format!("{}\n", log_url));
@@ -360,7 +361,9 @@ async fn run_leaderboard(
             i + 1, run.trial_ids.len(), trial.trial_id, trial.task_id);
 
         // Auto-dump trial data for dashboard
-        let dump_dir = format!("benchmarks/tasks/{}/{}", trial.task_id, trial.trial_id);
+        // Extract short provider name from model path for dump dir
+        let short_model = model.rsplit('/').next().unwrap_or(model);
+        let dump_dir = format!("benchmarks/tasks/{}/{}_{}", trial.task_id, short_model, trial.trial_id);
         let _ = std::fs::create_dir_all(&dump_dir);
         let log_url = format!("https://{}.eu.bitgn.com", trial.trial_id);
         let _ = std::fs::write(format!("{}/bitgn_log.url", dump_dir), format!("{}\n", log_url));

@@ -585,13 +585,15 @@ pub(crate) async fn run_agent(
             format!("  [{}] {} ({:.2}) sender={} {}", i, f.security.ml_label, f.security.ml_conf, sender, f.path)
         }).collect();
         let _ = std::fs::write(format!("{}/pipeline.txt", dump_dir), format!(
-            "instruction: {}\n\
+            "model: {}\n\
+             instruction: {}\n\
              intent: {} ({:.2})\n\
              label: {}\n\
              inbox_files: {}\n\
              crm_nodes: {}\n\
              \n\
              per_inbox:\n{}\n",
+            model,
             ready.instruction,
             ready.intent, intent_confidence,
             ready.instruction_label,
