@@ -241,15 +241,19 @@ impl Tool for WriteTool {
                                                     .ok_or(())
                                             });
                                         if let Ok(example) = parsed {
+                                            // AI-NOTE: t17 fix — README schema validation is advisory (warn_suffix),
+                                            //   not blocking. README may have multiple examples (seq.json + email)
+                                            //   and first parsed JSON may not match target file schema.
                                             if let Some(obj) = example.as_object() {
                                                 let missing: Vec<&String> = obj.keys()
                                                     .filter(|k| json.get(k.as_str()).is_none())
                                                     .collect();
                                                 if !missing.is_empty() {
-                                                    return Ok(ToolOutput::text(format!(
-                                                        "⚠ VALIDATION: Your JSON is missing fields from {}: {}. Check the example format in README.",
-                                                        readme_path, missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
-                                                    )));
+                                                    warn_suffix.push_str(&format!(
+                                                        "\n⚠ Hint: README shows fields: {}. You may be missing: {}.",
+                                                        obj.keys().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
+                                                        missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                                                    ));
                                                 }
                                             }
                                             break;
