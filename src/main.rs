@@ -259,15 +259,20 @@ async fn main() -> Result<()> {
             unsafe { std::env::set_var("DUMP_TRIAL", &dump_dir); }
 
             let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
+            let t0 = std::time::Instant::now();
             let (last_msg, history, tool_calls) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature,
                 &clf, &nli, ov.clone(), sgr_mode,
             ).await;
+            let agent_elapsed = t0.elapsed();
             verify_and_submit(
                 &pcm, &trial.instruction, &last_msg, &history, tool_calls,
                 &model, base_url.as_deref(), &llm_api_key, &extra_headers, temperature,
             ).await;
+            let total_elapsed = t0.elapsed();
+            eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Tools: {}",
+                agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), tool_calls);
 
             let score = match h.end_trial(&trial.trial_id).await {
                 Ok(result) => {
@@ -300,6 +305,14 @@ async fn main() -> Result<()> {
                     0.0
                 }
             };
+            // Write metrics to dump dir
+            let steps: usize = history.lines().count();
+            let efficiency = if tool_calls > 0 { 1.0 } else { 0.0 };
+            let _ = std::fs::write(format!("{}/metrics.txt", dump_dir), format!(
+                "model: {}\nscore: {:.2}\ntool_calls: {}\nsteps: {}\nagent_secs: {:.1}\ntotal_secs: {:.1}\nefficiency: {:.2}\n",
+                model, score, tool_calls, steps, agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), efficiency,
+            ));
+
             res.lock().await.push((task_id, score));
         });
         handles.push(handle);
@@ -372,7 +385,9 @@ async fn run_leaderboard(
         unsafe { std::env::set_var("DUMP_TRIAL", &dump_dir); }
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
+        let t0 = std::time::Instant::now();
         let (last_msg, history, tool_calls) = run_trial(&pcm, &trial.instruction, model, base_url, llm_api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false).await;
+        let agent_elapsed = t0.elapsed();
 
         // Self-consistency retry: if verifier disagrees, re-run agent with different temperature
         let should_retry = check_verifier_agreement(
@@ -406,8 +421,11 @@ async fn run_leaderboard(
             let _ = std::fs::OpenOptions::new().append(true).open(format!("{}/pipeline.txt", dump_dir))
                 .and_then(|mut f| {
                     use std::io::Write;
+                    let total_elapsed = t0.elapsed();
                     writeln!(f, "\nscore: {:.2}", score)?;
                     writeln!(f, "tool_calls: {}", tool_calls)?;
+                    writeln!(f, "agent_secs: {:.1}", agent_elapsed.as_secs_f64())?;
+                    writeln!(f, "total_secs: {:.1}", total_elapsed.as_secs_f64())?;
                     writeln!(f, "retry: {}", should_retry)?;
                     for d in &result.score_detail { writeln!(f, "detail: {}", d)?; }
                     Ok(())
