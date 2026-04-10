@@ -26,6 +26,8 @@ EXAMPLE — Bulk cleanup ("remove all cards and threads"):
 
 CRITICAL RULES:
   - DELETE tasks = search + read + delete ONLY. Do NOT write, create, or capture files.
+  - NEVER write("") or write empty content before delete. Just call delete() directly.
+  - "Discard" means delete the file. NOT write empty then delete — just delete.
   - "cards and threads" = ONLY 02_distill/cards/ and 02_distill/threads/
   - Do NOT delete from 01_capture/ — captured sources are IMMUTABLE
   - Do NOT delete from 00_inbox/ — inbox files are separate

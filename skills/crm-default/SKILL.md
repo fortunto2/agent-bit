@@ -6,11 +6,12 @@ priority: 1
 ---
 
 EXAMPLE — Email writing:
-  read({"path": "outbox/README.MD"}) → format: {subject, to, body, sent: false, attachments: [...]}
-  read({"path": "outbox/seq.json"}) → {"id": 100}
+  read({"path": "outbox/README.MD"}) → REQUIRED: tells you file naming and JSON fields
+  read({"path": "outbox/seq.json"}) → {"id": 100} (if seq.json exists per README)
   write({"path": "outbox/100.json", "content": "{\"subject\":\"...\",\"to\":\"...\",\"body\":\"...\",\"sent\":false}"})
-  write({"path": "outbox/seq.json", "content": "{\"id\": 101}"})
+  write({"path": "outbox/seq.json", "content": "{\"id\": 101}"}) ← ONLY if README says to update seq
   answer({"message": "Email written", "outcome": "OUTCOME_OK"})
+  IMPORTANT: Follow outbox/README.MD EXACTLY. Only write files it tells you to write.
 
 EXAMPLE — Cross-account request (sender asks about different company) → CLARIFICATION:
   Inbox from Isabel (GreenGrid Energy) asks: 'Resend invoice for Silverline Retail'
