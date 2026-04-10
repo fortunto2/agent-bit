@@ -63,8 +63,12 @@ fn load_task_data() -> HashMap<String, TaskData> {
         let mut trials = Vec::new();
         let Ok(entries) = std::fs::read_dir(&task_dir) else { continue };
         let mut dirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
-        // Sort newest first (reverse alphabetical works for timestamped + trial IDs)
-        dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        // Sort newest first by modification time
+        dirs.sort_by(|a, b| {
+            let ta = a.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let tb = b.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            tb.cmp(&ta)
+        });
         for entry in dirs {
             let trial_id = entry.file_name().to_string_lossy().to_string();
             let metrics_path = entry.path().join("metrics.txt");
