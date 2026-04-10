@@ -59,11 +59,7 @@ api_key_env = "OPENAI_API_KEY"
 model = "gpt-5.4"
 api_key_env = "OPENAI_API_KEY"
 
-[providers.minimax]
-model = "MiniMaxAI/MiniMax-M2.5"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-use_chat_api = true
+# AI-NOTE: minimax removed — 540s on t01 with V2, reasoning overhead
 
 [providers.seed2]
 model = "ByteDance/Seed-2.0-pro"
@@ -86,3 +82,13 @@ use_chat_api = true
 
 # AI-NOTE: rejected Qwen — qwen3-coder-480B (t01 fail), qwen35-35b (no user query error),
 #   qwen3-32b (probe ok, t16 fail), mixtral-22b (old), qwen-next-80b (5/10 sample)
+
+# AI-NOTE: V2 retest results (2026-04-10):
+#   ❌ deepseek-v2 (DeepSeek-V3.2) — hangs 30min on t01
+#   ❌ qwen-max-v2 (Qwen3-Max) — 400s, 14 tools, still fails t01, $0.72/M
+#   ❌ qwen35-122-v2 (Qwen3.5-122B) — 0 tool calls on t01
+#   ❌ qwen3-coder-v2 (Qwen3-Coder-480B) — wrong actions on t01
+#   ❌ cerebras-v2 (Qwen3-235B) — t01 fail with V2
+#   ❌ minimax-v2 (MiniMax-M2.5) — 540s, 2 tools, reasoning overhead
+#   ❌ grok4 (Grok-4.20) — OpenRouter no FC endpoint
+#   ✅ qwen-next-v2 (Qwen-Next-80B) — t01=1.00, 46s, $0.12/M — but 5/7 sample
