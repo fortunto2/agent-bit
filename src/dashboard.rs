@@ -130,32 +130,38 @@ fn render_trial(task: &str, trial_idx: usize, data: &HashMap<String, TaskData>, 
         out.push_str(&format!("🔗 {}\n", url.trim()));
     }
 
-    // Full agent log (run.log) — primary view if available
-    if let Ok(c) = std::fs::read_to_string(format!("{}/run.log", dir)) {
-        out.push_str(&format!("\n── Agent Log ({} lines) ──\n", c.lines().count()));
-        out.push_str(&c);
-        return out; // run.log is complete — skip dump file rendering
-    }
-
-    // Fallback: render dump files
+    // Always show pipeline.txt first (classification + score + metrics)
     if let Ok(c) = std::fs::read_to_string(format!("{}/pipeline.txt", dir)) {
         out.push_str("\n── Pipeline ──\n"); out.push_str(&c); out.push('\n');
     }
-    // All dump files
-    let mut files: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten()
-        .filter(|e| e.path().is_file() && e.file_name().to_string_lossy() != "score.txt"
-            && e.file_name().to_string_lossy() != "bitgn_log.url"
-            && e.file_name().to_string_lossy() != "pipeline.txt")
+
+    // Show metrics.txt if different from pipeline
+    if let Ok(c) = std::fs::read_to_string(format!("{}/metrics.txt", dir)) {
+        out.push_str("\n── Metrics ──\n"); out.push_str(&c); out.push('\n');
+    }
+
+    // Show inbox files (classifications + content)
+    let mut inbox_files: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("inbox_"))
         .collect();
-    files.sort_by_key(|e| e.file_name());
-    for f in &files {
-        let name = f.file_name().to_string_lossy().to_string();
-        if let Ok(c) = std::fs::read_to_string(f.path()) {
-            out.push_str(&format!("\n── {} ({} lines) ──\n", name, c.lines().count()));
-            out.push_str(&c);
-            out.push('\n');
+    inbox_files.sort_by_key(|e| e.file_name());
+    if !inbox_files.is_empty() {
+        out.push_str(&format!("\n── Inbox ({} files) ──\n", inbox_files.len()));
+        for f in &inbox_files {
+            if let Ok(c) = std::fs::read_to_string(f.path()) {
+                // Show first 5 lines of each inbox file
+                let preview: String = c.lines().take(5).collect::<Vec<_>>().join("\n");
+                out.push_str(&format!("{}\n{}\n\n", f.file_name().to_string_lossy(), preview));
+            }
         }
     }
+
+    // Agent log (run.log) — full tool call history
+    if let Ok(c) = std::fs::read_to_string(format!("{}/run.log", dir)) {
+        out.push_str(&format!("\n── Agent Log ({} lines) ──\n", c.lines().count()));
+        out.push_str(&c);
+    }
+
     out
 }
 
