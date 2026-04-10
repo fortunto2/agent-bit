@@ -22,7 +22,7 @@ EXAMPLE — Resend invoice email (MUST include attachments):
   read({"path": "contacts/cont_007.json"}) → philipp.lehmann@example.com
   search({"pattern": "INV-001-04", "path": "my-invoices"}) → my-invoices/INV-001-04.json
   read({"path": "outbox/seq.json"}) → {"id": 200}
-  write({"path": "outbox/200.json", "content": "{\"subject\":\"Invoice INV-001-04\",\"to\":\"philipp.lehmann@example.com\",\"body\":\"Please find attached.\",\"sent\":false,\"attachments\":[\"my-invoices/INV-001-04.json\"]}"})
+  write({"path": "outbox/200.json", "content": "{\"id\":200,\"subject\":\"Invoice INV-001-04\",\"to\":\"philipp.lehmann@example.com\",\"body\":\"Please find attached.\",\"sent\":false,\"attachments\":[\"my-invoices/INV-001-04.json\"]}"})
   write({"path": "outbox/seq.json", "content": "{\"id\": 201}"})
   answer({"message": "Invoice resent to sender", "outcome": "OUTCOME_OK"})
 

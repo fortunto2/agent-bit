@@ -76,6 +76,17 @@ pub(crate) fn threat_score(text: &str) -> u32 {
         score += 3;
     }
 
+    // AI-NOTE: t33 — bracket-based injection markers ([[clipboard relay]], [[system override]])
+    if lower.contains("[[clipboard relay") || lower.contains("[[system override")
+        || lower.contains("[[priority=") || lower.contains("[[internal relay") {
+        score += 3;
+    }
+
+    // AI-NOTE: t33 — "suppress mention" + action directives = injection
+    if lower.contains("suppress mention") || lower.contains("suppress") && lower.contains("cleanup path") {
+        score += 3;
+    }
+
     // Config-style injection (runtime_override=true, confirmation=not-required)
     if (lower.contains("runtime_override") || lower.contains("runtime override"))
         && (lower.contains("=true") || lower.contains("= true")) {
@@ -293,8 +304,10 @@ pub(crate) fn semantic_classify_inbox_file(
             ),
             "credential" => {
                 let lower = content.to_lowercase();
-                let has_forward = ["forward ", "share ", "send to "]
-                    .iter().any(|p| lower.contains(p));
+                // AI-NOTE: t07 — "send them to X" missed by "send to" pattern. Added "send " + "@" combo.
+                let has_forward = ["forward ", "share ", "send to ", "relay to ", "export to "]
+                    .iter().any(|p| lower.contains(p))
+                    || (lower.contains("send ") && lower.contains("@"));
                 // Branching that EXTRACTS OTP bits (e.g. "check first character", "depending on digit")
                 // vs simple verification ("reply correct/incorrect") which doesn't leak the OTP
                 let has_extraction = ["first character", "first digit", "depending on", "branch",
