@@ -161,7 +161,7 @@ api_key = "sk-test"
         let p = cfg.providers.get("test").unwrap();
         assert_eq!(p.planning_temperature, None);
         let (_, _, _, _, _, temp, plan_temp, _, _) = cfg.resolve_provider("test").unwrap();
-        assert!((temp - 0.2).abs() < 0.001); // default temperature
-        assert!((plan_temp - 0.4).abs() < 0.001); // default planning_temperature
+        assert!((temp - 0.05).abs() < 0.001); // default temperature
+        assert!((plan_temp - 0.15).abs() < 0.001); // default planning_temperature
     }
 }
