@@ -6,13 +6,42 @@ BitGN PAC1 Challenge agent in Rust, powered by sgr-agent.
 
 ```bash
 cargo build
-cargo run -- --provider nemotron --list          # list tasks WITH hints
-cargo run -- --provider nemotron --task t16      # single task
-cargo run -- --provider nemotron                 # all 40 tasks
-cargo run -- --provider nemotron --parallel 3    # parallel execution
-cargo run -- --provider openai-full --parallel 3 # GPT-5.4
-cargo test                                        # 240 unit tests
-cargo run -- --audit-store                        # audit adaptive store
+cargo test                                        # unit tests
+make task T=t16                                   # single task (default: nemotron)
+make task T=t16 PROVIDER=seed2                    # single task on specific model
+make full P=3                                     # parallel full run (default: nemotron)
+make full P=10 PROVIDER=seed2                     # parallel 10 on Seed
+make sample                                       # 8-task quick sample
+make failures M=Seed                              # show failures from dump dirs
+make compare                                      # side-by-side model comparison
+make ai-notes                                     # list all AI-NOTEs in codebase
+make preflight                                    # verify env before competition
+cargo run -- --provider nemotron --list            # list tasks WITH hints
+cargo run -- --audit-store                         # audit adaptive kNN store
+```
+
+### Dump-Based Analysis (ALWAYS use dumps, not stdout)
+
+Every run writes to `benchmarks/tasks/{task}/{model}_{trial}/`:
+- `pipeline.txt` — model, intent, label, score, steps, tool_calls, timing, score_detail
+- `metrics.txt` — same metrics in KV format
+- `score.txt` — score + harness detail lines
+- `run.log` — full agent history (tool calls, reasoning)
+- `inbox_*.txt` — pre-classified inbox content
+- `bitgn_log.url` — harness-side RPC log URL
+
+```bash
+# Find failures for a model
+grep "^score: 0" benchmarks/tasks/*/Seed*/pipeline.txt
+
+# Read full diagnosis
+cat benchmarks/tasks/t23/Seed-2.0-pro_vm-*/pipeline.txt
+
+# Read agent history
+cat benchmarks/tasks/t23/Seed-2.0-pro_vm-*/run.log
+
+# Check AI-NOTEs related to a task
+grep -rn "AI-NOTE.*t23\|AI-NOTE.*inbox" src/
 ```
 
 ## Architecture
