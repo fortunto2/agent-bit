@@ -673,7 +673,9 @@ pub(crate) async fn run_agent(
         }
     }
 
-    // Pre-grounding: dynamic context as user messages (system prompt is static for caching)
+    // AI-NOTE: agents_md + skill_body moved from system prompt to user messages — enables
+    //   server-side prompt prefix caching (DeepInfra auto-cache, OpenAI 93% hit).
+    //   System prompt is now STATIC across all trials. Dynamic content = user messages.
     let mut messages = Vec::new();
     if !agents_md.is_empty() {
         messages.push(Message::user(&format!("AGENTS.MD (workspace rules):\n{}", agents_md)));

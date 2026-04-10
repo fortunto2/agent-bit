@@ -23,8 +23,9 @@ pub fn load(project_dir: &Path) -> SkillRegistry {
 
 /// Select skill body for prompt injection.
 /// Wraps SkillRegistry::select with PAC1-specific fallback logic.
-/// Security labels (injection, social_engineering, credential) take priority.
-/// For benign labels (crm, non_work): intent-first to avoid security skill hijacking.
+// AI-NOTE: intent-first for benign labels — t01 fix. security-injection (priority=50) was hijacking
+//   cleanup (intent_delete) when classifier labeled instruction as "injection". All non-Nemotron
+//   models failed because they followed the wrong skill. Nemotron ignored it.
 pub fn select_body<'a>(registry: &'a SkillRegistry, security_label: &str, intent: &str, instruction: &str) -> &'a str {
     let is_security_label = matches!(security_label, "injection" | "social_engineering" | "credential");
     if is_security_label {

@@ -109,7 +109,10 @@ impl Config {
         };
 
         let headers: Vec<(String, String)> = p.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        // AI-NOTE: V2 default — was "explicit" before 2026-04-10. All non-Nemotron models got wrong
+        //   prompt causing 30pp gap (81% vs 95%). V2 is annotation-driven, explicit was numbered tree.
         let prompt_mode = p.prompt_mode.clone().unwrap_or_else(|| "v2".into());
+        // AI-NOTE: temp 0.05 / planning 0.15 — Nemotron-tuned. Was 0.2/0.4, all models tested worse.
         let temperature = p.temperature.or(self.defaults.temperature).unwrap_or(0.05);
         let planning_temperature = p.planning_temperature.or(self.defaults.planning_temperature).unwrap_or(0.15);
 

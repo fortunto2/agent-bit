@@ -22,9 +22,15 @@ const LEDGER_MAX: usize = 25;
 /// Returns a subset of `all_defs` appropriate for the current routing state.
 fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> Vec<ToolDef> {
     match task_type {
+        // AI-NOTE: security allows read/search (not just answer) — t29 OTP needs read docs/channels + otp.txt
         "security" => all_defs
             .into_iter()
-            .filter(|t| t.name == "answer")
+            .filter(|t| {
+                matches!(
+                    t.name.as_str(),
+                    "read" | "search" | "find" | "list" | "answer"
+                )
+            })
             .collect(),
         // "search" → read-only on step 0, full toolkit after (safety net if misclassified)
         "search" if step == 0 => all_defs

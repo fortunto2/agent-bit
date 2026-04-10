@@ -139,6 +139,16 @@ WORKFLOW:
 - Wrong skill selected → adjust `triggers` or `keywords` in frontmatter
 - Need new skill → create `skills/{name}/SKILL.md` + add to `COMPILED_SKILLS` in `src/skills.rs`
 
+### AI-NOTE Convention (MANDATORY)
+
+Every behavioral code change MUST have `# AI-NOTE:` comment explaining WHY and which task it fixes.
+Before modifying a file: `grep -r "# AI-" file` to check existing notes. Never remove AI-NOTEs without understanding why they exist.
+
+Format: `# AI-NOTE: <what was changed> — <task> <reason>`
+Example: `# AI-NOTE: security allows read — t29 OTP needs read docs/channels + otp.txt`
+
+After fixing a task, verify with `grep "AI-NOTE" src/` that the note exists.
+
 ### Architecture Decision Guide
 
 Before ANY fix, check these in order:
