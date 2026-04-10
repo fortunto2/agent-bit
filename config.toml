@@ -84,14 +84,14 @@ planning_temperature = 0.2
 use_chat_api = true
 prompt_cache_key = "pac1-v1"
 
-[providers.qwen3-235b]
-model = "Qwen/Qwen3-235B-A22B"
+[providers.qwen3]
+model = "Qwen/Qwen3-235B-A22B-Instruct-2507"
 base_url = "https://api.deepinfra.com/v1/openai"
 api_key = "REDACTED_DEEPINFRA_KEY"
 temperature = 0.1
 use_chat_api = true
 prompt_cache_key = "pac1-v1"
-reasoning_effort = "none"
+reasoning_effort = "none"  # $0.071/$0.10 per 1M, 262K context
 
 [providers.nemotron-v2]
 model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
