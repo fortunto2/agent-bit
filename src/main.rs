@@ -308,7 +308,7 @@ async fn main() -> Result<()> {
             };
             write_trial_metrics(
                 &dump_dir, &model, score, steps, tool_calls,
-                agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), &[],
+                agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), &[], &history,
             );
 
             res.lock().await.push((task_id, score));
@@ -417,7 +417,7 @@ async fn run_leaderboard(
         write_trial_metrics(
             &dump_dir, model, score as f32, steps, tool_calls,
             agent_elapsed.as_secs_f64(), total_elapsed_final.as_secs_f64(),
-            &result.score_detail,
+            &result.score_detail, &history,
         );
         // Score-gated learning: only learn from confirmed correct answers
         if score >= 1.0 {
@@ -439,11 +439,14 @@ async fn run_leaderboard(
     Ok(())
 }
 
-/// Write unified metrics + score to dump dir. Used by both single-task and parallel modes.
+/// Write unified metrics + score + run log to dump dir. Used by both single-task and parallel modes.
 fn write_trial_metrics(
     dump_dir: &str, model: &str, score: f32, steps: usize, tool_calls: usize,
-    agent_secs: f64, total_secs: f64, score_detail: &[String],
+    agent_secs: f64, total_secs: f64, score_detail: &[String], history: &str,
 ) {
+    // Always log to stderr what we're writing
+    eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Steps: {} | Tools: {}",
+        agent_secs, total_secs, steps, tool_calls);
     let _ = std::fs::write(format!("{}/metrics.txt", dump_dir), format!(
         "model: {}\nscore: {:.2}\nsteps: {}\ntool_calls: {}\nagent_secs: {:.1}\ntotal_secs: {:.1}\n",
         model, score, steps, tool_calls, agent_secs, total_secs,
@@ -465,6 +468,10 @@ fn write_trial_metrics(
             for d in score_detail { writeln!(f, "detail: {}", d)?; }
             Ok(())
         });
+    // Save full agent history as run.log
+    if !history.is_empty() {
+        let _ = std::fs::write(format!("{}/run.log", dump_dir), history);
+    }
     eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Steps: {} | Tools: {}",
         agent_secs, total_secs, steps, tool_calls);
 }
