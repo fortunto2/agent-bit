@@ -193,17 +193,28 @@ fn run_app() -> io::Result<()> {
 
     let data = load_task_data();
 
-    // Extract unique model names (ordered by frequency)
-    let mut model_counts: HashMap<String, usize> = HashMap::new();
-    for td in data.values() {
-        for t in &td.trials {
-            if !t.model.is_empty() {
-                *model_counts.entry(t.model.clone()).or_default() += 1;
-            }
+    // AI-NOTE: show only finalist models (matching config.toml providers)
+    // Filter by keyword match — models in dumps have full names like "nemotron-3-120b-a12b"
+    let finalist_keywords = ["nemotron", "Seed", "gpt-5", "Kimi-K2"];
+    let all_dump_models: Vec<String> = data.values()
+        .flat_map(|td| td.trials.iter().map(|t| t.model.clone()))
+        .filter(|m| !m.is_empty())
+        .collect();
+
+    let mut models: Vec<String> = Vec::new();
+    for kw in &finalist_keywords {
+        if let Some(m) = all_dump_models.iter().find(|m| m.contains(kw)) {
+            if !models.contains(m) { models.push(m.clone()); }
         }
     }
-    let mut models: Vec<String> = model_counts.keys().cloned().collect();
-    models.sort_by(|a, b| model_counts[b].cmp(&model_counts[a]));
+    if models.is_empty() {
+        // Fallback: top 4 by frequency
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for m in &all_dump_models { *counts.entry(m.clone()).or_default() += 1; }
+        let mut sorted: Vec<_> = counts.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        models = sorted.into_iter().take(4).map(|(k, _)| k).collect();
+    }
     if models.is_empty() { models.push("?".into()); }
 
     let max_trials = data.values().map(|d| d.trials.len()).max().unwrap_or(0);
@@ -225,7 +236,7 @@ fn run_app() -> io::Result<()> {
 
             let left = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(2), Constraint::Min(5), Constraint::Length(2)])
+                .constraints([Constraint::Length(2), Constraint::Min(5), Constraint::Length(8), Constraint::Length(2)])
                 .split(main[0]);
 
             // ── Header with metrics ──
@@ -271,16 +282,15 @@ fn run_app() -> io::Result<()> {
                         let is_col = is_sel && mi == trial_select.min(models.len().saturating_sub(1));
                         let (ch, fg, bg) = match latest {
                             Some(t) if t.score >= 1.0 => {
-                                if is_col { ("█", Color::Black, Color::Green) }
-                                else { ("█", Color::Green, Color::Reset) }
+                                if is_col { (" ✓ ", Color::Black, Color::Green) }
+                                else { (" ✓ ", Color::Green, Color::Reset) }
                             }
                             Some(t) if t.score >= 0.0 => {
-                                if is_col { ("█", Color::Black, Color::Red) }
-                                else { ("█", Color::Red, Color::Reset) }
+                                if is_col { (" ✗ ", Color::Black, Color::Red) }
+                                else { (" ✗ ", Color::Red, Color::Reset) }
                             }
                             _ => {
-                                if is_col { ("·", Color::Black, Color::Yellow) }
-                                else { ("·", Color::DarkGray, Color::Reset) }
+                                (" · ", Color::DarkGray, Color::Reset)
                             }
                         };
                         cells.push(Cell::from(ch).style(Style::default().fg(fg).bg(bg)));
@@ -305,18 +315,39 @@ fn run_app() -> io::Result<()> {
                 .row_highlight_style(Style::default());
             f.render_stateful_widget(table, left[1], &mut table_state);
 
-            // ── Status bar with model + metrics ──
+            // ── History panel: all runs of selected model on selected task ──
             let sel_model = models.get(trial_select.min(models.len().saturating_sub(1))).cloned().unwrap_or_default();
+            let history_lines: Vec<Line> = data.get(task_id)
+                .map(|td| td.trials.iter()
+                    .filter(|t| t.model == sel_model)
+                    .map(|t| {
+                        let status = if t.score >= 1.0 { "✓" } else { "✗" };
+                        let color = if t.score >= 1.0 { Color::Green } else { Color::Red };
+                        Line::from(vec![
+                            Span::styled(format!(" {} ", status), Style::default().fg(color)),
+                            Span::styled(format!("{:.0}s {}st {}tc ", t.agent_secs, t.steps, t.tool_calls), Style::default().fg(Color::White)),
+                            Span::styled(&t.trial_id[..t.trial_id.len().min(20)], Style::default().fg(Color::DarkGray)),
+                        ])
+                    })
+                    .collect())
+                .unwrap_or_default();
+            let history_widget = Paragraph::new(history_lines)
+                .block(Block::default().borders(Borders::TOP).title(
+                    Span::styled(format!(" {} history ", sel_model), Style::default().fg(Color::Cyan))
+                ));
+            f.render_widget(history_widget, left[2]);
+
+            // ── Status bar ──
             let trial_info = data.get(task_id)
                 .and_then(|td| td.trials.iter().find(|t| t.model == sel_model))
-                .map(|t| format!("{} | score={:.2} {:.0}s {}steps {}tools",
+                .map(|t| format!("{} | {:.2} {:.0}s {}steps {}tools",
                     t.model, t.score, t.agent_secs, t.steps, t.tool_calls))
                 .unwrap_or_else(|| format!("{} | no data", sel_model));
             let status = Paragraph::new(Line::from(vec![
                 Span::styled(format!(" {} ", task_id), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::styled(trial_info, Style::default().fg(Color::Cyan)),
             ]));
-            f.render_widget(status, left[2]);
+            f.render_widget(status, left[3]);
 
             // ── RIGHT: Log viewer ──
             // Build ALL lines (not sliced) — let Paragraph.scroll() handle offset
