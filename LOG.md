@@ -4,8 +4,8 @@
 
 PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF Workers AI).
 
-**Текущий best:** 93.0% (40/43) Nemotron | **Цель:** 98%+
-**Стабильные:** 33/43 | **Fixed:** 10 | **Non-det:** 4 (t07, t23, t36, t37) | **Persistent fail:** 0
+**Текущий best:** **95.3% (41/43)** Nemotron | **Цель:** 98%+
+**Стабильные:** 35/43 | **Fixed:** 11 | **Non-det:** 2 (t03, t07) | **Persistent fail:** 0
 **Cerebras Qwen3:** schema fix applied — works but prompt needs tuning
 
 ### Архитектура (что есть)
@@ -63,6 +63,7 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF
 | 04-09 | `e782bdd` | nemotron | **93.0%** (40/43) | t02, t03, t37 — prev record |
 | 04-10 | `2a7d040` | nemotron | 86.0% (37/43) | t12, t13, t14, t23, t25, t41 — cross-account fix v1 |
 | 04-10 | `2fe9772` | nemotron | **90.5%** (38/42) | t07, t31, t36, t37 — prompt fix + cross-account fix v2 |
+| 04-10 | `7728246` | nemotron | **95.3%** (41/43) | t03, t07 — credential fix + NEW RECORD |
 
 ---
 
