@@ -26,8 +26,32 @@ const TASK_IDS: &[&str] = &[
     "t41","t42","t43",
 ];
 
-struct Trial { trial_id: String, score: f32, detail: String }
+struct Trial {
+    trial_id: String,
+    model: String,
+    score: f32,
+    steps: usize,
+    tool_calls: usize,
+    agent_secs: f32,
+    detail: String,
+}
 struct TaskData { trials: Vec<Trial> }
+
+fn parse_metrics(path: &std::path::Path) -> (String, f32, usize, usize, f32) {
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let get = |key: &str| -> String {
+        content.lines().find(|l| l.starts_with(key))
+            .map(|l| l[key.len()..].trim().to_string())
+            .unwrap_or_default()
+    };
+    (
+        get("model: "),
+        get("score: ").parse().unwrap_or(-1.0),
+        get("steps: ").parse().unwrap_or(0),
+        get("tool_calls: ").parse().unwrap_or(0),
+        get("agent_secs: ").parse().unwrap_or(0.0),
+    )
+}
 
 fn load_task_data() -> HashMap<String, TaskData> {
     let mut data: HashMap<String, TaskData> = HashMap::new();
@@ -39,14 +63,38 @@ fn load_task_data() -> HashMap<String, TaskData> {
         let mut trials = Vec::new();
         let Ok(entries) = std::fs::read_dir(&task_dir) else { continue };
         let mut dirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
-        dirs.sort_by_key(|e| e.file_name());
+        // Sort newest first (reverse alphabetical works for timestamped + trial IDs)
+        dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
         for entry in dirs {
             let trial_id = entry.file_name().to_string_lossy().to_string();
-            let (score, detail) = if let Ok(c) = std::fs::read_to_string(entry.path().join("score.txt")) {
+            let metrics_path = entry.path().join("metrics.txt");
+            let pipeline_path = entry.path().join("pipeline.txt");
+
+            // Prefer metrics.txt, fallback to pipeline.txt, then score.txt
+            let (model, score, steps, tool_calls, agent_secs, detail) = if metrics_path.exists() {
+                let (m, s, st, tc, secs) = parse_metrics(&metrics_path);
+                let det = std::fs::read_to_string(entry.path().join("score.txt"))
+                    .ok().map(|c| c.lines().skip(1).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+                (m, s, st, tc, secs, det)
+            } else if pipeline_path.exists() {
+                let (m, s, st, tc, secs) = parse_metrics(&pipeline_path);
+                (m, s, st, tc, secs, String::new())
+            } else if let Ok(c) = std::fs::read_to_string(entry.path().join("score.txt")) {
                 let mut l = c.lines();
-                (l.next().and_then(|s| s.parse().ok()).unwrap_or(-1.0), l.collect::<Vec<_>>().join("\n"))
-            } else { (-1.0, String::new()) };
-            trials.push(Trial { trial_id, score, detail });
+                let s = l.next().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
+                (String::new(), s, 0, 0, 0.0, l.collect::<Vec<_>>().join("\n"))
+            } else {
+                continue; // skip dirs without any result files
+            };
+
+            // Extract model short name from trial_id (e.g. "Seed-2.0-pro_vm-xxx" → "Seed-2.0-pro")
+            let model_short = if !model.is_empty() {
+                model.rsplit('/').next().unwrap_or(&model).to_string()
+            } else {
+                trial_id.split("_vm-").next().unwrap_or(&trial_id).to_string()
+            };
+
+            trials.push(Trial { trial_id, model: model_short, score, steps, tool_calls, agent_secs, detail });
         }
         if !trials.is_empty() { data.insert(tid.to_string(), TaskData { trials }); }
     }
@@ -226,11 +274,18 @@ fn run_app() -> io::Result<()> {
                 .row_highlight_style(Style::default());
             f.render_stateful_widget(table, left[1], &mut table_state);
 
-            // ── Status bar ──
+            // ── Status bar with model + metrics ──
             let n_trials = data.get(task_id).map(|d| d.trials.len()).unwrap_or(0);
+            let trial_info = data.get(task_id)
+                .and_then(|td| td.trials.get(trial_select.min(td.trials.len().saturating_sub(1))))
+                .map(|t| format!("{} | {:.0}s {}steps {}tools",
+                    if t.model.is_empty() { "?" } else { &t.model },
+                    t.agent_secs, t.steps, t.tool_calls))
+                .unwrap_or_default();
             let status = Paragraph::new(Line::from(vec![
                 Span::styled(format!(" {} ", task_id), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("trial {}/{} ", trial_select.min(n_trials) + 1, n_trials), Style::default().fg(Color::White)),
+                Span::styled(format!("{}/{} ", trial_select.min(n_trials) + 1, n_trials), Style::default().fg(Color::White)),
+                Span::styled(trial_info, Style::default().fg(Color::Cyan)),
             ]));
             f.render_widget(status, left[2]);
 
