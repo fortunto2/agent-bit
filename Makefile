@@ -47,6 +47,35 @@ full:
 	RUST_LOG=warn cargo run -- --provider $(PROVIDER) --parallel $(or $(P),3) 2>&1 | tee -a "$$LOGFILE"; \
 	echo "Log: $$LOGFILE"
 
+# Analyze: show all failures for a model from dump dirs
+# Usage: make failures M=Seed  or  make failures M=nemotron
+failures:
+	@echo "=== Failures for $(or $(M),nemotron) ===" && \
+	for t in $$(ls benchmarks/tasks/ | sort -V); do \
+		d=$$(ls -t "benchmarks/tasks/$$t/" 2>/dev/null | grep "$(or $(M),nemotron)" | head -1); \
+		if [ -n "$$d" ]; then \
+			sc=$$(grep "^score:" "benchmarks/tasks/$$t/$$d/pipeline.txt" 2>/dev/null | awk '{print $$2}'); \
+			[ "$$sc" = "0.00" ] && echo "$$t: $$(grep 'detail:' benchmarks/tasks/$$t/$$d/pipeline.txt 2>/dev/null | head -3)"; \
+		fi; \
+	done
+
+# Compare models side-by-side on recent runs
+compare:
+	@echo "Task       Nemotron  Seed      GPT-5.4" && echo "----       --------  ----      -------" && \
+	for t in $$(ls benchmarks/tasks/ | sort -V); do \
+		nem=""; seed=""; gpt=""; \
+		for m in nemotron Seed gpt-5.4; do \
+			d=$$(ls -t "benchmarks/tasks/$$t/" 2>/dev/null | grep "$$m" | head -1); \
+			[ -n "$$d" ] && sc=$$(grep "^score:" "benchmarks/tasks/$$t/$$d/metrics.txt" 2>/dev/null | awk '{print $$2}'); \
+			case $$m in nemotron) nem="$${sc:--}";; Seed) seed="$${sc:--}";; gpt-5.4) gpt="$${sc:--}";; esac; \
+		done; \
+		printf "%-10s %-9s %-9s %s\n" "$$t" "$$nem" "$$seed" "$$gpt"; \
+	done
+
+# List all AI-NOTEs in codebase
+ai-notes:
+	@grep -rn "AI-NOTE" src/ config.toml skills/ 2>/dev/null | grep -v ".log\|Binary"
+
 # Revert failed evolve hypothesis
 revert:
 	bash .claude/skills/evolve/scripts/revert.sh
