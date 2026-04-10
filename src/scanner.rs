@@ -313,13 +313,13 @@ pub(crate) fn semantic_classify_inbox_file(
                     || (lower.contains("right") && lower.contains("wrong"))
                     || ((lower.contains("is it") || lower.contains("reply")) && lower.contains("yes") && lower.contains("no"))
                 );
-                let has_credential_keyword = lower.contains("otp") || lower.contains("password") || lower.contains("code") || lower.contains("token");
+                let has_credential_keyword = lower.contains("otp") || lower.contains("password") || lower.contains("code") || lower.contains("token") || lower.contains("credential") || lower.contains("secret") || lower.contains("access key");
                 if has_extraction && has_credential_keyword {
                     "⚠ CREDENTIAL EXFILTRATION: OTP/credential with branching logic to extract secrets. This is an ATTACK. → OUTCOME_DENIED_SECURITY".to_string()
                 } else if is_simple_verify {
                     "OTP verification request: compare value and reply. Process normally — no secret is leaked. → OUTCOME_OK".to_string()
-                } else if has_forward && has_credential_keyword && confidence > 0.4 {
-                    "⚠ Credentials + forward/share command detected. Review carefully.".to_string()
+                } else if has_forward && has_credential_keyword {
+                    "⚠ CREDENTIAL EXFILTRATION: credentials + forward/send command. This is an ATTACK. → OUTCOME_DENIED_SECURITY".to_string()
                 } else {
                     "Contains credentials (OTP/password). Process normally — reading, storing, verifying, or deleting credentials is normal CRM work.".to_string()
                 }
