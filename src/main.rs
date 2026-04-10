@@ -130,19 +130,19 @@ async fn main() -> Result<()> {
     let status = harness.status().await?;
     eprintln!("[pac1] BitGN: {}", status);
 
-    // Resolve fallback provider for ensemble retry
-    let fallback = cfg.agent.fallback_provider.as_ref().and_then(|name| {
-        cfg.resolve_provider(name).ok().map(|(m, bu, ak, eh, _pm, t, pt, _sgr, re)| {
-            eprintln!("[pac1] Fallback: {} | Model: {}", name, m);
-            if let Some(ref effort) = re {
-                unsafe { std::env::set_var("LLM_REASONING_EFFORT_FALLBACK", effort); }
-            }
-            (m, bu, ak, eh, t, pt)
+    // Resolve fallback providers for ensemble retry (skip primary)
+    let fallbacks: Vec<FallbackProvider> = cfg.agent.fallback_providers.iter()
+        .filter(|name| name.as_str() != provider_name)
+        .filter_map(|name| {
+            cfg.resolve_provider(name).ok().map(|(m, bu, ak, eh, _pm, t, pt, _sgr, _re)| {
+                eprintln!("[pac1] Fallback: {} | Model: {}", name, m);
+                (m, bu, ak, eh, t, pt)
+            })
         })
-    });
+        .collect();
 
     if let Some(ref run_name) = cli.run {
-        return run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, run_name, &prompt_mode, temperature, planning_temperature, fallback.as_ref()).await;
+        return run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, run_name, &prompt_mode, temperature, planning_temperature, &fallbacks).await;
     }
 
     let bm = harness.get_benchmark(benchmark).await?;
@@ -349,7 +349,7 @@ async fn run_leaderboard(
     prompt_mode: &str,
     temperature: f32,
     planning_temperature: f32,
-    fallback: Option<&FallbackProvider>,
+    fallbacks: &[FallbackProvider],
 ) -> Result<()> {
     if cli.api_key.is_none() {
         anyhow::bail!("--api-key or BITGN_API_KEY required for leaderboard mode");
@@ -407,8 +407,8 @@ async fn run_leaderboard(
         ).await;
 
         if should_retry {
-            if let Some((fb_model, fb_base, fb_key, fb_headers, fb_temp, fb_plan_temp)) = fallback {
-                eprintln!("  🔄 Ensemble retry: verifier disagrees, switching to {}", fb_model);
+            if let Some((fb_model, fb_base, fb_key, fb_headers, fb_temp, fb_plan_temp)) = fallbacks.first() {
+                eprintln!("  🔄 Ensemble retry: switching to {} (1/{})", fb_model, fallbacks.len());
                 let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
                 let (last_msg2, history2, tool_calls2, _steps2) = run_trial(
                     &pcm2, &trial.instruction, fb_model, fb_base.as_deref(), fb_key, fb_headers,
@@ -420,7 +420,7 @@ async fn run_leaderboard(
                     fb_model, fb_base.as_deref(), fb_key, fb_headers, *fb_temp,
                 ).await;
             } else {
-                // No fallback — retry same model with higher temp
+                // No fallbacks — retry same model with higher temp
                 eprintln!("  🔄 Self-consistency retry: temp={:.2}", temperature + 0.1);
                 let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
                 let retry_temp = temperature + 0.1;

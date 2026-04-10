@@ -26,9 +26,10 @@ pub struct AgentSection {
     pub max_steps: usize,
     #[serde(default = "default_benchmark")]
     pub benchmark: String,
-    /// Fallback provider for ensemble retry (when verifier disagrees).
+    /// Fallback providers for ensemble retry, in priority order.
+    /// Primary provider is auto-excluded from this list at runtime.
     #[serde(default)]
-    pub fallback_provider: Option<String>,
+    pub fallback_providers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
