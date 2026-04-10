@@ -86,22 +86,11 @@ use_chat_api = true
 prompt_cache_key = "pac1-v1"
 # $0.05/$0.20 per 1M, base K2
 
-[providers.seed18]
-model = "ByteDance/Seed-1.8"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-prompt_cache_key = "pac1-v1"
-# $0.03/$0.20 per 1M
+# AI-NOTE: rejected — seed18 (t01 fail), ds-turbo (t01 fail), mistral-med (t16 fail), hermes405 (no FC)
 
-[providers.ds-turbo]
-model = "deepseek-ai/DeepSeek-V3-0324-Turbo"
-base_url = "https://api.deepinfra.com/v1/openai"
-api_key_env = "DEEPINFRA_API_KEY"
-temperature = 0.1
-use_chat_api = true
-prompt_cache_key = "pac1-v1"
-# $0.10/$0.30 per 1M, turbo FC
+# AI-NOTE: llama405 rejected — "Tool calling is not supported"
 
-# AI-NOTE: mistral-med (probe ok, t16 fail), hermes405 (no FC endpoint) removed
+# AI-NOTE: qwen-next-80B — 5/10 sample, removed
+
+# AI-NOTE: rejected Qwen — qwen3-coder-480B (t01 fail), qwen35-35b (no user query error),
+#   qwen3-32b (probe ok, t16 fail), mixtral-22b (old), qwen-next-80b (5/10 sample)
