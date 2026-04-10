@@ -552,10 +552,19 @@ impl CrmGraph {
     /// Pre-computes norms for efficient cosine similarity (dot product on normalized vectors).
     pub fn compute_account_embeddings(&mut self, clf: &crate::scanner::SharedClassifier) {
         let sigs: Vec<(String, String)> = self.account_signatures();
-        if sigs.is_empty() { return; }
+        if sigs.is_empty() {
+            eprintln!("  ⚠ account_signatures empty — no embeddings");
+            return;
+        }
 
-        let Ok(mut guard) = clf.lock() else { return };
-        let Some(ref mut encoder) = *guard else { return };
+        let Ok(mut guard) = clf.lock() else {
+            eprintln!("  ⚠ classifier lock failed for embeddings");
+            return;
+        };
+        let Some(ref mut encoder) = *guard else {
+            eprintln!("  ⚠ classifier not initialized for embeddings");
+            return;
+        };
 
         for (name, sig) in &sigs {
             if let Ok(emb) = encoder.encode(sig) {
@@ -618,20 +627,20 @@ impl CrmGraph {
             .collect();
         eprintln!("  📊 Account similarity: [{}]", top3.join(", "));
 
-        // Find sender's own score and best non-sender score
+        // Find sender's own score
         let sender_sim = scores.iter()
             .find(|(n, _)| n.to_lowercase() == sender_lower)
             .map(|(_, s)| *s)
             .unwrap_or(0.0);
-        let best_other = scores.iter()
-            .find(|(n, _)| n.to_lowercase() != sender_lower);
+        let body_lower = body.to_lowercase();
 
-        if let Some((other_name, other_sim)) = best_other {
-            eprintln!("  📊 Cross-check: sender '{}' sim={:.3}, best other '{}' sim={:.3}",
-                sender_account, sender_sim, other_name, other_sim);
-            // Cross-account: embedding gap OR account name word-match in body
+        // Check ALL non-sender accounts: gap-based OR name-in-body
+        for (other_name, other_sim) in &scores {
+            if other_name.to_lowercase() == sender_lower { continue; }
             let gap = *other_sim - sender_sim;
-            let name_in_body = account_name_in_text(&other_name.to_lowercase(), &body.to_lowercase());
+            let name_in_body = account_name_in_text(&other_name.to_lowercase(), &body_lower);
+            eprintln!("  📊 Cross-check: '{}' sim={:.3} gap={:.3} name_in_body={}",
+                other_name, other_sim, gap, name_in_body);
             if *other_sim > 0.3 && (gap > 0.1 || (gap > 0.0 && name_in_body)) {
                 return Some((other_name.clone(), *other_sim));
             }

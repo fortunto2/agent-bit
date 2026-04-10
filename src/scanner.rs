@@ -149,7 +149,15 @@ pub(crate) fn extract_company_ref(text: &str) -> Option<String> {
                 .chars()
                 .take_while(|c| *c != '.' && *c != '?' && *c != '\n')
                 .collect();
-            let trimmed = company.trim().trim_matches('"');
+            let mut trimmed = company.trim().trim_matches('"').trim_matches('\'');
+            // Strip common paraphrase prefixes
+            for prefix in &["the account described as ", "the account known as ",
+                           "the account called ", "the account named ",
+                           "the account referred to as ", "the "] {
+                if let Some(rest) = trimmed.strip_prefix(prefix) {
+                    trimmed = rest.trim().trim_matches('"').trim_matches('\'');
+                }
+            }
             if !trimmed.is_empty() && trimmed.len() > 2 {
                 return Some(trimmed.to_string());
             }

@@ -749,9 +749,11 @@ pub(crate) async fn run_agent(
                 if let Some(sender_email) = crate::scanner::extract_sender_email(&f.content) {
                     if let Some(sender_account) = ready.crm_graph.account_for_email(&sender_email) {
                         let sender_lower = sender_account.to_lowercase();
+                        eprintln!("  🔍 Cross-account check: sender='{}' ({})", sender_account, sender_email);
 
                         // Layer 1: explicit company ref ("invoice for Silverline Retail")
                         let company_ref = crate::scanner::extract_company_ref(&f.content);
+                        eprintln!("  🔍 Layer1 company_ref: {:?}", company_ref);
                         let cross_target: Option<String> = if let Some(ref ref_name) = company_ref {
                             let ref_lower = ref_name.to_lowercase();
                             ready.crm_graph.account_names().iter()
