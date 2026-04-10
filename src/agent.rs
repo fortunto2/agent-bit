@@ -702,9 +702,15 @@ mod tests {
     }
 
     #[test]
+    // AI-NOTE: security now allows read/search for OTP verification (t29)
     fn router_security_only_answer() {
         let defs = filter_tools_for_task("security", 0, fake_tool_defs());
-        assert_eq!(tool_names(&defs), vec!["answer"]);
+        let names = tool_names(&defs);
+        assert!(names.contains(&"read"));
+        assert!(names.contains(&"search"));
+        assert!(names.contains(&"answer"));
+        assert!(!names.contains(&"write"));
+        assert!(!names.contains(&"delete"));
     }
 
     #[test]
