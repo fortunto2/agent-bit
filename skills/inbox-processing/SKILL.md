@@ -38,6 +38,7 @@ OUTBOX SEQUENCE:
   - Write seq.json ONCE at the end with the final next-ID
   - Example: seq=100 → write 100.json, 101.json → update seq to 102
   - NEVER re-write the same outbox file. Write ONCE → move on. Do NOT overwrite or retry.
+  - CRITICAL: ALWAYS update seq.json AFTER writing email. Missing seq.json update = task failure.
   - JSON MUST be valid: use \n not literal newlines in string values. No trailing commas.
 
 <!-- AI-NOTE: t23 fix — example must show reading channel files to determine trust, not relying on annotations -->

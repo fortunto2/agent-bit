@@ -19,136 +19,9 @@ use crate::prompts;
 use crate::scanner::{self, SharedClassifier, SharedNliClassifier};
 use crate::tools;
 
-/// Extract person names mentioned in inbox content (From: display names + body mentions of CRM contacts).
-/// Returns Vec<(name, source_file)>.
-pub(crate) fn extract_mentioned_names(inbox_content: &str, crm: &crm_graph::CrmGraph) -> Vec<(String, String)> {
-    let mut results = Vec::new();
-    let mut current_file = String::new();
-
-    for line in inbox_content.lines() {
-        if line.starts_with("$ cat ") {
-            current_file = line.strip_prefix("$ cat ").unwrap_or("").to_string();
-            continue;
-        }
-        // Skip classification/annotation headers
-        if line.starts_with('[') { continue; }
-
-        // Extract From: display name via mailparse
-        let lower = line.to_lowercase();
-        if lower.starts_with("from:") {
-            let value = line[5..].trim();
-            if let Ok(addrs) = mailparse::addrparse(value) {
-                for addr in addrs.iter() {
-                    if let mailparse::MailAddr::Single(info) = addr {
-                        if let Some(ref dname) = info.display_name {
-                            let name = dname.trim().to_string();
-                            if name.split_whitespace().count() >= 2 {
-                                results.push((name, current_file.clone()));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Scan body for mentions of known CRM contact names
-    let known = crm.contact_names();
-    for contact_name in &known {
-        let cn_lower = contact_name.to_lowercase();
-        // Check each file section
-        let mut cur_file = String::new();
-        let mut in_body = false;
-        for line in inbox_content.lines() {
-            if line.starts_with("$ cat ") {
-                cur_file = line.strip_prefix("$ cat ").unwrap_or("").to_string();
-                in_body = false;
-                continue;
-            }
-            if line.starts_with('[') { continue; }
-            if line.to_lowercase().starts_with("from:") || line.to_lowercase().starts_with("to:")
-                || line.to_lowercase().starts_with("subject:") {
-                in_body = true;
-                continue;
-            }
-            if in_body && line.to_lowercase().contains(&cn_lower) {
-                // Capitalize properly — use the first word-capitalized form from name_index
-                let display = contact_name
-                    .split_whitespace()
-                    .map(|w| {
-                        let mut c = w.chars();
-                        match c.next() {
-                            None => String::new(),
-                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                results.push((display, cur_file.clone()));
-                break; // One match per contact per file is enough
-            }
-        }
-    }
-
-    // Deduplicate by (name_lower, file)
-    results.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()).then(a.1.cmp(&b.1)));
-    results.dedup_by(|a, b| a.0.to_lowercase() == b.0.to_lowercase() && a.1 == b.1);
-    results
-}
-
-/// Resolve contact ambiguity: for names with multiple CRM matches, pick best match.
-/// Uses sender domain for affiliation ranking.
-pub(crate) fn resolve_contact_hints(
-    names: &[(String, String)],
-    crm: &crm_graph::CrmGraph,
-    sender_domain: Option<&str>,
-) -> String {
-    let mut hints = String::new();
-
-    for (name, _source) in names {
-        let matches = crm.find_all_matching_contacts(name);
-        if matches.len() <= 1 {
-            continue; // No ambiguity
-        }
-
-        // Rank by sender domain affiliation: prefer contact whose account domain matches sender
-        let best = if let Some(sdomain) = sender_domain {
-            let sender_stem = scanner::domain_stem(sdomain);
-            matches.iter().find(|(contact_name, _)| {
-                if let Some(account) = crm.account_for_contact(contact_name) {
-                    let account_lower = account.to_lowercase();
-                    // Check if sender stem overlaps with account name
-                    let stem_words: Vec<&str> = sender_stem.split_whitespace().collect();
-                    let acct_words: Vec<&str> = account_lower.split_whitespace().collect();
-                    let overlap = stem_words.iter().filter(|w| acct_words.contains(w)).count();
-                    overlap > 0 && (overlap as f64 / stem_words.len() as f64) > 0.5
-                } else {
-                    false
-                }
-            }).or(matches.first())
-        } else {
-            matches.first()
-        };
-
-        if let Some((best_name, _)) = best {
-            let account = crm.account_for_contact(best_name)
-                .unwrap_or_else(|| "unknown".to_string());
-            let others: Vec<&str> = matches.iter()
-                .filter(|(n, _)| n != best_name)
-                .map(|(n, _)| n.as_str())
-                .collect();
-            hints.push_str(&format!(
-                "RESOLVED: \"{}\" in this inbox = {} (account: {}). USE this contact, not: {}\n",
-                name, best_name, account, others.join(", ")
-            ));
-        }
-    }
-
-    hints
-}
-
-// read_inbox_files() removed — pipeline::Classified::scan_inbox() reads and classifies
-// inbox files in a single pass. Content reused from pipeline::Ready::inbox_files.
+// AI-NOTE: extract_mentioned_names + resolve_contact_hints moved to src/legacy.rs
+// They were part of CRM-specific pre-grounding (contact disambiguation).
+// Now agent resolves contacts via search — no pre-computed hints needed.
 
 /// Quick LLM intent classification — 1 function call when ML confidence is low.
 /// Returns None on error (structural fallback handles it).
@@ -200,6 +73,8 @@ async fn classify_intent_via_llm(
 
 /// Run a planning phase: read-only exploration → structured Plan.
 /// Returns None if planning fails or model doesn't call submit_plan.
+// AI-NOTE: run_planning_phase moved to src/legacy.rs — agent uses Phase 1 plan field instead.
+#[allow(dead_code)]
 pub(crate) async fn run_planning_phase(
     pcm: &Arc<pcm::PcmClient>,
     instruction: &str,
@@ -300,6 +175,8 @@ pub(crate) struct VerifiedOutcome {
     pub confidence: f64,
 }
 
+// AI-NOTE: run_outcome_verifier moved to src/legacy.rs — verifier removed (3 extra LLM calls).
+#[allow(dead_code)]
 /// Post-execution verifier: self-consistency via 3 parallel LLM calls + majority vote.
 /// AI-NOTE: RAG Challenge winner pattern — self-consistency reduces non-determinism.
 /// Falls back to proposed answer on any LLM error.
@@ -990,6 +867,7 @@ pub(crate) async fn run_agent(
 /// context for 4-way classification without overwhelming the verifier.
 /// EXCLUDES pre-grounding annotations ([CLASSIFICATION], [SENDER]) to avoid
 /// biasing the verifier toward DENIED_SECURITY on legitimate tasks.
+#[allow(dead_code)]
 pub(crate) fn build_execution_summary(history: &str, max_lines: usize) -> String {
     let relevant: Vec<&str> = history.lines()
         .filter(|l| {
@@ -1094,121 +972,5 @@ fn resolve_capture_folder(instruction: &str, tree: &str) -> Option<(String, Stri
     Some((source, capture_path, card_path))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_test_crm() -> crm_graph::CrmGraph {
-        let mut g = crm_graph::CrmGraph::new();
-        g.add_contact("John Smith", Some("john@acme.com"), Some("Acme Corp"));
-        g.add_contact("Jane Smith", Some("jane@other.com"), Some("Other Inc"));
-        g.add_contact("Bob Wilson", Some("bob@globex.com"), Some("Globex Inc"));
-        g.add_account("Acme Corp", Some("acme.com"));
-        g.add_account("Other Inc", Some("other.com"));
-        g.add_account("Globex Inc", Some("globex.com"));
-        g
-    }
-
-    #[test]
-    fn extract_names_from_header() {
-        let crm = make_test_crm();
-        let inbox = "$ cat inbox/msg1.md\n[CLASSIFICATION: clean (0.95)]\nFrom: John Smith <john@acme.com>\nSubject: Hello\n\nBody text here.";
-        let names = extract_mentioned_names(inbox, &crm);
-        assert!(names.iter().any(|(n, _)| n == "John Smith"), "Should extract From: display name");
-    }
-
-    #[test]
-    fn extract_names_from_body() {
-        let crm = make_test_crm();
-        let inbox = "$ cat inbox/msg1.md\n[CLASSIFICATION: clean (0.95)]\nFrom: someone@test.com\nSubject: Update\n\nPlease update Bob Wilson's phone number.";
-        let names = extract_mentioned_names(inbox, &crm);
-        assert!(names.iter().any(|(n, _)| n == "Bob Wilson"), "Should find CRM contact in body");
-    }
-
-    #[test]
-    fn extract_names_unknown_skipped() {
-        let crm = make_test_crm();
-        let inbox = "$ cat inbox/msg1.md\n[CLASSIFICATION: clean (0.95)]\nFrom: Unknown Person <unknown@test.com>\nSubject: Hi\n\nHello.";
-        let names = extract_mentioned_names(inbox, &crm);
-        assert!(names.iter().any(|(n, _)| n == "Unknown Person"));
-    }
-
-    #[test]
-    fn extract_names_no_names() {
-        let crm = make_test_crm();
-        let inbox = "$ cat inbox/msg1.md\n[CLASSIFICATION: clean (0.95)]\nFrom: test@test.com\nSubject: Hi\n\nNo names here.";
-        let names = extract_mentioned_names(inbox, &crm);
-        assert!(names.is_empty(), "No display name in From, no CRM names in body");
-    }
-
-    #[test]
-    fn resolve_hints_no_ambiguity() {
-        let crm = make_test_crm();
-        let names = vec![("Bob Wilson".to_string(), "inbox/msg.md".to_string())];
-        let hints = resolve_contact_hints(&names, &crm, None);
-        assert!(hints.is_empty(), "Single match = no hint needed");
-    }
-
-    #[test]
-    fn resolve_hints_ambiguous_ranked() {
-        let crm = make_test_crm();
-        let names = vec![("Smith".to_string(), "inbox/msg.md".to_string())];
-        let hints = resolve_contact_hints(&names, &crm, Some("acme.com"));
-        assert!(!hints.is_empty(), "Two Smiths = hint needed");
-        assert!(hints.contains("RESOLVED:"), "Directive format: {}", hints);
-        assert!(hints.contains("john smith") || hints.contains("John Smith"),
-            "Should prefer John Smith from Acme Corp. Got: {}", hints);
-        assert!(hints.contains("USE this contact"), "Must contain USE directive. Got: {}", hints);
-    }
-
-    #[test]
-    fn resolve_hints_no_match() {
-        let crm = make_test_crm();
-        let names = vec![("Totally Unknown".to_string(), "inbox/msg.md".to_string())];
-        let hints = resolve_contact_hints(&names, &crm, None);
-        assert!(hints.is_empty(), "No matches = no hint");
-    }
-
-    // ─── Verifier schema tests ──────────────────────────────────────────
-
-    #[test]
-    fn verify_outcome_schema_has_required_fields() {
-        let schema = prompts::verify_outcome_tool_def();
-        let func = &schema["function"];
-        assert_eq!(func["name"].as_str().unwrap(), "verify_outcome");
-        let props = &func["parameters"]["properties"];
-        assert!(props["outcome"].is_object());
-        assert!(props["reason"].is_object());
-        assert!(props["confidence"].is_object());
-        let required: Vec<&str> = func["parameters"]["required"]
-            .as_array().unwrap().iter()
-            .map(|v| v.as_str().unwrap()).collect();
-        assert!(required.contains(&"outcome"));
-        assert!(required.contains(&"reason"));
-        assert!(required.contains(&"confidence"));
-    }
-
-    #[test]
-    fn verify_outcome_schema_has_enum() {
-        let schema = prompts::verify_outcome_tool_def();
-        let outcomes: Vec<&str> = schema["function"]["parameters"]["properties"]["outcome"]["enum"]
-            .as_array().unwrap().iter()
-            .map(|v| v.as_str().unwrap()).collect();
-        assert_eq!(outcomes, vec![
-            "OUTCOME_OK", "OUTCOME_DENIED_SECURITY",
-            "OUTCOME_NONE_UNSUPPORTED", "OUTCOME_NONE_CLARIFICATION",
-        ]);
-    }
-
-    #[test]
-    fn verified_outcome_struct_clone() {
-        let v = VerifiedOutcome {
-            outcome: "OUTCOME_OK".to_string(),
-            reason: "Task completed".to_string(),
-            confidence: 0.95,
-        };
-        let v2 = v.clone();
-        assert_eq!(v2.outcome, "OUTCOME_OK");
-        assert_eq!(v2.confidence, 0.95);
-    }
-}
+// AI-NOTE: tests for extract_mentioned_names, resolve_contact_hints, verifier schema
+// moved to src/legacy.rs with their functions.
