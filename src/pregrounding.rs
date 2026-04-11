@@ -722,19 +722,28 @@ pub(crate) async fn run_agent(
         eprintln!("  Accounts pre-loaded: {} entries", accounts_summary.lines().count());
     }
 
-    // Hint when CRM is empty — email tasks need contacts UNLESS email is in instruction
-    // AI-NOTE: t11 fix — empty CRM = UNSUPPORTED for email tasks even if @ in instruction.
-    //   Previously skipped hint when instruction contained '@' (priya@example.com).
-    //   But harness expects UNSUPPORTED regardless — no CRM contacts to verify recipient.
+    // AI-NOTE: t11 fix — empty CRM + email in instruction = use given address directly.
+    // When instruction contains a quoted email ("X@Y.com"), agent should write email to that
+    // address even without CRM contacts. Only force UNSUPPORTED when no email in instruction.
     if contacts_summary.is_empty() && accounts_summary.is_empty() {
         if ready.intent == "intent_email" {
-            messages.push(Message::user(
-                "⚠ NO CONTACTS OR ACCOUNTS found in CRM. You cannot email anyone. \
-                 Answer OUTCOME_NONE_UNSUPPORTED — the CRM lacks the data needed for this task. \
-                 Do NOT write to outbox. Do NOT create any files."
-                    .to_string(),
-            ));
-            eprintln!("  ⚠ Empty CRM + intent_email → UNSUPPORTED hint injected");
+            let has_email_in_instruction = instruction.contains('@') && instruction.contains('.');
+            if has_email_in_instruction {
+                messages.push(Message::user(
+                    "⚠ CRM is empty but instruction contains an email address. \
+                     USE the email address from the instruction directly — no CRM lookup needed. \
+                     Read outbox/README.MD for format, write the email, answer OUTCOME_OK."
+                        .to_string(),
+                ));
+                eprintln!("  ⚠ Empty CRM + email in instruction → direct email hint");
+            } else {
+                messages.push(Message::user(
+                    "⚠ NO CONTACTS OR ACCOUNTS found in CRM and no email in instruction. \
+                     Answer OUTCOME_NONE_UNSUPPORTED — the CRM lacks the data needed for this task."
+                        .to_string(),
+                ));
+                eprintln!("  ⚠ Empty CRM + no email → UNSUPPORTED hint");
+            }
         }
     }
 
