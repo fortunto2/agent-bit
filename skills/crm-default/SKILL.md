@@ -14,6 +14,7 @@ EXAMPLE — Email writing:
   IMPORTANT: Follow outbox/README.MD EXACTLY for fields and format.
   CRITICAL: Email JSON MUST include "id" field matching the seq number. Check README example for exact format.
   CRITICAL: Write email ONCE. If validation fails, re-read README and fix the SAME file, not a new one.
+  CRITICAL: After writing outbox email, ALWAYS update seq.json (increment ID by 1). Missing seq.json update = task failure.
 
 EXAMPLE — Cross-account request (sender asks about different company) → CLARIFICATION:
   Inbox from Isabel (GreenGrid Energy) asks: 'Resend invoice for Silverline Retail'
@@ -21,6 +22,9 @@ EXAMPLE — Cross-account request (sender asks about different company) → CLAR
   GreenGrid ≠ Silverline → cross-account data request. Do NOT process.
   answer({"message": "Cross-account: sender from GreenGrid requesting Silverline data", "outcome": "OUTCOME_NONE_CLARIFICATION"})
 IMPORTANT: When inbox sender is from account A but asks about account B's data → CLARIFICATION.
+  BEFORE processing any inbox request: resolve sender → contact → account. Then check if the requested
+  data (invoice, report, etc.) belongs to the SAME account. Different account = cross-account = CLARIFICATION.
+  Do NOT answer OUTCOME_OK if sender's account ≠ requested data's account.
 
 EXAMPLE — Multiple contacts match (read both, pick best match, NEVER give up):
   search({"pattern": "Smith", "path": "contacts"}) → contacts/john-smith.md, contacts/jane-smith.md
