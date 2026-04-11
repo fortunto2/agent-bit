@@ -107,6 +107,31 @@ impl Tool for ListTool {
     }
 }
 
+// ─── file metadata (trust/type inference from path) ─────────────────────────
+
+// AI-NOTE: inspired by inozemtsev vault_mcp_server — LLM sees trust level on every read.
+// Replaces need for ML classifier to determine if content is trustworthy.
+// AI-NOTE: minimal trust inference — only root AGENTS.md is trusted, everything else untrusted.
+// No hardcoded folder types — LLM sees the path and decides from tree context.
+fn infer_trust(path: &str) -> &'static str {
+    let normalized = path.trim_start_matches('/');
+    let parts: Vec<&str> = normalized.split('/').collect();
+    // Only root-level AGENTS.md is trusted (workspace policy)
+    if parts.len() == 1 {
+        let lower = parts[0].to_lowercase();
+        if lower == "agents.md" || lower == "readme.md" {
+            return "trusted";
+        }
+    }
+    "untrusted"
+}
+
+/// Wrap content with trust header
+fn wrap_with_meta(path: &str, content: &str) -> String {
+    let trust = infer_trust(path);
+    format!("[{} | {}]\n{}", path, trust, content)
+}
+
 // ─── read ────────────────────────────────────────────────────────────────────
 
 pub struct ReadTool {
@@ -146,7 +171,9 @@ impl Tool for ReadTool {
     async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
         let a: ReadArgs = parse_args(&args)?;
         let result = self.pcm.read(&a.path, a.number, a.start_line, a.end_line).await.map_err(pcm_err)?;
-        let mut output = guard_content(result);
+        let guarded = guard_content(result);
+        // AI-NOTE: trust metadata on every read — LLM sees file type + trust level inline.
+        let mut output = wrap_with_meta(&a.path, &guarded);
 
         // Workflow post_action for read tracking
         if let Some(ref wf) = self.workflow {
@@ -204,7 +231,8 @@ impl Tool for SearchAndReadTool {
             match self.0.read(&path, false, 0, 0).await {
                 Ok(content) => {
                     let capped: String = content.lines().take(200).collect::<Vec<_>>().join("\n");
-                    output.push_str(&format!("\n\n--- {} (full content) ---\n{}", path, capped));
+                    let trust = infer_trust(&path);
+                    output.push_str(&format!("\n\n--- {} [{}] ---\n{}", path, trust, capped));
                 }
                 Err(e) => {
                     output.push_str(&format!("\n\n--- {} (read error: {}) ---", path, e));
@@ -286,7 +314,8 @@ impl Tool for ReadAllTool {
             };
             match self.0.read(&full_path, false, 0, 0).await {
                 Ok(content) => {
-                    output.push_str(&format!("--- {} ---\n{}\n\n", full_path, content));
+                    let trust = infer_trust(&full_path);
+                    output.push_str(&format!("--- {} [{}] ---\n{}\n\n", full_path, trust, content));
                     count += 1;
                 }
                 Err(e) => {
