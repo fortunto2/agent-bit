@@ -175,13 +175,14 @@ impl CrmGraph {
                 name = line.strip_prefix("# ").unwrap_or("").trim().to_string();
             } else if lower.starts_with("name:") {
                 name = line.splitn(2, ':').last().unwrap_or("").trim().to_string();
-            } else if lower.starts_with("email:") || lower.starts_with("e-mail:")
-                || lower.contains("contact_email:") || lower.contains("email:") {
-                // AI-NOTE: prod uses "primary_contact_email:" in markdown entities
+            } else if email.is_none() && lower.contains("email") {
+                // AI-NOTE: universal email extraction — any line with "email" + @ address
+                // Handles: "email:", "primary_contact_email:", "- email: `x@y`", etc.
                 let val = line.splitn(2, ':').last().unwrap_or("").trim()
-                    .trim_matches('`').trim().to_string();
+                    .trim_matches('`').trim_matches('"').trim().to_string();
                 if val.contains('@') { email = Some(val); }
-            } else if lower.starts_with("company:") || lower.starts_with("account:") || lower.starts_with("organization:") {
+            } else if lower.starts_with("company:") || lower.starts_with("account:") || lower.starts_with("organization:")
+                || lower.contains("relationship:") {
                 company = line.splitn(2, ':').last().map(|s| s.trim().to_string());
             }
         }
