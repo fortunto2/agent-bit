@@ -1,9 +1,9 @@
 ---
 name: capture-distill
 description: Capture from inbox into folders, create distill cards, update threads, delete source
-triggers: [intent_inbox]
+triggers: [intent_inbox, intent_delete]
 priority: 15
-keywords: [capture, distill, card, thread]
+keywords: [capture, distill, card, thread, delete, remove, clean, clear, discard]
 ---
 
 WORKFLOW (strict order — do NOT skip steps):
@@ -34,3 +34,21 @@ CRITICAL RULES:
   - After reading a file, write IMMEDIATELY. Do NOT re-read — you already have the content.
   - You MUST write ALL 3 files: capture + card + thread. Missing ANY = task failure.
   - If you read the inbox content, you have ALL data needed. No re-reads, just write.
+
+---
+
+DELETE/CLEANUP WORKFLOW (when task is delete-only, NOT capture):
+  1. Search to identify target files
+  2. Read each candidate to CONFIRM it's the right file
+  3. Delete ONLY the confirmed targets
+  4. Do NOT create, write, or modify any files
+
+EXAMPLE — Delete with search:
+  search({"pattern": "keyword", "path": "contacts"}) → contacts/alice.md
+  read({"path": "contacts/alice.md"}) → [confirm this is the target]
+  delete({"path": "contacts/alice.md"})
+  answer({"message": "Deleted contacts/alice.md", "outcome": "OUTCOME_OK", "refs": ["contacts/alice.md"]})
+
+CRITICAL: DELETE tasks = search + read + delete ONLY. Do NOT write or create files.
+  - "Discard" means delete the file. Just call delete() directly.
+  - Skip templates (_card-template.md) and README files.

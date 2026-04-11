@@ -1,6 +1,6 @@
 ---
 name: crm-lookup
-description: CRM data queries — find contacts, lookup emails, count entries, search channels
+description: Data queries — find contacts, lookup emails, count entries, search channels
 triggers: [intent_query]
 priority: 10
 ---
@@ -10,7 +10,7 @@ WORKFLOW:
   2. Read the found file to extract the answer
   3. Include file path in refs when calling answer()
 
-EXAMPLE — CRM lookup:
+EXAMPLE — Data lookup:
   search({"pattern": "Smith", "path": "contacts"}) → contacts/john-smith.md:3:John Smith
   read({"path": "contacts/john-smith.md"}) → John Smith <john@acme.com>
   answer({"message": "Found contact John Smith", "outcome": "OUTCOME_OK", "refs": ["contacts/john-smith.md"]})

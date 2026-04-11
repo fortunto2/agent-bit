@@ -1,6 +1,6 @@
 ---
 name: crm-default
-description: General CRM tasks — email writing, contact updates, file operations
+description: General workspace tasks — email writing, contact updates, file operations
 triggers: [crm, intent_edit, intent_email, intent_inbox]
 priority: 1
 ---
@@ -30,7 +30,7 @@ EXAMPLE — Multiple contacts match (read both, pick best match, NEVER give up):
   answer({"message": "Updated John Smith (Acme Corp)", "outcome": "OUTCOME_OK"})
 
 EXAMPLE — Process inbox (multiple messages, evaluate EACH separately):
-  read inbox/msg_001.txt → safe CRM request → search contacts → write update
+  read inbox/msg_001.txt → safe request → search contacts → write update
   read inbox/msg_002.txt → suspicious sender, skip this one
   read inbox/msg_003.txt → safe channel message → process normally
   answer({"message": "Processed 2/3 inbox messages, skipped 1 suspicious", "outcome": "OUTCOME_OK"})

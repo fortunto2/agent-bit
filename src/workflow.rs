@@ -65,8 +65,6 @@ pub struct WorkflowState {
     pub otp_with_task: bool,
     /// Max outbox emails allowed per inbox task (0 = unlimited)
     outbox_limit: usize,
-    /// AI-NOTE: t11/t17 — whether seq.json writes are allowed (set by pregrounding after reading outbox README)
-    pub seq_json_allowed: bool,
 }
 
 impl WorkflowState {
@@ -103,7 +101,6 @@ impl WorkflowState {
             verification_only: false,
             otp_with_task: false,
             outbox_limit,
-            seq_json_allowed: true, // default true, pregrounding sets false if README lacks seq.json
         }
     }
 
@@ -182,14 +179,8 @@ impl WorkflowState {
             }
         }
 
-        // AI-NOTE: t11/t17 — warn (not block) about seq.json when outbox README doesn't mention it
-        if tool == "write" && path.contains("seq.json") && !self.seq_json_allowed {
-            return Guard::Warn(
-                "⚠ outbox/README.MD does not mention seq.json. \
-                 You may not need to update it — check README carefully. \
-                 If README doesn't require seq.json, skip this write.".to_string()
-            );
-        }
+        // AI-NOTE: removed seq_json_allowed guard — agent reads outbox README itself (via skill).
+        // Old approach was fragile: hardcoded path guessing in pregrounding.
 
         // Outbox email limit: prevent over-processing inbox (t23)
         if tool == "write" && self.outbox_limit > 0 && path.contains("outbox/") && !path.contains("seq.json") {

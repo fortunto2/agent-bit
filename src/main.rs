@@ -665,7 +665,10 @@ async fn verify_and_submit(
             // No proposed answer — agent didn't call answer(). Use guess_outcome heuristic.
             // Verifier is not used here: its value is in correcting a wrong outcome code,
             // not in guessing from scratch (CRM content confuses it — e.g. articles about "injection").
-            let text = if last_msg.is_empty() { "Unable to determine answer" } else { last_msg };
+            // AI-NOTE: prefer found data over "Unable to determine". Scan history for last read result.
+            let text = if last_msg.is_empty() {
+                extract_last_finding(history).unwrap_or("Task processed")
+            } else { last_msg };
             let outcome = guess_outcome(text, history);
             eprintln!("  ⚠ Auto-answer [{}]: {}", outcome, &text[..text.len().min(100)]);
             let _ = pcm.answer(text, outcome, &[]).await;
@@ -756,6 +759,28 @@ fn guess_outcome(last_msg: &str, history: &str) -> &'static str {
     }
 
     "OUTCOME_OK"
+}
+
+/// Extract last meaningful finding from agent history (when agent found data but didn't answer).
+/// Scans backwards for read/search results that contain actual data.
+fn extract_last_finding(history: &str) -> Option<&str> {
+    for line in history.lines().rev() {
+        let trimmed = line.trim();
+        // Skip empty, tool metadata, and system lines
+        if trimmed.is_empty() || trimmed.starts_with("$ ") || trimmed.starts_with('[') {
+            continue;
+        }
+        // Skip obvious non-data lines
+        if trimmed.starts_with("Written to") || trimmed.starts_with("Deleted")
+            || trimmed.starts_with("Created") || trimmed.starts_with("Moved") {
+            continue;
+        }
+        // Found a substantive line — likely data from a read
+        if trimmed.len() > 10 {
+            return Some(trimmed);
+        }
+    }
+    None
 }
 
 /// Audit the adaptive outcome store: report stats, find duplicates, prune noise.

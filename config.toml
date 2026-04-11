@@ -29,7 +29,7 @@
 #   ❌ Hermes-4-405B (OpenRouter) — no FC endpoint support
 
 [agent]
-max_steps = 20
+max_steps = 14
 benchmark = "bitgn/pac1-dev"
 fallback_providers = ["seed2", "openai-full"]  # ensemble: primary → fallbacks in order, skip self
 

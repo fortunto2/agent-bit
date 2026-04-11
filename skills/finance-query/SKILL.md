@@ -6,7 +6,7 @@ priority: 12
 keywords: [total, spend, revenue, how much, sum, balance, cost breakdown]
 ---
 
-<!-- AI-NOTE: pac1-prod "Finance ops" category — answer money questions from CRM data -->
+<!-- AI-NOTE: pac1-prod "Finance ops" category — answer money questions from workspace data -->
 WORKFLOW:
   1. Identify what financial data is needed (invoices, bills, amounts, dates, totals)
   2. Search relevant directories: my-invoices/, accounts/, or any finance-related folders
