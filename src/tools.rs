@@ -918,6 +918,13 @@ impl Tool for AnswerTool {
 
         // Auto-refs: merge LLM-provided refs with recent reads for complete coverage.
         // Also follow account_id references: contact file → account file
+        // AI-NOTE: strip leading '/' from refs and message — prod harness expects relative paths.
+        //   GPT-5.4 generates "/50_finance/..." but harness wants "50_finance/...".
+        let a = AnswerArgs {
+            message: a.message.replace(" /", " ").trim_start_matches('/').to_string(),
+            outcome: a.outcome,
+            refs: a.refs.iter().map(|r| r.trim_start_matches('/').to_string()).collect(),
+        };
         let refs = {
             let reads = self.pcm.recent_read_paths();
             let mut merged: Vec<String> = a.refs.clone();
