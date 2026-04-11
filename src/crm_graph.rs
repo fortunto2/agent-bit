@@ -175,8 +175,12 @@ impl CrmGraph {
                 name = line.strip_prefix("# ").unwrap_or("").trim().to_string();
             } else if lower.starts_with("name:") {
                 name = line.splitn(2, ':').last().unwrap_or("").trim().to_string();
-            } else if lower.starts_with("email:") || lower.starts_with("e-mail:") {
-                email = line.splitn(2, ':').last().map(|s| s.trim().to_string());
+            } else if lower.starts_with("email:") || lower.starts_with("e-mail:")
+                || lower.contains("contact_email:") || lower.contains("email:") {
+                // AI-NOTE: prod uses "primary_contact_email:" in markdown entities
+                let val = line.splitn(2, ':').last().unwrap_or("").trim()
+                    .trim_matches('`').trim().to_string();
+                if val.contains('@') { email = Some(val); }
             } else if lower.starts_with("company:") || lower.starts_with("account:") || lower.starts_with("organization:") {
                 company = line.splitn(2, ':').last().map(|s| s.trim().to_string());
             }
