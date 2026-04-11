@@ -87,6 +87,10 @@ struct Cli {
     /// Audit outcome store: report stats, find duplicates, prune noise
     #[arg(long)]
     audit_store: bool,
+
+    /// Probe: test if model supports function calling (run once per new model)
+    #[arg(long)]
+    probe: bool,
 }
 
 /// Standard mode: concise prompt for strong models (GPT-5, etc.)
@@ -156,6 +160,49 @@ async fn main() -> Result<()> {
                 println!("{}: {}", t.task_id, t.preview);
             } else {
                 println!("{}: {} | hint: {}", t.task_id, t.preview, t.hint);
+            }
+        }
+        return Ok(());
+    }
+
+    // AI-NOTE: FC probe — run once per new model via `make probe` or `--probe`
+    if cli.probe {
+        eprintln!("[pac1] FC probe: testing model {} for function calling support...", model);
+        let config = pregrounding::make_llm_config(
+            &model, base_url.as_deref(), &llm_api_key,
+            &extra_headers, temperature,
+        );
+        let llm = sgr_agent::llm::Llm::new(&config);
+        let probe_tool = sgr_agent::tool::ToolDef {
+            name: "analyze".into(),
+            description: "Analyze task and return structured plan".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "task_type": { "type": "string", "enum": ["search", "edit", "delete", "analyze"] },
+                    "plan": { "type": "array", "items": { "type": "string" } },
+                    "security": { "type": "string", "enum": ["safe", "blocked"] },
+                    "done": { "type": "boolean" },
+                    "confidence": { "type": "number" }
+                },
+                "required": ["task_type", "plan", "security", "done", "confidence"],
+                "additionalProperties": false
+            }),
+        };
+        let msgs = vec![sgr_agent::Message::system("You are a workspace agent. Analyze: 'list all contacts'. Call the analyze tool.")];
+        match llm.tools_call_stateful(&msgs, &[probe_tool], None).await {
+            Ok((calls, _)) if calls.is_empty() => {
+                eprintln!("  ❌ FAIL: 0 tool calls. Model cannot handle structured CoT.");
+                std::process::exit(1);
+            }
+            Ok((calls, _)) => {
+                let has_type = calls[0].arguments.get("task_type").is_some();
+                let has_plan = calls[0].arguments.get("plan").is_some();
+                eprintln!("  ✅ PASS: task_type={}, plan={}", has_type, has_plan);
+            }
+            Err(e) => {
+                eprintln!("  ❌ ERROR: {:#}", e);
+                std::process::exit(1);
             }
         }
         return Ok(());
@@ -429,12 +476,20 @@ async fn run_leaderboard(
         let (last_msg, history, tool_calls, steps) = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir)).await;
         let agent_elapsed = t0.elapsed();
 
-        let should_retry = check_verifier_agreement(
-            &pcm, &trial.instruction, &last_msg, &history, tool_calls,
-            &model, base_url.as_deref(), &llm_api_key, &extra_headers, temperature,
-        ).await;
+        // AI-NOTE: verifier + ensemble retry removed. Agent's answer is final.
+        // Old: check_verifier_agreement → retry on fallback → verify_and_submit.
+        // New: direct submit. Saves 3+ LLM calls per trial.
+        {
+            // Just submit directly
+            verify_and_submit(
+                &pcm, &trial.instruction, &last_msg, &history, tool_calls,
+                &model, base_url.as_deref(), &llm_api_key, &extra_headers, temperature,
+            ).await;
+        }
 
-        if should_retry {
+        // Ensemble retry preserved but without verifier gate — only on explicit failure
+        if false {
+            // Placeholder: can re-enable retry on specific conditions (e.g., 0 tool calls)
             if let Some((fb_model, fb_base, fb_key, fb_headers, fb_temp, fb_plan_temp)) = fallbacks.first() {
                 eprintln!("  🔄 Ensemble retry: switching to {} (1/{})", fb_model, fallbacks.len());
                 let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
@@ -448,7 +503,6 @@ async fn run_leaderboard(
                     fb_model, fb_base.as_deref(), fb_key, fb_headers, *fb_temp,
                 ).await;
             } else {
-                eprintln!("  🔄 Self-consistency retry: temp={:.2}", temperature + 0.1);
                 let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
                 let retry_temp = temperature + 0.1;
                 let (last_msg2, history2, tool_calls2, _steps2) = run_trial(&pcm2, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir)).await;
@@ -561,48 +615,8 @@ async fn run_trial(
     }
 }
 
-/// Check if verifier agrees with proposed answer (without submitting).
-/// Returns true if retry recommended (verifier disagrees with high confidence).
-#[allow(clippy::too_many_arguments)]
-async fn check_verifier_agreement(
-    pcm: &Arc<pcm::PcmClient>,
-    instruction: &str,
-    _last_msg: &str,
-    history: &str,
-    tool_call_count: usize,
-    model: &str,
-    base_url: Option<&str>,
-    api_key: &str,
-    extra_headers: &[(String, String)],
-    temperature: f32,
-) -> bool {
-    let execution_summary = pregrounding::build_execution_summary(history, 15);
-    let proposed = pcm.get_proposed_answer();
-    let Some(ref p) = proposed else { return false };
-
-    let verified = pregrounding::run_outcome_verifier(
-        model, base_url, api_key, extra_headers, temperature,
-        instruction, &execution_summary, &p.outcome, &p.message,
-    ).await;
-
-    let Some(ref v) = verified else { return false };
-
-    // If override policy would change outcome → retry instead
-    if let Some(_) = apply_override_policy(&p.outcome, &v.outcome, v.confidence, tool_call_count) {
-        eprintln!("  🔍 Verifier wants override {} → {} (conf={:.2}) — will retry",
-            p.outcome, v.outcome, v.confidence);
-        return true;
-    }
-
-    // If verifier disagrees with high confidence → retry
-    if v.outcome != p.outcome && v.confidence >= 0.85 {
-        eprintln!("  🔍 Verifier disagrees: {} vs {} (conf={:.2}) — will retry",
-            p.outcome, v.outcome, v.confidence);
-        return true;
-    }
-
-    false
-}
+// AI-NOTE: check_verifier_agreement removed — verifier eliminated (3 LLM calls per trial).
+// Agent's answer is final. No retry based on verifier disagreement.
 
 /// Post-execution verification and submission.
 /// 1. If agent proposed an answer → verify with LLM → apply override policy → submit
@@ -625,41 +639,10 @@ async fn verify_and_submit(
 
     match proposed {
         Some(ref p) => {
-            // Agent proposed an answer — verify it
-            let verified = pregrounding::run_outcome_verifier(
-                model, base_url, api_key, extra_headers, temperature,
-                instruction, &execution_summary, &p.outcome, &p.message,
-            ).await;
-
-            match verified {
-                Some(ref v) => {
-                    match apply_override_policy(&p.outcome, &v.outcome, v.confidence, tool_call_count) {
-                        Some(ref override_outcome) => {
-                            eprintln!("  🔍 Verifier: OVERRIDE {} → {} (conf={:.2}) — {}",
-                                p.outcome, override_outcome, v.confidence, v.reason);
-                            let _ = pcm.submit_proposed(Some(override_outcome)).await;
-                        }
-                        None if v.outcome == p.outcome => {
-                            eprintln!("  🔍 Verifier: agree (conf={:.2}) — {}", v.confidence, v.reason);
-                            let _ = pcm.submit_proposed(None).await;
-                        }
-                        None => {
-                            let reason = if p.outcome == "OUTCOME_DENIED_SECURITY" {
-                                "security after investigation — never overridden"
-                            } else {
-                                "low confidence"
-                            };
-                            eprintln!("  🔍 Verifier: disagree but keep proposed ({}) — {} (conf={:.2})",
-                                reason, v.reason, v.confidence);
-                            let _ = pcm.submit_proposed(None).await;
-                        }
-                    }
-                }
-                None => {
-                    eprintln!("  🔍 Verifier: fallback to proposed (LLM error)");
-                    let _ = pcm.submit_proposed(None).await;
-                }
-            }
+            // AI-NOTE: verifier removed — was 3 extra LLM calls per trial.
+            // Agent's own answer is final. Competitors (Codex) don't verify.
+            eprintln!("  ✅ Submit: {} — {}", p.outcome, &p.message[..p.message.len().min(100)]);
+            let _ = pcm.submit_proposed(None).await;
         }
         None => {
             // No proposed answer — agent didn't call answer(). Use guess_outcome heuristic.

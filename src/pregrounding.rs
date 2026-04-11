@@ -646,50 +646,7 @@ pub(crate) async fn run_agent(
     let config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
     let llm = Llm::new(&config);
 
-    // Probe: verify model supports tool_choice + complex function calling schema
-    {
-        use sgr_agent::tool::ToolDef;
-        let probe_tool = ToolDef {
-            name: "analyze".into(),
-            description: "Analyze task and return structured plan".into(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "task_type": { "type": "string", "enum": ["search", "edit", "delete", "analyze"] },
-                    "plan": { "type": "array", "items": { "type": "string" } },
-                    "security": { "type": "string", "enum": ["safe", "blocked"] },
-                    "done": { "type": "boolean" },
-                    "confidence": { "type": "number" }
-                },
-                "required": ["task_type", "plan", "security", "done", "confidence"],
-                "additionalProperties": false
-            }),
-        };
-        let probe_msgs = vec![Message::system("You are a CRM agent. Analyze: 'list all contacts'. Call the analyze tool.")];
-        match llm.tools_call(&probe_msgs, &[probe_tool]).await {
-            Ok(calls) if calls.is_empty() => {
-                eprintln!("  ❌ Model {} returned 0 tool calls on FC probe (complex schema)", model);
-                eprintln!("     Model cannot handle structured CoT. Use: Nemotron (CF), GPT-5.4, MiniMax M2.5");
-                anyhow::bail!("Model {} failed FC probe — 0 tool calls with complex schema", model);
-            }
-            Ok(calls) => {
-                let has_type = calls[0].arguments.get("task_type").is_some();
-                let has_plan = calls[0].arguments.get("plan").is_some();
-                if has_type && has_plan {
-                    eprintln!("  ✅ FC probe passed (complex schema)");
-                } else {
-                    eprintln!("  ⚠ FC probe: tool called but missing fields (task_type={}, plan={})", has_type, has_plan);
-                }
-            }
-            Err(e) => {
-                let msg = format!("{:#}", e);
-                if msg.contains("400") || msg.contains("422") || msg.contains("not support") {
-                    anyhow::bail!("❌ Model {} does NOT support function calling. Error: {}", model, msg);
-                }
-                eprintln!("  ⚠ FC probe error (non-fatal): {}", msg);
-            }
-        }
-    }
+    // AI-NOTE: FC probe moved to --probe CLI flag (not per-trial). Use `make probe` to test new models.
 
     // AI-NOTE: agents_md + skill_body moved from system prompt to user messages — enables
     //   server-side prompt prefix caching (DeepInfra auto-cache, OpenAI 93% hit).
@@ -709,19 +666,22 @@ pub(crate) async fn run_agent(
     // feature matrix, contact resolution, channel stats, OTP hints (all handled by skills now).
     // Kept: inbox with ML classification headers (security advantage over raw injection).
 
-    // Feature matrix: batch-score inbox for threat probability (sigmoid gate)
-    let empty_channel_trust = crate::policy::ChannelTrust::new();
-    let inbox_scores = if !ready.inbox_files.is_empty() {
-        let fm = crate::feature_matrix::InboxFeatureMatrix::from_inbox_files(
-            &ready.inbox_files, &ready.crm_graph, shared_clf, &empty_channel_trust,
-        );
-        let scores = fm.score_all(&crate::feature_matrix::threat_weights());
-        fm.log_summary();
-        eprintln!("  📊 Threat scores: {:?}", scores.iter().map(|s| format!("{:.2}", s)).collect::<Vec<_>>());
-        Some(scores)
-    } else {
-        None
-    };
+    // AI-NOTE: Feature matrix disabled for A/B comparison experiment — testing without threat scores
+    // // Feature matrix: batch-score inbox for threat probability (sigmoid gate)
+    // let empty_channel_trust = crate::policy::ChannelTrust::new();
+    // let inbox_scores = if !ready.inbox_files.is_empty() {
+    //     let fm = crate::feature_matrix::InboxFeatureMatrix::from_inbox_files(
+    //         &ready.inbox_files, &ready.crm_graph, shared_clf, &empty_channel_trust,
+    //     );
+    //     let scores = fm.score_all(&crate::feature_matrix::threat_weights());
+    //     fm.log_summary();
+    //     eprintln!("  📊 Threat scores: {:?}", scores.iter().map(|s| format!("{:.2}", s)).collect::<Vec<_>>());
+    //     Some(scores)
+    // } else {
+    //     None
+    // };
+    #[allow(unused)]
+    let inbox_scores: Option<Vec<f32>> = None;
 
     // Inject inbox content with ML classification + feature matrix threat score
     let mut has_otp = false;
@@ -732,12 +692,10 @@ pub(crate) async fn run_agent(
             let sender_trust = f.security.sender.as_ref()
                 .map(|s| format!("{}", s.trust))
                 .unwrap_or_else(|| "UNKNOWN".to_string());
-            let threat = inbox_scores.as_ref().map(|s| s[fi]).unwrap_or(0.0);
-            let threat_label = if threat > 0.7 { "HIGH" } else if threat > 0.4 { "MEDIUM" } else { "LOW" };
-            // ML classification + feature matrix threat score
+            // AI-NOTE: threat score removed for A/B experiment — testing without feature matrix
             inbox_content.push_str(&format!(
-                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | threat: {} ({:.0}%) | {}]\n",
-                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, threat_label, threat * 100.0, f.security.recommendation
+                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | {}]\n",
+                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, f.security.recommendation
             ));
             // Sender trust annotations (from pipeline security assessment)
             if f.security.sender.as_ref().is_some_and(|s| s.domain_match == "mismatch") {

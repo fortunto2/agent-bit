@@ -93,6 +93,9 @@ evolve-fails:
 	bash scripts/evolve-all.sh --provider $(PROVIDER) --tasks "t03 t08 t19 t23 t25 t29"
 
 # Pre-flight check: verify env, models, store before competition
+probe:
+	cargo run --release -- --provider $(or $(PROVIDER),nemotron) --probe
+
 preflight:
 	@echo "=== PAC1 Pre-flight Check ==="
 	@printf "Rust toolchain: " && rustc --version
