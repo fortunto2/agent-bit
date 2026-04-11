@@ -480,8 +480,13 @@ pub(crate) async fn run_agent(
             if trimmed.ends_with('/') {
                 let dir = trimmed.trim_end_matches('/');
                 if !dir.is_empty() {
-                    // AI-NOTE: t26 fix — case-sensitive FS: try README.md then README.MD
-                    let candidates = [format!("{}/README.md", dir), format!("{}/README.MD", dir)];
+                    // AI-NOTE: prod uses AGENTS.MD not README. Try AGENTS.MD first, then README variants.
+                    let candidates = [
+                        format!("{}/AGENTS.MD", dir),
+                        format!("{}/AGENTS.md", dir),
+                        format!("{}/README.md", dir),
+                        format!("{}/README.MD", dir),
+                    ];
                     for path in &candidates {
                         if let Ok(content) = pcm.read(path, false, 0, 0).await {
                             if !content.is_empty() {
