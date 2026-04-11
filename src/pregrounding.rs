@@ -545,20 +545,19 @@ pub(crate) async fn run_agent(
 
     // AI-NOTE: Feature matrix disabled for A/B comparison experiment — testing without threat scores
     // // Feature matrix: batch-score inbox for threat probability (sigmoid gate)
-    // let empty_channel_trust = crate::policy::ChannelTrust::new();
-    // let inbox_scores = if !ready.inbox_files.is_empty() {
-    //     let fm = crate::feature_matrix::InboxFeatureMatrix::from_inbox_files(
-    //         &ready.inbox_files, &ready.crm_graph, shared_clf, &empty_channel_trust,
-    //     );
-    //     let scores = fm.score_all(&crate::feature_matrix::threat_weights());
-    //     fm.log_summary();
-    //     eprintln!("  📊 Threat scores: {:?}", scores.iter().map(|s| format!("{:.2}", s)).collect::<Vec<_>>());
-    //     Some(scores)
-    // } else {
-    //     None
-    // };
-    #[allow(unused)]
-    let inbox_scores: Option<Vec<f32>> = None;
+    // Feature matrix: batch-score inbox for threat probability
+    let empty_channel_trust = crate::policy::ChannelTrust::new();
+    let inbox_scores = if !ready.inbox_files.is_empty() {
+        let fm = crate::feature_matrix::InboxFeatureMatrix::from_inbox_files(
+            &ready.inbox_files, &ready.crm_graph, shared_clf, &empty_channel_trust,
+        );
+        let scores = fm.score_all(&crate::feature_matrix::threat_weights());
+        fm.log_summary();
+        eprintln!("  📊 Threat scores: {:?}", scores.iter().map(|s| format!("{:.2}", s)).collect::<Vec<_>>());
+        Some(scores)
+    } else {
+        None
+    };
 
     // Inject inbox content with ML classification + feature matrix threat score
     let mut has_otp = false;
@@ -569,16 +568,30 @@ pub(crate) async fn run_agent(
             let sender_trust = f.security.sender.as_ref()
                 .map(|s| format!("{}", s.trust))
                 .unwrap_or_else(|| "UNKNOWN".to_string());
-            // AI-NOTE: threat score removed for A/B experiment — testing without feature matrix
+            let threat = inbox_scores.as_ref().map(|s| s[fi]).unwrap_or(0.0);
+            let threat_label = if threat > 0.7 { "HIGH" } else if threat > 0.4 { "MEDIUM" } else { "LOW" };
             inbox_content.push_str(&format!(
-                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | {}]\n",
-                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, f.security.recommendation
+                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | threat: {} ({:.0}%) | {}]\n",
+                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, threat_label, threat * 100.0, f.security.recommendation
             ));
             // Sender trust annotations (from pipeline security assessment)
             if f.security.sender.as_ref().is_some_and(|s| s.domain_match == "mismatch") {
                 inbox_content.push_str("[⚠ SENDER DOMAIN MISMATCH]\n");
             } else if f.security.sender.as_ref().is_some_and(|s| s.trust == crate::crm_graph::SenderTrust::Known) {
                 inbox_content.push_str("[✓ TRUSTED]\n");
+                // AI-NOTE: cross-account detection via ONNX embeddings (cosine similarity)
+                // Catches paraphrases: "Dutch banking client" → "Blue Harbor Bank"
+                if let Some(sender_email) = crate::scanner::extract_sender_email(&f.content) {
+                    if let Some(sender_account) = ready.crm_graph.account_for_email(&sender_email) {
+                        if let Some((target, sim)) = ready.crm_graph.detect_cross_account(&f.content, &sender_account, shared_clf) {
+                            inbox_content.push_str(&format!(
+                                "[⚠ CROSS-ACCOUNT: sender from '{}' requests data for '{}' (sim={:.2}) — verify authorization]\n",
+                                sender_account, target, sim
+                            ));
+                            eprintln!("  ⚠ Cross-account (ONNX): {} → {} (sim={:.2})", sender_account, target, sim);
+                        }
+                    }
+                }
             }
             inbox_content.push_str(&format!("{}\n\n", f.content));
             eprintln!("  📋 {}: {} ({:.2}) | sender: {}",

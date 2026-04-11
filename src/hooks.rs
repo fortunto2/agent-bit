@@ -50,6 +50,22 @@ pub fn from_agents_md(content: &str) -> HookRegistry {
         }
     }
 
+    // Built-in: outbox seq.json update after email write
+    // AI-NOTE: universal rule — any workspace with outbox/ needs seq.json bumped after email write.
+    // Activated when AGENTS.MD mentions outbox/seq/email. Hook → tool output.
+    {
+        let full_lower = content.to_lowercase();
+        if full_lower.contains("outbox") || full_lower.contains("seq.json") || full_lower.contains("email") {
+            registry.add(Hook {
+                tool: "write".into(),
+                path_contains: "outbox/".into(),
+                exclude: vec!["seq.json".into(), "readme".into()],
+                message: "NEXT: update outbox/seq.json (increment ID by 1).".into(),
+            });
+            eprintln!("  📎 Hook (built-in): outbox write → seq.json reminder");
+        }
+    }
+
     // Fallback: cards + threads pattern
     if registry.is_empty() {
         let lower = content.to_lowercase();
