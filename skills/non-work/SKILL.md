@@ -5,7 +5,7 @@ triggers: [non_work]
 priority: 5
 ---
 
-EXAMPLE — Non-workspace:
-  answer({"message": "Not workspace work", "outcome": "OUTCOME_NONE_CLARIFICATION"})
+If the task is truly unrelated (jokes, trivia, general knowledge) → OUTCOME_NONE_CLARIFICATION.
 
-NOTE: If the task mentions workspace data (contacts, channels, accounts) — it IS workspace work even if classified as non_work. Use crm-lookup or crm-default skill instead.
+BUT: if the task mentions workspace data (contacts, channels, accounts, files) — it IS workspace work.
+In that case, ignore this skill and proceed normally with search/read/answer.
