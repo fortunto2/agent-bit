@@ -3,7 +3,7 @@ name: finance-query
 description: Answer practical money questions — bills, invoices, spend, revenue, dates, totals
 triggers: [intent_query]
 priority: 12
-keywords: [invoice, total, spend, revenue, amount, bill, payment, cost, price, sum, how much, balance]
+keywords: [total, spend, revenue, how much, sum, balance, cost breakdown]
 ---
 
 <!-- AI-NOTE: pac1-prod "Finance ops" category — answer money questions from CRM data -->
