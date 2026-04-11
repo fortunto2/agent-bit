@@ -30,7 +30,7 @@
 
 [agent]
 max_steps = 20
-benchmark = "bitgn/pac1-prod"
+benchmark = "bitgn/pac1-dev"
 fallback_providers = ["seed2", "openai-full"]  # ensemble: primary → fallbacks in order, skip self
 
 [defaults]
@@ -67,7 +67,7 @@ model = "ByteDance/Seed-2.0-pro"
 base_url = "https://api.deepinfra.com/v1/openai"
 api_key_env = "DEEPINFRA_API_KEY"
 use_chat_api = true
-reasoning_effort = "low"  # Phase 1 uses this, Phase 2 auto-forces "none"
+reasoning_effort = "none"  # Phase 1 uses this, Phase 2 auto-forces "none"
 
 [providers.kimi-k2]
 model = "moonshotai/Kimi-K2-Instruct"
