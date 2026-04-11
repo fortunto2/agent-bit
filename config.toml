@@ -30,7 +30,7 @@
 
 [agent]
 max_steps = 20
-benchmark = "bitgn/pac1-dev"
+benchmark = "bitgn/pac1-prod"
 fallback_providers = ["seed2", "openai-full"]  # ensemble: primary → fallbacks in order, skip self
 
 [defaults]
