@@ -27,7 +27,7 @@ task:
 	RUNDIR="benchmarks/tasks/$(T)/$(PROVIDER)_$$STAMP"; \
 	mkdir -p "$$RUNDIR"; \
 	echo "=== $(T) | $(PROVIDER) | $$(date) ===" | tee "$$RUNDIR/run.log"; \
-	DUMP_TRIAL="$$RUNDIR" RUST_LOG=warn cargo run -- --provider $(PROVIDER) --task $(T) 2>&1 | tee -a "$$RUNDIR/run.log"; \
+	DUMP_TRIAL="$$RUNDIR" RUST_LOG=warn cargo run --release -- --provider $(PROVIDER) --task $(T) 2>&1 | tee -a "$$RUNDIR/run.log"; \
 	echo "Run: $$RUNDIR"
 
 # 8-task quick sample with per-task logs
@@ -35,7 +35,7 @@ sample:
 	@for t in t01 t02 t03 t05 t09 t16 t18 t21; do \
 		mkdir -p benchmarks/tasks/$$t; \
 		LOGFILE="benchmarks/tasks/$$t/$(PROVIDER)_$$(date +%Y%m%d_%H%M%S).log"; \
-		(RUST_LOG=warn cargo run -- --provider $(PROVIDER) --task $$t 2>&1 | tee "$$LOGFILE" | grep "Score:" &); \
+		(RUST_LOG=warn cargo run --release -- --provider $(PROVIDER) --task $$t 2>&1 | tee "$$LOGFILE" | grep "Score:" &); \
 	done; wait
 
 # Parallel full run: make full P=3
@@ -44,7 +44,7 @@ full:
 	@mkdir -p benchmarks/runs
 	@LOGFILE="benchmarks/runs/$(PROVIDER)_$$(date +%Y%m%d_%H%M%S).log"; \
 	echo "=== Full benchmark | $(PROVIDER) | P=$(or $(P),3) | $$(date) ===" | tee "$$LOGFILE"; \
-	RUST_LOG=warn cargo run -- --provider $(PROVIDER) --parallel $(or $(P),3) 2>&1 | tee -a "$$LOGFILE"; \
+	RUST_LOG=warn cargo run --release -- --provider $(PROVIDER) --parallel $(or $(P),3) 2>&1 | tee -a "$$LOGFILE"; \
 	echo "Log: $$LOGFILE"
 
 # Analyze: show all failures for a model from dump dirs
