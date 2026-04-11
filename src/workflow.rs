@@ -182,11 +182,12 @@ impl WorkflowState {
             }
         }
 
-        // AI-NOTE: t11/t17 — block seq.json write when outbox README doesn't mention it
+        // AI-NOTE: t11/t17 — warn (not block) about seq.json when outbox README doesn't mention it
         if tool == "write" && path.contains("seq.json") && !self.seq_json_allowed {
-            return Guard::Block(
-                "⛔ seq.json write blocked — outbox/README.MD does not mention seq.json. \
-                 Just write the email file and call answer(OUTCOME_OK).".to_string()
+            return Guard::Warn(
+                "⚠ outbox/README.MD does not mention seq.json. \
+                 You may not need to update it — check README carefully. \
+                 If README doesn't require seq.json, skip this write.".to_string()
             );
         }
 

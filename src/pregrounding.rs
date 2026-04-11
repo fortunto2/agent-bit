@@ -722,27 +722,25 @@ pub(crate) async fn run_agent(
         eprintln!("  Accounts pre-loaded: {} entries", accounts_summary.lines().count());
     }
 
-    // AI-NOTE: t11 fix — empty CRM + email in instruction = use given address directly.
-    // When instruction contains a quoted email ("X@Y.com"), agent should write email to that
-    // address even without CRM contacts. Only force UNSUPPORTED when no email in instruction.
+    // AI-NOTE: t11 — empty CRM hints. Non-blocking: agent decides.
     if contacts_summary.is_empty() && accounts_summary.is_empty() {
         if ready.intent == "intent_email" {
             let has_email_in_instruction = instruction.contains('@') && instruction.contains('.');
             if has_email_in_instruction {
                 messages.push(Message::user(
-                    "⚠ CRM is empty but instruction contains an email address. \
-                     USE the email address from the instruction directly — no CRM lookup needed. \
-                     Read outbox/README.MD for format, write the email, answer OUTCOME_OK."
+                    "⚠ CRM has no contacts/accounts, but instruction contains an email address. \
+                     Consider using that address directly if it makes sense. \
+                     Otherwise, OUTCOME_NONE_UNSUPPORTED if you truly cannot complete the task."
                         .to_string(),
                 ));
-                eprintln!("  ⚠ Empty CRM + email in instruction → direct email hint");
+                eprintln!("  ⚠ Empty CRM + email in instruction → soft hint");
             } else {
                 messages.push(Message::user(
-                    "⚠ NO CONTACTS OR ACCOUNTS found in CRM and no email in instruction. \
-                     Answer OUTCOME_NONE_UNSUPPORTED — the CRM lacks the data needed for this task."
+                    "⚠ CRM has no contacts or accounts. If you need contact data to complete this task, \
+                     consider OUTCOME_NONE_UNSUPPORTED."
                         .to_string(),
                 ));
-                eprintln!("  ⚠ Empty CRM + no email → UNSUPPORTED hint");
+                eprintln!("  ⚠ Empty CRM + no email → soft UNSUPPORTED hint");
             }
         }
     }
