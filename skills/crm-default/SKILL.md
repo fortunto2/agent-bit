@@ -12,7 +12,8 @@ EXAMPLE — Email writing:
   write({"path": "outbox/seq.json", "content": "{\"id\": 101}"})
   answer({"message": "Email written", "outcome": "OUTCOME_OK"})
   IMPORTANT: Follow outbox/README.MD EXACTLY for fields and format.
-  IMPORTANT: Include ALL fields shown in README example. Add "id" matching the seq number.
+  CRITICAL: Email JSON MUST include "id" field matching the seq number. Missing id = task failure.
+  CRITICAL: Write email ONCE. If validation fails, do NOT retry with a new file — fix the SAME file.
 
 EXAMPLE — Cross-account request (sender asks about different company) → CLARIFICATION:
   Inbox from Isabel (GreenGrid Energy) asks: 'Resend invoice for Silverline Retail'
