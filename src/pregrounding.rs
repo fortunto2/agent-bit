@@ -1156,12 +1156,15 @@ pub(crate) async fn run_agent(
                     n
                 )));
             }
-        } else if n > 2 {
+        // AI-NOTE: inbox delete nudge for ALL inbox sizes (not just n>2).
+        //   Prod uses single-file inbox (00_inbox/000_next-task.md) — must delete after processing.
+        //   Previously only fired for n>2 → prod single-inbox tasks never got delete hint.
+        } else if n >= 1 {
             messages.push(Message::user(&format!(
-                "INBOX PROCESSING ({} messages already shown above — do NOT re-read them): \
-                 Act on each message directly from context. For each: search account → write/update → delete inbox file. \
+                "INBOX PROCESSING ({} message{} already shown above — do NOT re-read {}): \
+                 Act on each message directly from context. After processing: DELETE the inbox source file. \
                  Skip messages that need no CRM action.",
-                n
+                n, if n > 1 { "s" } else { "" }, if n > 1 { "them" } else { "it" }
             )));
         }
     }
