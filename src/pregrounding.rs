@@ -99,6 +99,37 @@ pub(crate) fn make_llm_config(
     }
 }
 
+/// Dump trial debug data to disk.
+fn dump_trial_data(
+    dump_dir: &str, tree_out: &str, agents_md: &str, crm_schema: &str,
+    ready: &crate::pipeline::Ready, model: &str, intent_confidence: f32,
+) {
+    let _ = std::fs::create_dir_all(dump_dir);
+    let _ = std::fs::write(format!("{dump_dir}/tree.txt"), tree_out);
+    if !agents_md.is_empty() { let _ = std::fs::write(format!("{dump_dir}/agents.md"), agents_md); }
+    if !crm_schema.is_empty() { let _ = std::fs::write(format!("{dump_dir}/crm_schema.txt"), crm_schema); }
+    let contacts = ready.crm_graph.contacts_summary();
+    if !contacts.is_empty() { let _ = std::fs::write(format!("{dump_dir}/contacts.txt"), &contacts); }
+    let accounts = ready.crm_graph.accounts_summary();
+    if !accounts.is_empty() { let _ = std::fs::write(format!("{dump_dir}/accounts.txt"), &accounts); }
+    for (i, f) in ready.inbox_files.iter().enumerate() {
+        let sender = f.security.sender.as_ref().map(|s| format!("{}", s.trust)).unwrap_or_default();
+        let _ = std::fs::write(
+            format!("{dump_dir}/inbox_{i:02}_{}.txt", f.path.replace('/', "_")),
+            format!("[{} ({:.2}) | sender: {sender} | {}]\n\n{}", f.security.ml_label, f.security.ml_conf, f.security.recommendation, f.content),
+        );
+    }
+    let per_inbox: Vec<String> = ready.inbox_files.iter().enumerate().map(|(i, f)| {
+        let sender = f.security.sender.as_ref().map(|s| format!("{}", s.trust)).unwrap_or_else(|| "?".into());
+        format!("  [{i}] {} ({:.2}) sender={sender} {}", f.security.ml_label, f.security.ml_conf, f.path)
+    }).collect();
+    let _ = std::fs::write(format!("{dump_dir}/pipeline.txt"), format!(
+        "model: {model}\ninstruction: {}\nintent: {} ({intent_confidence:.2})\nlabel: {}\ninbox_files: {}\ncrm_nodes: {}\n\nper_inbox:\n{}\n",
+        ready.instruction, ready.intent, ready.instruction_label, ready.inbox_files.len(), ready.crm_graph.node_count(), per_inbox.join("\n"),
+    ));
+    eprintln!("  📁 Trial data dumped to {dump_dir}");
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_agent(
     pcm: &Arc<pcm::PcmClient>,
@@ -225,64 +256,11 @@ pub(crate) async fn run_agent(
         }
     }
 
-    // AI-NOTE: dump_dir passed as argument (not env var) — safe for parallel execution.
-    //   Previously used DUMP_TRIAL env var which caused race conditions in parallel mode.
+    // Dump trial data for debugging
     let dump_dir_resolved = dump_dir.map(|s| s.to_string())
         .or_else(|| std::env::var("DUMP_TRIAL").ok());
-    if let Some(dump_dir) = dump_dir_resolved {
-        let _ = std::fs::create_dir_all(&dump_dir);
-        // Tree
-        let _ = std::fs::write(format!("{}/tree.txt", dump_dir), &tree_out);
-        // Agents.md
-        if !agents_md.is_empty() {
-            let _ = std::fs::write(format!("{}/agents.md", dump_dir), &agents_md);
-        }
-        // CRM schema
-        if !crm_schema.is_empty() {
-            let _ = std::fs::write(format!("{}/crm_schema.txt", dump_dir), &crm_schema);
-        }
-        // Contacts + accounts summary
-        let contacts = ready.crm_graph.contacts_summary();
-        if !contacts.is_empty() {
-            let _ = std::fs::write(format!("{}/contacts.txt", dump_dir), &contacts);
-        }
-        let accounts = ready.crm_graph.accounts_summary();
-        if !accounts.is_empty() {
-            let _ = std::fs::write(format!("{}/accounts.txt", dump_dir), &accounts);
-        }
-        // Inbox files (raw content + classification)
-        for (i, f) in ready.inbox_files.iter().enumerate() {
-            let sender = f.security.sender.as_ref().map(|s| format!("{}", s.trust)).unwrap_or_default();
-            let header = format!("[{} ({:.2}) | sender: {} | {}]\n\n",
-                f.security.ml_label, f.security.ml_conf, sender, f.security.recommendation);
-            let _ = std::fs::write(
-                format!("{}/inbox_{:02}_{}.txt", dump_dir, i, f.path.replace('/', "_")),
-                format!("{}{}", header, f.content),
-            );
-        }
-        // Pipeline context + diagnosis (what was classified, how)
-        let per_inbox: Vec<String> = ready.inbox_files.iter().enumerate().map(|(i, f)| {
-            let sender = f.security.sender.as_ref().map(|s| format!("{}", s.trust)).unwrap_or_else(|| "?".into());
-            format!("  [{}] {} ({:.2}) sender={} {}", i, f.security.ml_label, f.security.ml_conf, sender, f.path)
-        }).collect();
-        let _ = std::fs::write(format!("{}/pipeline.txt", dump_dir), format!(
-            "model: {}\n\
-             instruction: {}\n\
-             intent: {} ({:.2})\n\
-             label: {}\n\
-             inbox_files: {}\n\
-             crm_nodes: {}\n\
-             \n\
-             per_inbox:\n{}\n",
-            model,
-            ready.instruction,
-            ready.intent, intent_confidence,
-            ready.instruction_label,
-            ready.inbox_files.len(),
-            ready.crm_graph.node_count(),
-            per_inbox.join("\n"),
-        ));
-        eprintln!("  📁 Trial data dumped to {}", dump_dir);
+    if let Some(ref d) = dump_dir_resolved {
+        dump_trial_data(d, &tree_out, &agents_md, &crm_schema, &ready, model, intent_confidence);
     }
 
     // AI-NOTE: system prompt loaded from prompts/system.md at runtime (hot-reload, no rebuild).
