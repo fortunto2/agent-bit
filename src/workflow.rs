@@ -65,6 +65,8 @@ pub struct WorkflowState {
     pub otp_with_task: bool,
     /// Max outbox emails allowed per inbox task (0 = unlimited)
     outbox_limit: usize,
+    /// AI-NOTE: t11/t17 — whether seq.json writes are allowed (set by pregrounding after reading outbox README)
+    pub seq_json_allowed: bool,
 }
 
 impl WorkflowState {
@@ -101,6 +103,7 @@ impl WorkflowState {
             verification_only: false,
             otp_with_task: false,
             outbox_limit,
+            seq_json_allowed: true, // default true, pregrounding sets false if README lacks seq.json
         }
     }
 
@@ -177,6 +180,14 @@ impl WorkflowState {
                     path, reason, tool
                 ));
             }
+        }
+
+        // AI-NOTE: t11/t17 — block seq.json write when outbox README doesn't mention it
+        if tool == "write" && path.contains("seq.json") && !self.seq_json_allowed {
+            return Guard::Block(
+                "⛔ seq.json write blocked — outbox/README.MD does not mention seq.json. \
+                 Just write the email file and call answer(OUTCOME_OK).".to_string()
+            );
         }
 
         // Outbox email limit: prevent over-processing inbox (t23)

@@ -991,6 +991,20 @@ pub(crate) async fn run_agent(
         workflow.lock().unwrap().otp_with_task = true;
     }
 
+    // AI-NOTE: t11/t17 — check if outbox/README.MD mentions seq.json.
+    // If not, block seq.json writes (harness penalizes unexpected file writes).
+    if let Ok(readme_content) = pcm.read("outbox/README.MD", false, 0, 0).await {
+        if !readme_content.to_lowercase().contains("seq.json") && !readme_content.to_lowercase().contains("seq") {
+            eprintln!("  🚫 seq.json: outbox README does not mention seq.json — blocking writes");
+            workflow.lock().unwrap().seq_json_allowed = false;
+        }
+    } else if let Ok(readme_content) = pcm.read("outbox/README.md", false, 0, 0).await {
+        if !readme_content.to_lowercase().contains("seq.json") && !readme_content.to_lowercase().contains("seq") {
+            eprintln!("  🚫 seq.json: outbox README does not mention seq.json — blocking writes");
+            workflow.lock().unwrap().seq_json_allowed = false;
+        }
+    }
+
     // Build tool registry + agent — workflow wired for guards/hooks
     let registry = ToolRegistry::new()
         .register(tools::ReadTool::new(pcm.clone(), Some(workflow.clone())))
