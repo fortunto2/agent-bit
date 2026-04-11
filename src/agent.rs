@@ -28,7 +28,7 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
             .filter(|t| {
                 matches!(
                     t.name.as_str(),
-                    "read" | "search" | "find" | "list" | "answer"
+                    "read" | "read_all" | "search" | "search_and_read" | "grep_count" | "find" | "list" | "answer"
                 )
             })
             .collect(),
@@ -38,7 +38,7 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
             .filter(|t| {
                 matches!(
                     t.name.as_str(),
-                    "read" | "search" | "find" | "list" | "tree" | "answer" | "context"
+                    "read" | "read_all" | "search" | "search_and_read" | "grep_count" | "find" | "list" | "tree" | "answer" | "context"
                 )
             })
             .collect(),
@@ -48,7 +48,7 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
             .filter(|t| {
                 matches!(
                     t.name.as_str(),
-                    "search" | "read" | "find" | "list" | "delete" | "answer"
+                    "search" | "search_and_read" | "read" | "read_all" | "find" | "list" | "delete" | "answer"
                 )
             })
             .collect(),
@@ -58,6 +58,8 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
                 matches!(
                     t.name.as_str(),
                     "read"
+                        | "read_all"
+                        | "search_and_read"
                         | "write"
                         | "delete"
                         | "mkdir"
@@ -75,7 +77,7 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
             .filter(|t| {
                 matches!(
                     t.name.as_str(),
-                    "read" | "search" | "find" | "list" | "tree" | "context" | "answer"
+                    "read" | "read_all" | "search" | "find" | "list" | "tree" | "context" | "answer"
                 )
             })
             .collect(),

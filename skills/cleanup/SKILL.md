@@ -2,30 +2,44 @@
 name: cleanup
 description: Delete cards, threads, or other files — search first, then delete
 triggers: [intent_delete]
-priority: 10
-keywords: [delete, remove, clean, clear]
+priority: 20
+keywords: [delete, remove, clean, clear, discard]
 ---
 
 WORKFLOW:
-  1. Search to identify target files (cards, threads, etc.)
-  2. Read each candidate to CONFIRM it's the right file
-  3. Delete ONLY the confirmed targets
-  4. Do NOT create, write, or modify any files
+  For BULK cleanup ("remove all", "clean up all", "delete all cards/threads"):
+    1. list() each target directory — get file names
+    2. delete() each file directly — do NOT read files first, reading is waste
+    3. Skip templates (_card-template.md) and README files
+    4. answer() with count and refs
 
-EXAMPLE — Delete with ambiguous reference ("delete that card", "remove the file"):
-  search({"pattern": "keyword from context", "path": "contacts"}) → contacts/alice.md, contacts/bob.md
-  read({"path": "contacts/alice.md"}) → [confirm this is the target]
-  delete({"path": "contacts/alice.md"})
-  answer({"message": "Deleted contacts/alice.md", "outcome": "OUTCOME_OK", "refs": ["contacts/alice.md"]})
+  For TARGETED cleanup ("delete that card", "remove the file"):
+    1. search() to identify the target
+    2. read() to CONFIRM it's the right file (only when ambiguous)
+    3. delete() the confirmed target
+    4. answer() with refs
 
-EXAMPLE — Bulk cleanup ("remove all cards and threads"):
-  list({"path": "02_distill/cards"}) → [list of card files]
-  list({"path": "02_distill/threads"}) → [list of thread files]
-  Delete each file one by one (skip templates like _card-template.md).
-  answer({"message": "Deleted N cards and M threads", "outcome": "OUTCOME_OK"})
+  Do NOT create, write, or modify any files.
+
+EXAMPLE — Bulk cleanup ("remove all captured cards and threads"):
+  list({"path": "02_distill/cards"}) → card_001.md, card_002.md, _card-template.md
+  list({"path": "02_distill/threads"}) → thread_001.md, thread_002.md
+  delete({"path": "02_distill/cards/card_001.md"})
+  delete({"path": "02_distill/cards/card_002.md"})
+  delete({"path": "02_distill/threads/thread_001.md"})
+  delete({"path": "02_distill/threads/thread_002.md"})
+  answer({"message": "Deleted 2 cards and 2 threads", "outcome": "OUTCOME_OK", "refs": ["02_distill/cards/card_001.md", "02_distill/cards/card_002.md", "02_distill/threads/thread_001.md", "02_distill/threads/thread_002.md"]})
+  NOTE: Do NOT read() files before deleting in bulk ops. Skip _card-template.md (template).
+
+EXAMPLE — Targeted delete ("delete that card about project X"):
+  search({"pattern": "project X", "path": "02_distill/cards"}) → card_005.md
+  read({"path": "02_distill/cards/card_005.md"}) → [confirm this is the target]
+  delete({"path": "02_distill/cards/card_005.md"})
+  answer({"message": "Deleted card_005.md", "outcome": "OUTCOME_OK", "refs": ["02_distill/cards/card_005.md"]})
 
 CRITICAL RULES:
-  - DELETE tasks = search + read + delete ONLY. Do NOT write, create, or capture files.
+  - DELETE tasks = list + delete + answer ONLY. Do NOT write, create, or capture files.
+  - BULK = "remove all" / "clean up all" → list then delete each. NEVER read() files in bulk ops.
   - NEVER write("") or write empty content before delete. Just call delete() directly.
   - "Discard" means delete the file. NOT write empty then delete — just delete.
   - "cards and threads" = ONLY 02_distill/cards/ and 02_distill/threads/

@@ -773,6 +773,9 @@ pub(crate) async fn run_agent(
     // Build tool registry + agent — workflow wired for guards/hooks
     let registry = ToolRegistry::new()
         .register(tools::ReadTool::new(pcm.clone(), Some(workflow.clone())))
+        .register(tools::ReadAllTool(pcm.clone()))
+        .register(tools::SearchAndReadTool(pcm.clone()))
+        .register(tools::GrepCountTool(pcm.clone()))
         .register(tools::WriteTool::new(pcm.clone(), hook_registry.clone(), Some(workflow.clone())))
         .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
         .register(tools::FindTool(pcm.clone()))
@@ -804,7 +807,8 @@ pub(crate) async fn run_agent(
     // capture pre-execute. Agent navigates via tree + AGENTS.MD + skill.
 
     // Scale max_steps for multi-inbox: 5+ messages need more room
-    let effective_max_steps = if ready.inbox_files.len() > 3 {
+    // AI-NOTE: skip scaling for intent_delete — t01 delete tasks ignore inbox, don't need extra steps
+    let effective_max_steps = if ready.inbox_files.len() > 3 && ready.intent != "intent_delete" {
         let scaled = max_steps + (ready.inbox_files.len() * 4);
         eprintln!("  📬 Multi-inbox ({} files): max_steps {}→{}", ready.inbox_files.len(), max_steps, scaled);
         scaled

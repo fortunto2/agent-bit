@@ -159,6 +159,148 @@ impl Tool for ReadTool {
     }
 }
 
+// ─── search_and_read ─────────────────────────────────────────────────────────
+
+// AI-NOTE: search_and_read = search + read first result in one call. Saves 1 tool call per lookup.
+pub struct SearchAndReadTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct SearchAndReadArgs {
+    /// Regex pattern to search
+    pattern: String,
+    /// Directory to search in
+    #[serde(default = "def_root")]
+    path: String,
+}
+
+#[async_trait]
+impl Tool for SearchAndReadTool {
+    fn name(&self) -> &str { "search_and_read" }
+    fn description(&self) -> &str {
+        "Search for a pattern, then automatically read the first matching file. \
+         Returns both search results and full file content in one call. \
+         Use when you need to find AND read a file (e.g., find a contact then read their details)."
+    }
+    fn is_read_only(&self) -> bool { true }
+    fn parameters_schema(&self) -> Value { json_schema_for::<SearchAndReadArgs>() }
+    async fn execute(&self, args: Value, ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        self.execute_readonly(args, ctx).await
+    }
+    async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: SearchAndReadArgs = parse_args(&args)?;
+        let limit = 5;
+        let search_result = self.0.search(&a.path, &a.pattern, limit).await.map_err(pcm_err)?;
+
+        // Extract first file from search results
+        let first_file = search_result.lines()
+            .filter(|l| !l.starts_with('$') && !l.is_empty())
+            .filter_map(|l| l.split(':').next())
+            .map(|p| p.trim().to_string())
+            .find(|p| !p.is_empty());
+
+        let mut output = search_result.clone();
+
+        if let Some(path) = first_file {
+            match self.0.read(&path, false, 0, 0).await {
+                Ok(content) => {
+                    let capped: String = content.lines().take(200).collect::<Vec<_>>().join("\n");
+                    output.push_str(&format!("\n\n--- {} (full content) ---\n{}", path, capped));
+                }
+                Err(e) => {
+                    output.push_str(&format!("\n\n--- {} (read error: {}) ---", path, e));
+                }
+            }
+        }
+
+        Ok(ToolOutput::text(output))
+    }
+}
+
+// ─── grep_count ──────────────────────────────────────────────────────────────
+
+// AI-NOTE: grep_count — count matching lines in one call instead of search+read+manual count
+pub struct GrepCountTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct GrepCountArgs {
+    /// Regex pattern to count matches
+    pattern: String,
+    /// File path to search in
+    path: String,
+}
+
+#[async_trait]
+impl Tool for GrepCountTool {
+    fn name(&self) -> &str { "grep_count" }
+    fn description(&self) -> &str { "Count lines matching a regex pattern in a file. Returns exact count as a number. Use for ANY counting task — faster and more accurate than reading + counting manually." }
+    fn is_read_only(&self) -> bool { true }
+    fn parameters_schema(&self) -> Value { json_schema_for::<GrepCountArgs>() }
+    async fn execute(&self, args: Value, ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        self.execute_readonly(args, ctx).await
+    }
+    async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: GrepCountArgs = parse_args(&args)?;
+        let re = regex::Regex::new(&a.pattern)
+            .map_err(|e| ToolError::InvalidArgs(format!("invalid regex: {e}")))?;
+        let content = self.0.read(&a.path, false, 0, 0).await.map_err(pcm_err)?;
+        let count = content.lines().filter(|line| re.is_match(line)).count();
+        Ok(ToolOutput::text(count.to_string()))
+    }
+}
+
+// ─── read_all ────────────────────────────────────────────────────────────────
+
+// AI-NOTE: read_all batches list+read into one tool call — inspired by inozemtsev vault_read_all_in_dir
+pub struct ReadAllTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct ReadAllArgs {
+    /// Directory path to read all files from
+    path: String,
+}
+
+#[async_trait]
+impl Tool for ReadAllTool {
+    fn name(&self) -> &str { "read_all" }
+    fn description(&self) -> &str { "Read ALL files in a directory in one call. Much faster than listing then reading one by one. Returns each file with its path header." }
+    fn is_read_only(&self) -> bool { true }
+    fn parameters_schema(&self) -> Value { json_schema_for::<ReadAllArgs>() }
+    async fn execute(&self, args: Value, ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        self.execute_readonly(args, ctx).await
+    }
+    async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: ReadAllArgs = parse_args(&args)?;
+        let listing = self.0.list(&a.path).await.map_err(pcm_err)?;
+
+        let mut output = String::new();
+        let mut count = 0u32;
+        for line in listing.lines().skip(1) {
+            let name = line.trim();
+            if name.is_empty() || name.ends_with('/') {
+                continue;
+            }
+            let full_path = if a.path.ends_with('/') {
+                format!("{}{}", a.path, name)
+            } else {
+                format!("{}/{}", a.path, name)
+            };
+            match self.0.read(&full_path, false, 0, 0).await {
+                Ok(content) => {
+                    output.push_str(&format!("--- {} ---\n{}\n\n", full_path, content));
+                    count += 1;
+                }
+                Err(e) => {
+                    output.push_str(&format!("--- {} ---\n[error: {}]\n\n", full_path, e));
+                }
+            }
+        }
+        if count == 0 {
+            output.push_str("(no files found)\n");
+        }
+        Ok(ToolOutput::text(output))
+    }
+}
+
 // ─── write ───────────────────────────────────────────────────────────────────
 
 pub struct WriteTool {
@@ -330,38 +472,69 @@ impl DeleteTool {
     }
 }
 
+// AI-NOTE: batch delete via `paths` array — t01 reduce tool_calls from ~48 to ~3
 #[derive(Deserialize, JsonSchema)]
 struct DeleteArgs {
-    /// File path to delete
-    path: String,
+    /// File path to delete (use this for single file)
+    #[serde(default)]
+    path: Option<String>,
+    /// Multiple file paths to delete in one call (preferred for bulk cleanup)
+    #[serde(default)]
+    paths: Option<Vec<String>>,
 }
 
 #[async_trait]
 impl Tool for DeleteTool {
     fn name(&self) -> &str { "delete" }
-    fn description(&self) -> &str { "Delete a file. Security hygiene: after processing inbox messages with OTP codes or credentials, delete the source file (e.g. docs/channels/otp.txt) to prevent credential reuse." }
+    fn description(&self) -> &str { "Delete one or more files. Pass `path` for a single file, or `paths` (array) to delete many files at once. Security hygiene: after processing inbox messages with OTP codes or credentials, delete the source file (e.g. docs/channels/otp.txt) to prevent credential reuse." }
     fn parameters_schema(&self) -> Value { json_schema_for::<DeleteArgs>() }
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
         let a: DeleteArgs = parse_args(&args)?;
 
-        // Workflow pre_action guard (capture guard: block delete before write)
-        let guard = self.workflow.as_ref().map(|wf| wf.lock().unwrap().pre_action("delete", &a.path));
-        let mut warn_suffix = String::new();
-        if let Some(out) = apply_guard(guard, &mut warn_suffix) {
-            return Ok(out);
-        }
+        // Collect all paths to delete (single `path` or batch `paths`)
+        let targets: Vec<String> = match (a.path, a.paths) {
+            (_, Some(ps)) if !ps.is_empty() => ps,
+            (Some(p), _) => vec![p],
+            _ => return Err(ToolError::InvalidArgs("provide `path` (string) or `paths` (array)".into())),
+        };
 
-        self.pcm.delete(&a.path).await.map_err(pcm_err)?;
-        let mut out = format!("Deleted {}", a.path);
+        let mut results: Vec<String> = Vec::with_capacity(targets.len());
+        let mut errors: Vec<String> = Vec::new();
 
-        // Workflow post_action (phase transition + hooks)
-        if let Some(ref wf) = self.workflow {
-            for hook_msg in wf.lock().unwrap().post_action("delete", &a.path) {
-                out.push_str(&format!("\n{}", hook_msg));
+        for path in &targets {
+            // Workflow pre_action guard per file
+            let guard = self.workflow.as_ref().map(|wf| wf.lock().unwrap().pre_action("delete", path));
+            let mut warn_suffix = String::new();
+            if let Some(blocked) = apply_guard(guard, &mut warn_suffix) {
+                // Blocked — record but continue with remaining files
+                errors.push(format!("BLOCKED {}: {}", path, blocked.content));
+                continue;
+            }
+
+            match self.pcm.delete(path).await {
+                Ok(()) => {
+                    let mut line = format!("Deleted {}", path);
+                    // Workflow post_action (phase transition + hooks)
+                    if let Some(ref wf) = self.workflow {
+                        for hook_msg in wf.lock().unwrap().post_action("delete", path) {
+                            line.push_str(&format!("\n{}", hook_msg));
+                        }
+                    }
+                    line.push_str(&warn_suffix);
+                    results.push(line);
+                }
+                Err(e) => errors.push(format!("FAILED {}: {}", path, e)),
             }
         }
 
-        out.push_str(&warn_suffix);
+        let mut out = results.join("\n");
+        if !errors.is_empty() {
+            if !out.is_empty() { out.push('\n'); }
+            out.push_str(&errors.join("\n"));
+        }
+        if out.is_empty() {
+            out = "No files deleted".to_string();
+        }
         Ok(ToolOutput::text(out))
     }
 }
