@@ -70,7 +70,9 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF
 | 04-10 | — | kimi-turbo | 58.1% (25/43) | unstable, rejected |
 | 04-10 | `c8a2f27` | seed2 | 85.1% (37/43) | parallel 43 run |
 | 04-10 | `effbdd2` | nemotron | 93.0% (40/43) | parallel 10 (pre-t23/t29 fix) |
-| 04-11 | `effbdd2` | nemotron | pending | parallel 10 (with all fixes) |
+| 04-11 | `effbdd2` | nemotron | 86.0% (37/43) | parallel 10 (pre t02/t11/t17 fix) |
+| 04-11 | `effbdd2` | nemotron | **79.1%** (34/43) | **LEADERBOARD #1** parallel 5 — old binary |
+| 04-11 | `78144b8` | nemotron | pending | **LEADERBOARD #2** parallel 5 — with all fixes |
 
 ---
 
