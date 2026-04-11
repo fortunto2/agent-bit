@@ -175,12 +175,15 @@ impl CrmGraph {
                 name = line.strip_prefix("# ").unwrap_or("").trim().to_string();
             } else if lower.starts_with("name:") {
                 name = line.splitn(2, ':').last().unwrap_or("").trim().to_string();
-            } else if email.is_none() && lower.contains("email") {
-                // AI-NOTE: universal email extraction — any line with "email" + @ address
-                // Handles: "email:", "primary_contact_email:", "- email: `x@y`", etc.
-                let val = line.splitn(2, ':').last().unwrap_or("").trim()
-                    .trim_matches('`').trim_matches('"').trim().to_string();
-                if val.contains('@') { email = Some(val); }
+            } else if email.is_none() {
+                // AI-NOTE: universal email extraction via regex — works on any format:
+                //   "email: x@y", "- primary_contact_email: `x@y`", "contact <x@y>", etc.
+                static EMAIL_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+                    regex::Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").unwrap()
+                });
+                if let Some(m) = EMAIL_RE.find(line) {
+                    email = Some(m.as_str().to_string());
+                }
             } else if lower.starts_with("company:") || lower.starts_with("account:") || lower.starts_with("organization:")
                 || lower.contains("relationship:") {
                 company = line.splitn(2, ':').last().map(|s| s.trim().to_string());
