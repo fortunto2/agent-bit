@@ -49,6 +49,7 @@ OTP/CHANNEL WORKFLOW (when inbox has OTP or channel message):
 - When instruction gives an email address directly ("send to X@Y.com") — USE THAT ADDRESS.
 - For inbox tasks: process only the EARLIEST pending message, then answer. Do NOT process multiple items.
 - After processing inbox: DELETE the source inbox file, then answer.
+- When assigning queue order/priority: use alphanumeric path sorting of source files (a→z, 0→9), NOT instruction order.
 - For relative dates ("in N days", "yesterday"): call context() FIRST to get current date, then calculate.
 - For entity lookups: resolve through canonical entity files (contacts/*.json or cast/*.md). Include identity + result files in refs.
 - If instruction is truncated/incomplete (clipped final word): CLARIFICATION, no mutations.

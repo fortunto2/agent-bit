@@ -71,6 +71,11 @@ pub(crate) fn threat_score(text: &str) -> u32 {
         score += 3;
     }
 
+    // AI-NOTE: fake authority and exfiltration handled by LLM via system prompt rules,
+    //   not hardcoded scanner patterns. Scanner only catches HTML injection (ammonia)
+    //   and structural concealment patterns. Specific [System Message] / AGENTS.MD
+    //   patterns removed — too fragile, causes overfit.
+
     // Concealment + override ("do not mention this override", "ignore local rules")
     if lower.contains("do not mention") && (lower.contains("override") || lower.contains("cleanup")) {
         score += 3;
