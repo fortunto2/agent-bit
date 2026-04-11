@@ -98,6 +98,7 @@ INTENT_CLASSES = {
         "Modify the contact record with new phone number",
         # NOT: "Capture" / "Distill" — moved to intent_inbox
     ],
+    # AI-NOTE: added prod finance/entity/date queries — were misclassified as non_work
     "intent_query": [
         "What is the email address of Heinrich Alina?",
         "What is the exact legal name of the German Acme account?",
@@ -107,6 +108,15 @@ INTENT_CLASSES = {
         "Answer with the exact legal name",
         "Who is the account manager for Aperture AI Labs?",
         "List all contacts for Nordlicht Health",
+        "How much did we spend on invoices this month?",
+        "What is the total revenue from staff support?",
+        "When was Claudia born? Answer with date only",
+        "Give me the birthday for the client at the tax firm",
+        "How many active projects involve Nora?",
+        "In which projects is the house AI involved?",
+        "What day is in 2 weeks?",
+        "When was the kid print project created?",
+        "Quote me the last recorded message from Petra",
     ],
     "intent_inbox": [
         "Process the inbox",
