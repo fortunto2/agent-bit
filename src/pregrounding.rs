@@ -709,19 +709,35 @@ pub(crate) async fn run_agent(
     // feature matrix, contact resolution, channel stats, OTP hints (all handled by skills now).
     // Kept: inbox with ML classification headers (security advantage over raw injection).
 
-    // Inject inbox content with ML classification (pipeline already read + classified)
+    // Feature matrix: batch-score inbox for threat probability (sigmoid gate)
+    let empty_channel_trust = crate::policy::ChannelTrust::new();
+    let inbox_scores = if !ready.inbox_files.is_empty() {
+        let fm = crate::feature_matrix::InboxFeatureMatrix::from_inbox_files(
+            &ready.inbox_files, &ready.crm_graph, shared_clf, &empty_channel_trust,
+        );
+        let scores = fm.score_all(&crate::feature_matrix::threat_weights());
+        fm.log_summary();
+        eprintln!("  📊 Threat scores: {:?}", scores.iter().map(|s| format!("{:.2}", s)).collect::<Vec<_>>());
+        Some(scores)
+    } else {
+        None
+    };
+
+    // Inject inbox content with ML classification + feature matrix threat score
     let mut has_otp = false;
     let mut is_verification = false;
     if !ready.inbox_files.is_empty() {
         let mut inbox_content = String::new();
-        for f in ready.inbox_files.iter() {
+        for (fi, f) in ready.inbox_files.iter().enumerate() {
             let sender_trust = f.security.sender.as_ref()
                 .map(|s| format!("{}", s.trust))
                 .unwrap_or_else(|| "UNKNOWN".to_string());
-            // ML classification header — our security advantage
+            let threat = inbox_scores.as_ref().map(|s| s[fi]).unwrap_or(0.0);
+            let threat_label = if threat > 0.7 { "HIGH" } else if threat > 0.4 { "MEDIUM" } else { "LOW" };
+            // ML classification + feature matrix threat score
             inbox_content.push_str(&format!(
-                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | {}]\n",
-                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, f.security.recommendation
+                "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | threat: {} ({:.0}%) | {}]\n",
+                f.path, f.security.ml_label, f.security.ml_conf, sender_trust, threat_label, threat * 100.0, f.security.recommendation
             ));
             // Sender trust annotations (from pipeline security assessment)
             if f.security.sender.as_ref().is_some_and(|s| s.domain_match == "mismatch") {
