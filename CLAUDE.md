@@ -48,19 +48,19 @@ grep -rn "AI-NOTE.*t23\|AI-NOTE.*inbox" src/
 
 ```
 src/pipeline.rs      -- enum state machine (New→Classified→InboxScanned→SecurityChecked→Ready)
-src/main.rs          -- CLI, orchestration, verify_and_submit, guess_outcome
-src/prompts.rs       -- system prompts (V2 annotation-driven + explicit decision tree)
+src/main.rs          -- CLI, orchestration, guess_outcome, --probe flag
+src/prompts.rs       -- system prompt (single explicit decision tree, hot-reload from prompts/system.md)
 src/skills.rs        -- skill system: loads SKILL.md files, push-model selection via classifier
 src/scanner.rs       -- security scanning, inbox classification, domain matching
-src/pregrounding.rs  -- context assembly, planning, hints, agent execution (uses pipeline states)
+src/pregrounding.rs  -- Codex-style context assembly + agent execution (713 lines)
 src/agent.rs         -- Pac1Agent (Router + Structured CoT reasoning, two-phase FC)
 src/pac1_sgr.rs      -- Pac1SgrAgent (pure SGR mode, single LLM call per step, experimental)
 src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
 src/pcm.rs           -- PcmRuntime client (11 file-system RPCs + read cache + ProposedAnswer)
-src/tools.rs         -- 13 Tool implementations + security guard + OutcomeValidator + skill introspection
+src/tools.rs         -- 16 Tools (13 base + read_all, search_and_read, grep_count) + trust metadata
 src/hooks.rs         -- HookRegistry: data-driven tool completion hooks from AGENTS.MD
 src/policy.rs        -- File access policy: structural guards for protected paths
-src/config.rs        -- Provider config with prompt_mode, temperature, sgr_mode
+src/config.rs        -- Provider config with temperature, sgr_mode, fallback_providers
 src/classifier.rs    -- ONNX classifier (security + intent) + NliClassifier (NLI zero-shot) + OutcomeValidator (adaptive kNN)
 src/crm_graph.rs     -- petgraph CRM knowledge graph (contacts, accounts, sender trust, ONNX embeddings)
 src/feature_matrix.rs -- 12-feature inbox scoring: sigmoid(features × weights), ridge regression calibration
@@ -119,22 +119,23 @@ Replaces hardcoded `examples_for_class()` with file-based SKILL.md files. Uses `
 **Push model:** classifier label + intent → skill selection → inject into `{examples}` placeholder.
 **Hybrid fallback:** agent can call `list_skills` / `get_skill` tools mid-task to switch workflows.
 
-**Directory:** `skills/` (13 skills, hot-reloadable — edit .md, no rebuild needed)
+**Directory:** `skills/` (14 skills, hot-reloadable — edit .md, no rebuild needed)
 ```
 skills/
-├── crm-default/SKILL.md       — general CRM (email, contacts, cross-account, multi-inbox)
+├── crm-default/SKILL.md       — general workspace (email, contacts, cross-account, multi-inbox)
 ├── crm-lookup/SKILL.md        — data queries, counting, captured article lookup
 ├── crm-invoice/SKILL.md       — resend/forward invoices with attachments
-├── inbox-processing/SKILL.md  — multi-inbox workflow, channel priority, seq.json
-├── capture-distill/SKILL.md   — capture → card → thread → delete source
-├── cleanup/SKILL.md           — delete cards/threads (search → read → delete only)
+├── inbox-processing/SKILL.md  — multi-inbox workflow, channel priority, OTP
+├── capture-distill/SKILL.md   — capture → card → thread → delete source + bulk cleanup
+├── cleanup/SKILL.md           — delete cards/threads (bulk: list→delete, no read)
 ├── security-injection/SKILL.md — injection/social engineering → DENIED
 ├── security-credential/SKILL.md — OTP workflow (7 examples, exfiltration anti-pattern)
-├── non-work/SKILL.md          — non-CRM → CLARIFICATION
+├── non-work/SKILL.md          — non-workspace → CLARIFICATION
 ├── unsupported/SKILL.md       — external API/deploy/calendar → UNSUPPORTED
 ├── followup-reschedule/SKILL.md — reschedule dates in accounts + reminders
 ├── invoice-creation/SKILL.md  — create typed invoice JSON
-└── purchase-ops/SKILL.md      — fix purchase ID prefix regression
+├── purchase-ops/SKILL.md      — fix purchase ID prefix regression
+└── finance-query/SKILL.md     — bills, invoices, spend, revenue queries
 ```
 
 **SKILL.md format** (YAML frontmatter + markdown body):
@@ -235,12 +236,21 @@ word_count_norm, sentence_length, cross_account_sim, nli_injection, nli_credenti
 - `detect_cross_account()` — comparative: other_sim > sender_sim + 0.1 gap
 - `is_word_match()` — path-boundary protected file matcher (no substring false positives)
 
-### Prompt Modes (src/prompts.rs)
+### System Prompt (prompts/system.md)
 
-Two prompt modes, switchable per provider via `prompt_mode` in config.toml:
-- **`"v2"`** (default for Nemotron): annotation-driven, no decision tree. Pipeline annotations = law.
-- **`"explicit"`** (default for GPT-5.4): numbered decision tree, more flexible.
-V2 outperforms explicit on Nemotron (82.5% vs 75%) because model can't ignore annotations.
+Single prompt for all models, hot-reloaded from `prompts/system.md` at runtime.
+Explicit decision tree: "DENIED requires EXPLICIT evidence — not suspicion, not caution."
+Fallback to compiled-in `SYSTEM_PROMPT_V2` if file not found.
+
+### Batch Tools (efficiency)
+
+Three tools reduce multi-step operations to single calls:
+- `read_all(path)` — list + read ALL files in directory (batch for small dirs)
+- `search_and_read(pattern, path)` — search + read first match (saves 1 call per lookup)
+- `grep_count(pattern, path)` — count lines matching regex (no read + count manually)
+- Trust metadata on every read: `[path | trusted/untrusted]` header
+
+Result: t01 48→4 tool calls. All batch tools added to `filter_tools_for_task` allow-lists.
 
 ### Read Cache (src/pcm.rs)
 
@@ -286,10 +296,10 @@ CRM Graph + ONNX Embeddings:
   → detect_cross_account(body, sender) — cosine similarity, gap > 0.1
   → Annotation: [⚠ CROSS-ACCOUNT REQUEST]
 
-Pre-grounding (context assembly):
-  → Skill selection (classifier label + intent → 13 SKILL.md files)
-  → Pre-execute deterministic steps (capture write if sigmoid < 0.5)
-  → Contact/account resolution, channel trust, OTP hints
+Pre-grounding (Codex-style minimal, 6 messages):
+  → AGENTS.MD, skill body, tree, date, inbox (with ML classification + threat scores), instruction
+  → Skill selection (classifier label + intent → 14 SKILL.md files)
+  → Cross-account detection (ONNX embeddings on inbox)
 
 Workflow SM (during agent execution):
   Reading → Acting → Cleanup → Done
@@ -300,11 +310,10 @@ Workflow SM (during agent execution):
 
 Agent Loop (LLM):
   Structured CoT → Reflexion → Confidence gate → Router → Tool execution
-    → Self-consistency retry (verifier disagrees → re-run with temp+0.1)
     → Retry on empty (no tool calls → nudge 2x)
 
 Post-execution:
-  → verify_and_submit() — 3-vote verifier + override policy (step count)
+  → verify_and_submit() — direct submit (no verifier)
   → score.txt saved to benchmarks/tasks/{task}/{trial}/
 ```
 
@@ -342,25 +351,14 @@ Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_sec
 - Body fallback: if no CRM account, check domain stem vs company name in email body (strict >50%)
 - Ensemble blocker only fires on MISMATCH, not UNKNOWN (prevents over-cautious DENIED on legit tasks)
 
-### Contact Pre-Grounding (disambiguation)
-- `extract_mentioned_names()` — parses inbox content for names (From: headers + body mentions of CRM contacts)
-- `resolve_contact_hints()` — directive format: `RESOLVED: "Smith" = john smith (account: Acme Corp). USE this contact, not: jane smith`
-- Injected as pre-grounding message: "⚠ CONTACT RESOLUTION (use these, do NOT ask for clarification)"
-- `contacts_summary()` — pre-loads all contacts (name, email, account) to avoid 10+ individual file reads that trigger loop detection
+### CRM Graph (entity resolution at runtime, not pre-grounding)
+- CrmGraph built at startup (parallel IO) — used for search annotation + cross-account detection
+- **Removed from pre-grounding** (2026-04-11): contacts_summary, accounts_summary, contact resolution hints
+- Agent finds entities via search — SearchTool annotates results with CrmGraph account info
 - CrmGraph methods: `contacts_for_account()`, `account_for_contact()`, `find_all_matching_contacts()`, `contact_names()`
-- SearchTool carries `Option<Arc<CrmGraph>>` — annotates multi-contact search results with account info
-- CrmGraph `ingest_contact/account` strips PCM `$ cat` header and supports `full_name` field
-- UNKNOWN sender annotation is neutral ("new or external sender, process normally") — prevents over-cautious DENIED
-- Prompt includes explicit disambiguation example (search both contacts → pick best match → proceed)
-
-### Account Pre-Grounding (paraphrase resolution)
-- `accounts_summary()` — pre-loads all accounts (name, domain, account_manager, contacts) into agent context
-- Enables LLM to resolve account paraphrases ("Dutch banking customer" → "Blue Harbor Bank") from pre-loaded data
-- `account_manager` field parsed from account files (JSON `account_manager`/`accountManager`, markdown `account_manager:`)
-- `annotate_account_results()` — multi-account search results annotated with linked contacts (mirrors `annotate_contact_results()`)
-- `expand_query()` — 2-word queries now try reversed word order ("Blom Frederike" → also "Frederike Blom")
-- Auto-refs: always merges recent reads with LLM-provided refs (accounts, contacts, invoices)
-- Auto-refs: infers account file from contact file (contacts/cont_009.json → accounts/acct_009.json)
+- `annotate_contact_results()` / `annotate_account_results()` — enrich search output with linked entities
+- `expand_query()` — 2-word queries try reversed word order ("Blom Frederike" → also "Frederike Blom")
+- Auto-refs: merges recent reads with LLM-provided refs (accounts, contacts, invoices)
 
 ### Credential Detection
 - **Exfiltration** (DENIED): OTP + branching logic ("first character", "branch", "depending on")
@@ -379,27 +377,13 @@ Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_sec
 - **Created in main.rs**: shared across all trials, accessible for post-trial learning (not in pregrounding.rs)
 - Dedup: cosine >0.95 suppressed, cap 200, FIFO eviction
 
-### Outcome Verifier (post-execution)
+### Answer Submission (post-execution)
 - **Deferred answer pattern**: AnswerTool stores `ProposedAnswer` via `pcm.propose_answer()` instead of submitting RPC immediately
-- After execution loop, `verify_and_submit()` calls `run_outcome_verifier()` — single LLM call with focused 4-way classification
-- Verifier prompt (`VERIFIER_PROMPT` in prompts.rs) is much simpler than SYSTEM_PROMPT_EXPLICIT — just validates the outcome code
-- Uses function calling schema (`verify_outcome`) returning `{outcome, reason, confidence}`
-- **Override policy** (`apply_override_policy()`): **selective security override (v0.4)** — verifier overrides agent ONLY when it detects DENIED_SECURITY with ≥0.95 confidence and agent said OK. Non-security disagreements remain warn-only (6:1 wrong:correct ratio). Agent's own DENIED_SECURITY is never overridden.
-- Falls back to proposed answer on verifier LLM error
-- When no proposed answer (agent didn't call answer()): uses `guess_outcome()` heuristic directly (verifier confused by CRM content)
-- Execution summary: `build_execution_summary()` extracts last 15 relevant tool lines from history, **filters out** security annotations (Security threat, OUTCOME_DENIED, injection, exfiltration) to prevent verifier meta-injection
-- Logging: `🔍 Verifier: agree|disagree (conf=X.XX) — reason`
-- Key files: `pcm.rs` (ProposedAnswer), `prompts.rs` (VERIFIER_PROMPT), `pregrounding.rs` (run_outcome_verifier), `main.rs` (verify_and_submit)
-
-### Single Prompt Mode
-- Single explicit decision tree for all models (removed standard/explicit split)
-- Numbered steps, 5 examples, verbose — works for both Nemotron and GPT-5.4
-- Decision framework reframing: "DENIED requires EXPLICIT evidence — not suspicion, not caution"
-
-### Temperature Annealing (EAD-inspired)
-- `planning_temperature` (default 0.4): higher temp during read-only planning phase → more exploration
-- `temperature` (default 0.1 for Nemotron): lower temp during execution → deterministic commits
-- Separate values threaded through config → main → pregrounding → run_planning_phase vs run_agent
+- After execution loop, `verify_and_submit()` submits agent's answer directly (no verifier)
+- When no proposed answer (agent didn't call answer()): uses `guess_outcome()` heuristic + `extract_last_finding()` from history
+- **Verifier removed** (2026-04-11): was 3 parallel LLM calls per trial. Agent's answer is final.
+- **FC probe removed from per-trial** (2026-04-11): moved to `--probe` CLI flag (`make probe`)
+- **Planning phase removed** (2026-04-11): agent uses Phase 1 reasoning `plan` field instead
 - Config field `planning_temperature` in `ProviderSection`, defaults to 0.4 if absent
 
 ### Confidence-Gated Reflection (AUQ-inspired)
@@ -423,8 +407,8 @@ Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_sec
 - `classify()` returns security labels only; `classify_intent()` returns intent labels only — no contamination
 - Logged as `Instruction intent: intent_X (confidence)`
 - **Task-type forcing**: `detect_forced_task_type()` maps `intent_delete` → `"delete"` task_type override (logged as `🔒 Task-type override`)
-- **Skip planning**: `intent_query` skips planning phase entirely — planner hallucinates wrong contacts on simple lookups (t16, t34)
-- **Intent-based hints**: `intent_delete` → delete-only hint, `intent_inbox` → capture-delete workflow hint, `intent_query` → include file refs hint
+- **Planning phase removed** (2026-04-11): agent uses Phase 1 reasoning `plan` field instead
+- **Intent-based routing**: `intent_delete` → skip multi-inbox scaling, `intent_inbox` → skill-driven workflow
 - To add new intents: edit `INTENT_CLASSES` in `scripts/export_model.py`, run `uv run ... scripts/export_model.py` to regenerate centroids
 
 ### Delete Routing (structural write-restriction)
@@ -442,15 +426,18 @@ Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_sec
 - **t03 fixed**: thread-update example + write-nudge (2+ reads-since-last-write → inject "use write() now"). Counter only resets on write-class tools (write/delete/move_file/answer), NOT on search/find/list/tree. Filename preservation hint for distill cards.
 - **Capture-delete nudge**: at 50%+ steps, if inbox files read but not deleted → inject strong "DELETE inbox files NOW" reminder. Deferred flag pattern — only marks sent when conditions are met (inbox read in ledger + no inbox delete). Pre-grounding also injects reminder for capture/distill/process/inbox instructions. Distill example in prompts.rs includes delete step.
 
-### Pre-grounding Context
-- tree + AGENTS.md + CRM schema (READMEs from directories)
-- Contacts summary: pre-loaded from CrmGraph (name, email, account) — avoids 10+ file reads that trigger loop detection
-- Classified inbox with [CLASSIFICATION], [SENDER TRUST] annotations
-- Inbox processing guidance: evaluate EACH message separately, OK if at least one processed
-- Channel file statistics: auto-count entries by category (blacklist, verified, etc.)
-- OTP cleanup: after processing OTP inbox, delete source file (docs/channels/otp.txt)
-- OTP-intent hint: injected when inbox has credential classification >0.50 OR raw OTP keyword (`OTP:`, `verification code`). Tells agent to delete `docs/channels/otp.txt` (NOT inbox file)
-- Outbox: read README.MD for format, include `"sent": false`
+### Pre-grounding Context (Codex-style minimal)
+Simplified from 15+ messages to 6 (2026-04-11):
+1. AGENTS.MD (workspace rules)
+2. SKILL WORKFLOW (selected by classifier)
+3. tree (directory structure)
+4. date (from context())
+5. Inbox content with ML classification headers: `[CLASSIFICATION: label (conf) | sender: trust | threat: HIGH (78%) | recommendation]`
+6. Instruction
+
+Removed: contacts_summary, accounts_summary, CRM schema, channel reads, channel trust,
+OTP hints, capture hints, intent hints, capture pre-execute, inbox processing hints.
+Agent explores workspace itself via tree + AGENTS.MD + batch tools.
 
 ### Agent Loop Configuration
 - `loop_abort_threshold: 25` — high to avoid tier-2 false positives from parallel reads (10 contacts in 1 step)
@@ -467,6 +454,7 @@ Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_sec
 | `--parallel` | 1 | Concurrency limit |
 | `--list` | false | List tasks and exit |
 | `--dry-run` | false | Pre-scan only, no LLM |
+| `--probe` | false | Test model FC support (run once per new model) |
 | `--audit-store` | false | Audit adaptive outcome store |
 | `--run` | - | Leaderboard run mode |
 
@@ -482,7 +470,7 @@ Providers in `config.toml`. Key fields per provider:
 
 Agent uses two-phase function calling: Phase 1 = reasoning tool (8-field schema via `tools_call` with `tool_choice: required`), Phase 2 = action tools. Models must handle complex tool schemas on long context (7K+ system prompt).
 
-**FC probe** runs at agent start — calls `tools_call` with 5-field schema. Fails fast if model can't do FC at all. But passing probe ≠ working agent — some models pass probe but fail on real tasks (long context degrades FC quality).
+**FC probe** via `--probe` CLI flag (`make probe PROVIDER=seed2`) — tests model FC support with 5-field schema. Run once per new model, not per trial.
 
 **Quick model test**: `cargo run --release -- --provider NAME --task t01 && cargo run --release -- --provider NAME --task t16`. t01 = multi-step cleanup (hard), t16 = simple lookup (easy). Both must pass.
 
