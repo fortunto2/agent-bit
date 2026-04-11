@@ -112,13 +112,22 @@ impl CrmGraph {
                 .collect()
         }
 
+        // AI-NOTE: try multiple paths — dev uses accounts/contacts/, prod uses 10_entities/cast/
         // Accounts FIRST (builds account_id_map for contact.account_id resolution)
-        for content in read_all(pcm, "accounts").await {
-            g.ingest_account(&content);
+        for dir in &["accounts", "10_entities/cast", "10_entities/accounts", "entities/accounts"] {
+            let items = read_all(pcm, dir).await;
+            if !items.is_empty() {
+                for content in items { g.ingest_account(&content); }
+                break;
+            }
         }
         // Contacts (account_id_map now available)
-        for content in read_all(pcm, "contacts").await {
-            g.ingest_contact(&content);
+        for dir in &["contacts", "10_entities/cast", "10_entities/contacts", "entities/contacts"] {
+            let items = read_all(pcm, dir).await;
+            if !items.is_empty() {
+                for content in items { g.ingest_contact(&content); }
+                break;
+            }
         }
 
         g

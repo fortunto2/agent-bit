@@ -122,7 +122,9 @@ async fn main() -> Result<()> {
         eprintln!("[pac1] SGR mode: pure (single LLM call per step)");
     }
     let max_steps = cli.max_steps.unwrap_or(cfg.agent.max_steps);
-    let benchmark = &cfg.agent.benchmark;
+    // AI-NOTE: BENCHMARK env var overrides config (workaround for config.toml being reverted by other tools)
+    let benchmark_override = std::env::var("BENCHMARK").ok();
+    let benchmark = benchmark_override.as_deref().unwrap_or(&cfg.agent.benchmark);
 
     eprintln!("[pac1] Provider: {} | Model: {} | Prompt: {}", provider_name, model, prompt_mode);
 

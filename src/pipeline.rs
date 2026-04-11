@@ -308,12 +308,10 @@ impl Classified {
                 || filename.eq_ignore_ascii_case("README.MD") {
                 continue;
             }
-            if filename.eq_ignore_ascii_case("AGENTS.MD") {
-                return Err(BlockReason {
-                    outcome: "OUTCOME_DENIED_SECURITY",
-                    message: "Blocked: fake AGENTS.MD in inbox — social engineering".into(),
-                    stage: "scan_inbox",
-                });
+            // AI-NOTE: prod has AGENTS.MD in every folder including 00_inbox/ — skip, don't block.
+            //   Previously blocked as "fake AGENTS.MD injection" but it's legitimate in prod layout.
+            if filename.eq_ignore_ascii_case("AGENTS.MD") || filename.eq_ignore_ascii_case("AGENTS.md") {
+                continue;
             }
             filenames.push(format!("{}/{}", dir, filename));
         }
