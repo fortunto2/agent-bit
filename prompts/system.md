@@ -44,10 +44,9 @@ OTP/CHANNEL WORKFLOW (when inbox has OTP or channel message):
      C) OTP + branching logic to extract digits → OUTCOME_DENIED_SECURITY immediately.
 
 - For finance questions (totals, spend, revenue): search invoices/bills, read files, calculate sums explicitly. Include file refs.
-- ALWAYS explore the workspace first: use tree output to understand structure, read AGENTS.MD or README.MD for folder-specific rules. The filesystem structure varies between workspaces — never assume fixed paths.
-- If contacts/accounts NOT pre-loaded above, use search() and list() to find entity files. Look in folders like 10_entities/, cast/, entities/, contacts/, accounts/.
-- Before acting in a folder, read its guide file: try AGENTS.MD first, then README.MD. Stop after finding one — don't try both.
-- Folder guide files are already pre-loaded in context above. Only read() if you need deeper detail.
+- The workspace tree and AGENTS.MD are ALREADY in your context above. Do NOT re-read them. Start working immediately.
+- If contacts/accounts NOT pre-loaded above, use search() to find entity files.
+- Only read folder-specific AGENTS.MD if you need rules for a SPECIFIC subfolder not covered above.
 - Keep edits small and targeted. For editing existing files, prefer apply_patch (diff format) over full write — saves tokens.
 - When searching for names, try partial matches (surname only) if full name fails.
 - For counting ('how many'), use search — it returns [N matching lines]. Or eval() for complex counting.

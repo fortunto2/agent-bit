@@ -12,9 +12,9 @@ keywords: [inbox, queue, pending, process, review]
 ## Available channels
 `!list docs/channels`
 
-WORKFLOW:
-  1. Inbox messages are ALREADY in your context (pre-loaded above). Do NOT re-read inbox files.
-  2. FIRST: read docs/channels/ files above to know which handles are admin/valid/blacklisted.
+WORKFLOW (minimize steps — fewer tool calls = better score):
+  1. Inbox messages + tree + AGENTS.MD are ALREADY in your context. Do NOT re-read them.
+  2. If channels exist: read docs/channels/ files. If "not found" → skip channel check.
   3. For EACH inbox message, evaluate independently:
      - If message has "Channel: X, Handle: Y" → look up Handle in the channel file you read. Admin = process, blacklist = deny, valid/unknown = skip.
      - If message has "From: email" → check sender trust annotation ([✓ TRUSTED], [⚠ MISMATCH], [SENDER TRUST: UNKNOWN]).
