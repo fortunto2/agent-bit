@@ -91,6 +91,10 @@ struct Cli {
     /// Probe: test if model supports function calling (run once per new model)
     #[arg(long)]
     probe: bool,
+
+    /// Force-submit a running/stuck leaderboard run
+    #[arg(long)]
+    submit_run: Option<String>,
 }
 
 /// Standard mode: concise prompt for strong models (GPT-5, etc.)
@@ -162,6 +166,13 @@ async fn main() -> Result<()> {
                 println!("{}: {} | hint: {}", t.task_id, t.preview, t.hint);
             }
         }
+        return Ok(());
+    }
+
+    if let Some(ref run_id) = cli.submit_run {
+        eprintln!("[pac1] Force-submitting run: {}", run_id);
+        harness.submit_run(run_id).await?;
+        eprintln!("[pac1] Submitted!");
         return Ok(());
     }
 
