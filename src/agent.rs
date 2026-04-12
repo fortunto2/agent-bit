@@ -28,7 +28,7 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
             .filter(|t| {
                 matches!(
                     t.name.as_str(),
-                    "read" | "read_all" | "search" | "search_and_read" | "grep_count" | "eval" | "find" | "list" | "answer"
+                    "read" | "read_all" | "search" | "eval" | "find" | "list" | "answer"
                 )
             })
             .collect(),
@@ -38,7 +38,7 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
             .filter(|t| {
                 matches!(
                     t.name.as_str(),
-                    "read" | "read_all" | "search" | "search_and_read" | "grep_count" | "eval" | "find" | "list" | "tree" | "answer" | "context"
+                    "read" | "read_all" | "search" | "eval" | "find" | "list" | "tree" | "answer" | "context"
                 )
             })
             .collect(),
@@ -48,7 +48,7 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
             .filter(|t| {
                 matches!(
                     t.name.as_str(),
-                    "search" | "search_and_read" | "read" | "read_all" | "find" | "list" | "delete" | "answer"
+                    "search" | "read" | "read_all" | "find" | "list" | "delete" | "answer"
                 )
             })
             .collect(),
@@ -59,7 +59,6 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
                     t.name.as_str(),
                     "read"
                         | "read_all"
-                        | "search_and_read"
                         | "write"
                         | "delete"
                         | "mkdir"
