@@ -452,20 +452,21 @@ impl Tool for EvalTool {
             }
             scope.push("workspace_date".to_string(), ws_date);
 
+            // parse_json: uses Rhai's native JSON parser + llm_json repair fallback
             engine.register_fn("parse_json", |s: &str| -> rhai::Dynamic {
-                match serde_json::from_str::<serde_json::Value>(s) {
-                    Ok(v) => json_to_rhai(&v),
-                    Err(_) => {
-                        let opts = llm_json::RepairOptions::default();
-                        match llm_json::repair_json(s, &opts) {
-                            Ok(fixed) => match serde_json::from_str::<serde_json::Value>(&fixed) {
-                                Ok(v) => json_to_rhai(&v),
-                                Err(_) => rhai::Dynamic::UNIT,
-                            },
-                            Err(_) => rhai::Dynamic::UNIT,
-                        }
+                // Try Rhai native parse first
+                let mut eng = rhai::Engine::new();
+                if let Ok(map) = eng.parse_json(s, false) {
+                    return rhai::Dynamic::from(map);
+                }
+                // Fallback: llm_json repair + serde → rhai conversion
+                let opts = llm_json::RepairOptions::default();
+                if let Ok(fixed) = llm_json::repair_json(s, &opts) {
+                    if let Ok(map) = eng.parse_json(&fixed, false) {
+                        return rhai::Dynamic::from(map);
                     }
                 }
+                rhai::Dynamic::UNIT
             });
 
             engine.set_max_operations(100_000);
