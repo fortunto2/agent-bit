@@ -93,15 +93,21 @@ pub fn scan_content(content: &str) -> bool {
 // AI-NOTE: auto-ref universal — any data file eligible, exclude system files only.
 // Old: hardcoded AUTO_REF_DIRS (CRM-specific: accounts/, contacts/, etc.)
 // New: exclude README/AGENTS/inbox — everything else is valid data ref.
+// AI-NOTE: auto-ref includes ANY file agent read, except root policy + inbox.
+// Subdir README.MD IS included (harness requires it as ref for project lookups).
 pub fn is_auto_ref_path(path: &str) -> bool {
     let norm = path.trim_start_matches('/');
     let lower = norm.to_lowercase();
-    // Exclude system/policy files
-    if lower.contains("readme") || lower.contains("agents.m") || lower.starts_with("_") {
+    // Exclude root policy files only (not subdir READMEs)
+    if !norm.contains('/') && (lower == "readme.md" || lower == "agents.md") {
         return false;
     }
     // Exclude inbox source files
     if lower.starts_with("inbox/") || lower.starts_with("00_inbox/") {
+        return false;
+    }
+    // Exclude templates
+    if lower.starts_with("_") {
         return false;
     }
     true
