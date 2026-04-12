@@ -527,12 +527,31 @@ impl Tool for EvalTool {
                 &mut ctx,
             );
 
-            // Execute JS
+            // Execute JS — auto-stringify objects/arrays
             match ctx.eval(Source::from_bytes(&code)) {
                 Ok(val) => {
-                    val.to_string(&mut ctx)
-                        .map(|s| s.to_std_string_escaped())
-                        .unwrap_or_else(|e| format!("JS error: {e}"))
+                    if val.is_object() {
+                        // Objects/arrays: JSON.stringify for readable output
+                        let stringify_code = format!(
+                            "JSON.stringify({})",
+                            val.to_string(&mut ctx).map(|s| s.to_std_string_escaped()).unwrap_or_default()
+                        );
+                        // Safer: re-eval with JSON.stringify wrapping the result
+                        let wrapped = format!("var __result = ({code}); typeof __result === 'object' ? JSON.stringify(__result, null, 2) : String(__result)");
+                        ctx.eval(Source::from_bytes(&wrapped))
+                            .and_then(|v| v.to_string(&mut ctx))
+                            .map(|s| s.to_std_string_escaped())
+                            .unwrap_or_else(|_| {
+                                // Fallback to basic toString
+                                val.to_string(&mut ctx)
+                                    .map(|s| s.to_std_string_escaped())
+                                    .unwrap_or_else(|e| format!("JS error: {e}"))
+                            })
+                    } else {
+                        val.to_string(&mut ctx)
+                            .map(|s| s.to_std_string_escaped())
+                            .unwrap_or_else(|e| format!("JS error: {e}"))
+                    }
                 }
                 Err(e) => format!("JS error: {e}"),
             }
