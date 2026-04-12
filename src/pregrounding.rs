@@ -401,26 +401,28 @@ pub(crate) async fn run_agent(
     // AI-NOTE: removed seq.json pre-check — agent reads outbox README itself (via skill).
     // Old approach: hardcoded outbox path guessing. New: agent-driven, workspace-agnostic.
 
-    // Build tool registry + agent — workflow wired for guards/hooks
+    // ── Tool Registry (Claude Code / Codex inspired: core + extended + management) ──
     let registry = ToolRegistry::new()
-        .register(tools::ReadTool::new(pcm.clone(), Some(workflow.clone())))
-        .register(tools::ReadAllTool(pcm.clone()))
-        .register(tools::SearchAndReadTool(pcm.clone()))
-        .register(tools::GrepCountTool(pcm.clone()))
-        .register(tools::EvalTool(pcm.clone()))
-        .register(tools::WriteTool::new(pcm.clone(), hook_registry.clone(), Some(workflow.clone())))
-        .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
-        .register(tools::FindTool(pcm.clone()))
-        .register(tools::ListTool(pcm.clone()))
-        .register(tools::TreeTool(pcm.clone()))
-        .register(tools::DeleteTool::new(pcm.clone(), Some(workflow.clone())))
-        .register(tools::MkDirTool(pcm.clone()))
-        .register(tools::MoveTool(pcm.clone()))
-        .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone(), Some(workflow.clone())))
-        .register(tools::ContextTool(pcm.clone()))
-        .register(tools::ListSkillsTool(skill_registry.clone()))
-        .register(tools::GetSkillTool(skill_registry.clone()))
-        .register(tools::QueryCrmTool(crm_graph.clone()));
+        // CORE (7 tools — like Claude Code Read/Write/Edit/Bash/Glob/Grep + PAC1 answer)
+        .register(tools::ReadTool::new(pcm.clone(), Some(workflow.clone())))   // = FileReadTool
+        .register(tools::WriteTool::new(pcm.clone(), hook_registry.clone(), Some(workflow.clone()))) // = FileWriteTool
+        .register(tools::DeleteTool::new(pcm.clone(), Some(workflow.clone()))) // (no Claude equiv — through Bash)
+        .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))     // = GrepTool (auto-expand ≤10 files)
+        .register(tools::ListTool(pcm.clone()))                                 // = GlobTool / list_dir
+        .register(tools::TreeTool(pcm.clone()))                                 // workspace overview
+        .register(tools::EvalTool(pcm.clone()))                                 // = BashTool / js_repl (Boa JS + glob)
+        .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone(), Some(workflow.clone()))) // PAC1-specific
+        .register(tools::ContextTool(pcm.clone()))                              // PAC1-specific (date/time)
+        // EXTENDED (batch tools — justified by PCM round-trip savings)
+        .register(tools::ReadAllTool(pcm.clone()))                              // = read entire directory
+        .register(tools::SearchAndReadTool(pcm.clone()))                        // = grep + read all matches
+        .register(tools::GrepCountTool(pcm.clone()));                            // = grep -c (one call)
+        // MANAGEMENT (disabled — testing with 12 core+extended tools only)
+        // .register(tools::MkDirTool(pcm.clone()))
+        // .register(tools::MoveTool(pcm.clone()))
+        // .register(tools::FindTool(pcm.clone()))
+        // .register(tools::ListSkillsTool(skill_registry.clone()))
+        // .register(tools::GetSkillTool(skill_registry.clone()))
 
     let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, Some(workflow.clone()));
     agent.set_intent(&instruction_intent);
