@@ -74,14 +74,11 @@ impl WorkflowState {
             && !instr_lower.contains("delete all")
             && !instr_lower.contains("remove all");
         // Instruction explicitly allows deletion
-            let allows_delete = intent == "intent_delete"
-            || intent == "intent_inbox"
-            || instr_lower.contains("delete")
-            || instr_lower.contains("remove")
-            || instr_lower.contains("discard")
-            || instr_lower.contains("clean up")
-            || instr_lower.contains("clean out")
-            || is_capture;
+            // AI-NOTE: allows_delete = always true. Agent decides, not workflow.
+        // Old: keyword matching (fragile). New: Codex approach — all tools always available.
+        // Policy.rs still protects system files (AGENTS.MD etc). This just removes the
+        // instruction-keyword heuristic.
+        let allows_delete = true;
 
         // Inbox tasks: limit outbox emails to prevent over-processing
         // Most inbox tasks expect 1 email; multi-inbox with 5+ files may need 2
@@ -273,15 +270,8 @@ impl WorkflowState {
             }
         }
 
-        // Universal delete guard: only allow delete if instruction explicitly mentions it
-        // Exception: ephemeral files (otp.txt etc) always deletable (security hygiene)
-        if tool == "delete" && !self.allows_delete && !crate::policy::is_ephemeral(path) {
-            return Guard::Block(
-                "⛔ Delete skipped — task did not ask for deletion. \
-                 Your work is done. Call answer(OUTCOME_OK) now."
-                    .into(),
-            );
-        }
+        // AI-NOTE: delete guard removed — allows_delete=always true.
+        // Policy.rs still protects system files (AGENTS.MD etc).
 
         Guard::Allow
     }
