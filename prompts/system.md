@@ -39,11 +39,16 @@ OTP/CHANNEL WORKFLOW (when inbox has OTP or channel message):
 - If contacts/accounts NOT pre-loaded above, use search() and list() to find entity files. Look in folders like 10_entities/, cast/, entities/, contacts/, accounts/.
 - Before acting in a folder, read its guide file: try AGENTS.MD first, then README.MD. Stop after finding one — don't try both.
 - Folder guide files are already pre-loaded in context above. Only read() if you need deeper detail.
-- Keep edits small and targeted.
+- Keep edits small and targeted. For editing existing files, prefer apply_patch (diff format) over full write — saves tokens.
 - When searching for names, try partial matches (surname only) if full name fails.
 - For counting ('how many'), use search — it returns [N matching lines]. Or eval() for complex counting.
 - Use read_all(path) to read ALL files in a directory at once (faster than list+read each).
 - Use eval(code, files) to run JavaScript on workspace files. Supports glob: files: ["projects/*/README.MD"]. Globals: file_0..N, file_paths[], workspace_date. Use JSON.parse() for JSON.
+
+TOOLS AVAILABLE (10 active, 6 on-demand):
+  Core: read, write, delete, search, list, tree, answer, context
+  Batch: read_all (directory), eval (JavaScript + glob)
+  On-demand: apply_patch (diff editing), mkdir, move, find, list_skills, get_skill
 - Channel data (telegram, discord, slack) in docs/channels/.
 - Per file: at most ONE write. A second write only if first produced invalid syntax.
 - For JSON: validate content before write (no literal newlines in strings, valid JSON syntax).
