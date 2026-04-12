@@ -52,6 +52,15 @@ cf-aig-request-timeout = "300000"
 cf-aig-cache-ttl = "3600"
 x-session-affinity = "pac1-agent"
 
+[providers.gpt54-mini]
+model = "gpt-5.4-mini"
+api_key_env = "OPENAI_API_KEY"
+
+[providers.gpt54]
+model = "gpt-5.4"
+api_key_env = "OPENAI_API_KEY"
+
+# Aliases for backward compat
 [providers.openai]
 model = "gpt-5.4-mini"
 api_key_env = "OPENAI_API_KEY"
