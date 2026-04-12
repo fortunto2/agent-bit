@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use sgr_agent::agent_loop::{LoopConfig, LoopEvent, run_loop};
-use sgr_agent::agents::clarification::PlanTool;
-use sgr_agent::agents::planning::{Plan, PlanningAgent};
+// AI-NOTE: PlanTool, Plan, PlanningAgent removed — planning phase eliminated
 use sgr_agent::context::AgentContext;
 use sgr_agent::evolution::{self, EvolutionEntry, RunStats};
 use sgr_agent::registry::ToolRegistry;
@@ -408,6 +407,8 @@ pub(crate) async fn run_agent(
         .register(tools::ReadAllTool(pcm.clone()))
         .register(tools::SearchAndReadTool(pcm.clone()))
         .register(tools::GrepCountTool(pcm.clone()))
+        .register(tools::DateCalcTool(pcm.clone()))
+        .register(tools::JsonExtractTool(pcm.clone()))
         .register(tools::WriteTool::new(pcm.clone(), hook_registry.clone(), Some(workflow.clone())))
         .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
         .register(tools::FindTool(pcm.clone()))

@@ -250,6 +250,144 @@ impl Tool for SearchAndReadTool {
     }
 }
 
+// ─── date_calc ──────────────────────────────────────────────────────────────
+
+// AI-NOTE: date_calc — agent miscalculates "168 days ago" mentally. This does it correctly.
+pub struct DateCalcTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct DateCalcArgs {
+    /// Base date in YYYY-MM-DD format. Use "today" to auto-fetch from context().
+    base: String,
+    /// Number of days to add (positive) or subtract (negative)
+    delta_days: i64,
+}
+
+#[async_trait]
+impl Tool for DateCalcTool {
+    fn name(&self) -> &str { "date_calc" }
+    fn description(&self) -> &str {
+        "Calculate a date by adding/subtracting days. Use for 'N days ago', 'in 2 weeks', etc. \
+         Base can be 'today' (auto-fetches workspace date) or YYYY-MM-DD. \
+         Returns the result date in YYYY-MM-DD format."
+    }
+    fn is_read_only(&self) -> bool { true }
+    fn parameters_schema(&self) -> Value { json_schema_for::<DateCalcArgs>() }
+    async fn execute(&self, args: Value, ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        self.execute_readonly(args, ctx).await
+    }
+    async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: DateCalcArgs = parse_args(&args)?;
+        let base_str = if a.base == "today" {
+            // Fetch workspace date from context
+            match self.0.context().await {
+                Ok(ctx) => {
+                    // Parse date from context response (format: "2026-05-14T00:00:00Z" or similar)
+                    ctx.split('T').next().unwrap_or(&ctx).trim_matches('"').to_string()
+                }
+                Err(_) => return Ok(ToolOutput::text("Error: cannot fetch workspace date. Provide base date as YYYY-MM-DD.".to_string())),
+            }
+        } else {
+            a.base.clone()
+        };
+        // Parse YYYY-MM-DD
+        let parts: Vec<&str> = base_str.split('-').collect();
+        if parts.len() != 3 {
+            return Ok(ToolOutput::text(format!("Error: invalid date format '{}'. Use YYYY-MM-DD.", base_str)));
+        }
+        let (y, m, d) = match (parts[0].parse::<i32>(), parts[1].parse::<u32>(), parts[2].parse::<u32>()) {
+            (Ok(y), Ok(m), Ok(d)) => (y, m, d),
+            _ => return Ok(ToolOutput::text(format!("Error: cannot parse date '{}'", base_str))),
+        };
+        // Simple date arithmetic using chrono-free approach (Julian day number)
+        fn to_jdn(y: i32, m: u32, d: u32) -> i64 {
+            let a = (14 - m as i64) / 12;
+            let y2 = y as i64 + 4800 - a;
+            let m2 = m as i64 + 12 * a - 3;
+            d as i64 + (153 * m2 + 2) / 5 + 365 * y2 + y2 / 4 - y2 / 100 + y2 / 400 - 32045
+        }
+        fn from_jdn(jdn: i64) -> (i32, u32, u32) {
+            let a = jdn + 32044;
+            let b = (4 * a + 3) / 146097;
+            let c = a - (146097 * b) / 4;
+            let d = (4 * c + 3) / 1461;
+            let e = c - (1461 * d) / 4;
+            let m = (5 * e + 2) / 153;
+            let day = (e - (153 * m + 2) / 5 + 1) as u32;
+            let month = (m + 3 - 12 * (m / 10)) as u32;
+            let year = (100 * b + d - 4800 + m / 10) as i32;
+            (year, month, day)
+        }
+        let jdn = to_jdn(y, m, d) + a.delta_days;
+        let (ry, rm, rd) = from_jdn(jdn);
+        Ok(ToolOutput::text(format!("{:04}-{:02}-{:02}", ry, rm, rd)))
+    }
+}
+
+// ─── json_extract ───────────────────────────────────────────────────────────
+
+// AI-NOTE: json_extract — read JSON file + extract field(s) without filling context.
+pub struct JsonExtractTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct JsonExtractArgs {
+    /// File path to read (must be JSON)
+    path: String,
+    /// Dot-separated field path to extract (e.g. "total", "line_items.0.amount", "name")
+    field: String,
+}
+
+#[async_trait]
+impl Tool for JsonExtractTool {
+    fn name(&self) -> &str { "json_extract" }
+    fn description(&self) -> &str {
+        "Read a JSON file and extract a specific field. Returns just the field value. \
+         Use dot notation for nested fields (e.g. 'line_items.0.amount'). \
+         Much faster than read() + manual parsing for JSON data."
+    }
+    fn is_read_only(&self) -> bool { true }
+    fn parameters_schema(&self) -> Value { json_schema_for::<JsonExtractArgs>() }
+    async fn execute(&self, args: Value, ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        self.execute_readonly(args, ctx).await
+    }
+    async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: JsonExtractArgs = parse_args(&args)?;
+        let content = self.0.read(&a.path, false, 0, 0).await.map_err(pcm_err)?;
+        // Strip PCM header ($ cat ...)
+        let json_str = if content.starts_with("$ ") {
+            content.find('\n').map(|i| &content[i+1..]).unwrap_or(&content)
+        } else {
+            &content
+        };
+        let parsed: serde_json::Value = match serde_json::from_str(json_str) {
+            Ok(v) => v,
+            Err(_) => {
+                let opts = llm_json::RepairOptions::default();
+                match llm_json::repair_json(json_str, &opts) {
+                    Ok(fixed) => serde_json::from_str(&fixed)
+                        .map_err(|e| ToolError::InvalidArgs(format!("JSON parse error after repair: {e}")))?,
+                    Err(e) => return Ok(ToolOutput::text(format!("JSON parse error: {e}"))),
+                }
+            }
+        };
+
+        // Navigate dot path
+        let mut current = &parsed;
+        for key in a.field.split('.') {
+            current = if let Ok(idx) = key.parse::<usize>() {
+                current.get(idx).unwrap_or(&serde_json::Value::Null)
+            } else {
+                current.get(key).unwrap_or(&serde_json::Value::Null)
+            };
+        }
+        Ok(ToolOutput::text(match current {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Null => "(field not found)".into(),
+            other => other.to_string(),
+        }))
+    }
+}
+
 // ─── grep_count ──────────────────────────────────────────────────────────────
 
 // AI-NOTE: grep_count — count matching lines in one call instead of search+read+manual count

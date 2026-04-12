@@ -645,7 +645,6 @@ async fn verify_and_submit(
     extra_headers: &[(String, String)],
     temperature: f32,
 ) {
-    let execution_summary = pregrounding::build_execution_summary(history, 15);
     let proposed = pcm.get_proposed_answer();
 
     match proposed {
