@@ -410,7 +410,7 @@ pub(crate) async fn run_agent(
         .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
         .register(sgr_agent_tools::ListTool(pcm.clone()))                        // → sgr-agent-tools
         .register(sgr_agent_tools::TreeTool(pcm.clone()))                        // → sgr-agent-tools
-        .register(tools::EvalTool(pcm.clone()))                                  // local (Boa deps)
+        .register(sgr_agent_tools::EvalTool(pcm.clone()))                         // → sgr-agent-tools
         .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone(), Some(workflow.clone()))) // PAC1-specific
         .register(tools::ContextTool(pcm.clone()))                               // PAC1-specific
         // EXTENDED
