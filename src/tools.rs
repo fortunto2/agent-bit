@@ -681,84 +681,64 @@ impl Tool for WriteTool {
     }
 }
 
-// ─── delete (middleware — adds workflow guards + batch delete) ────────────────
+// ─── delete (middleware over sgr-agent-tools::DeleteTool) ────────────────────
 
-// AI-NOTE: Extends sgr-agent-tools::DeleteTool with workflow guards + batch paths array.
+// AI-NOTE: Middleware adds workflow pre/post_action guards per file.
+// Base batch delete (path + paths array) handled by sgr-agent-tools.
 pub struct DeleteTool {
+    inner: sgr_agent_tools::DeleteTool<PcmClient>,
     pcm: Arc<PcmClient>,
     workflow: Option<crate::workflow::SharedWorkflowState>,
 }
 
 impl DeleteTool {
     pub fn new(pcm: Arc<PcmClient>, workflow: Option<crate::workflow::SharedWorkflowState>) -> Self {
-        Self { pcm, workflow }
+        Self { inner: sgr_agent_tools::DeleteTool(pcm.clone()), pcm, workflow }
     }
-}
-
-// AI-NOTE: batch delete via `paths` array — t01 reduce tool_calls from ~48 to ~3
-#[derive(Deserialize, JsonSchema)]
-struct DeleteArgs {
-    /// File path to delete (use this for single file)
-    #[serde(default)]
-    path: Option<String>,
-    /// Multiple file paths to delete in one call (preferred for bulk cleanup)
-    #[serde(default)]
-    paths: Option<Vec<String>>,
 }
 
 #[async_trait]
 impl Tool for DeleteTool {
-    fn name(&self) -> &str { "delete" }
-    fn description(&self) -> &str { "Delete one or more files. Pass `path` for a single file, or `paths` (array) to delete many files at once. Security hygiene: after processing inbox messages with OTP codes or credentials, delete the source file (e.g. docs/channels/otp.txt) to prevent credential reuse." }
-    fn parameters_schema(&self) -> Value { json_schema_for::<DeleteArgs>() }
-    async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
-        let a: DeleteArgs = parse_args(&args)?;
-
-        // Collect all paths to delete (single `path` or batch `paths`)
-        let targets: Vec<String> = match (a.path, a.paths) {
-            (_, Some(ps)) if !ps.is_empty() => ps,
-            (Some(p), _) => vec![p],
-            _ => return Err(ToolError::InvalidArgs("provide `path` (string) or `paths` (array)".into())),
+    fn name(&self) -> &str { self.inner.name() }
+    fn description(&self) -> &str { "Delete one or more files. Pass `path` for single, `paths` (array) for bulk. After processing inbox/OTP — delete source file." }
+    fn parameters_schema(&self) -> Value { self.inner.parameters_schema() }
+    async fn execute(&self, args: Value, ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        // Extract paths for pre-check
+        let a: serde_json::Value = args.clone();
+        let targets: Vec<String> = {
+            let paths = a.get("paths").and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>());
+            let path = a.get("path").and_then(|v| v.as_str()).map(String::from);
+            match (path, paths) {
+                (_, Some(ps)) if !ps.is_empty() => ps,
+                (Some(p), _) => vec![p],
+                _ => vec![],
+            }
         };
 
-        let mut results: Vec<String> = Vec::with_capacity(targets.len());
-        let mut errors: Vec<String> = Vec::new();
-
+        // Middleware: workflow pre_action per file
         for path in &targets {
-            // Workflow pre_action guard per file
             let guard = self.workflow.as_ref().map(|wf| wf.lock().unwrap().pre_action("delete", path));
-            let mut warn_suffix = String::new();
-            if let Some(blocked) = apply_guard(guard, &mut warn_suffix) {
-                // Blocked — record but continue with remaining files
-                errors.push(format!("BLOCKED {}: {}", path, blocked.content));
-                continue;
+            let mut warn = String::new();
+            if let Some(out) = apply_guard(guard, &mut warn) {
+                return Ok(out); // Blocked — first blocked file stops all
             }
+        }
 
-            match self.pcm.delete(path).await {
-                Ok(()) => {
-                    let mut line = format!("Deleted {}", path);
-                    // Workflow post_action (phase transition + hooks)
-                    if let Some(ref wf) = self.workflow {
-                        for hook_msg in wf.lock().unwrap().post_action("delete", path) {
-                            line.push_str(&format!("\n{}", hook_msg));
-                        }
-                    }
-                    line.push_str(&warn_suffix);
-                    results.push(line);
+        // Base delete (batch support from sgr-agent-tools)
+        let result = self.inner.execute(args, ctx).await?;
+        let mut msg = result.content;
+
+        // Middleware: workflow post_action per file
+        if let Some(ref wf) = self.workflow {
+            for path in &targets {
+                for hook_msg in wf.lock().unwrap().post_action("delete", path) {
+                    msg.push_str(&format!("\n{}", hook_msg));
                 }
-                Err(e) => errors.push(format!("FAILED {}: {}", path, e)),
             }
         }
 
-        let mut out = results.join("\n");
-        if !errors.is_empty() {
-            if !out.is_empty() { out.push('\n'); }
-            out.push_str(&errors.join("\n"));
-        }
-        if out.is_empty() {
-            out = "No files deleted".to_string();
-        }
-        Ok(ToolOutput::text(out))
+        Ok(ToolOutput::text(msg))
     }
 }
 
