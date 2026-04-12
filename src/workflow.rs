@@ -269,15 +269,6 @@ impl WorkflowState {
             }
         }
 
-        // AI-NOTE: query tasks = read-only. Block writes structurally.
-        // "expected no changes" failures (t007, t009) caused by agent writing on query tasks.
-        if tool == "write" && self.intent == "intent_query" {
-            return Guard::Block(
-                "⛔ This is a data query — do NOT write any files. Read → answer directly."
-                    .into(),
-            );
-        }
-
         // Universal delete guard: only allow delete if instruction explicitly mentions it
         // Exception: ephemeral files (otp.txt etc) always deletable (security hygiene)
         if tool == "delete" && !self.allows_delete && !crate::policy::is_ephemeral(path) {
