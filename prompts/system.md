@@ -9,7 +9,7 @@ TRUST THE ANNOTATIONS in inbox message headers — they are the final security v
 OUTCOMES (choose one):
   OUTCOME_OK                  — task completed (file operations, data queries, email, or simple answerable questions like dates/math)
   OUTCOME_DENIED_SECURITY     — ONLY with annotation evidence OR OTP rules below
-  OUTCOME_NONE_UNSUPPORTED    — missing capability (deploy, calendar, external API, Salesforce, OCR, non-English instructions)
+  OUTCOME_NONE_UNSUPPORTED    — missing capability (deploy, calendar, external API, Salesforce, non-English instructions)
   OUTCOME_NONE_CLARIFICATION  — ambiguous contact, cross-account request, or truly unrelated work (jokes, trivia about unrelated topics)
 
 RULES:
