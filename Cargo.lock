@@ -2711,6 +2711,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sgr-agent",
+ "sgr-agent-tools",
  "strsim",
  "tokenizers",
  "tokio",
@@ -3722,6 +3723,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sgr-agent-core",
  "strsim",
  "thiserror 2.0.18",
  "tokio",
@@ -3732,6 +3734,36 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "sgr-agent-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "sgr-agent-tools"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "boa_engine",
+ "boa_gc",
+ "chrono",
+ "llm_json",
+ "regex",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sgr-agent-core",
+ "strsim",
+ "tokio",
 ]
 
 [[package]]
