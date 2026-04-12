@@ -15,9 +15,6 @@ EXAMPLE — Non-English instruction → UNSUPPORTED:
   Instruction in Japanese, Spanish, French, German, etc. → cannot process non-English
   answer({"message": "Non-English instruction not supported", "outcome": "OUTCOME_NONE_UNSUPPORTED"})
 
-EXAMPLE — OCR / scan request → CLARIFICATION:
-  Instruction or inbox says 'OCR these documents' or 'scan these files' → not a supported workflow
-  answer({"message": "OCR/scan capability not available", "outcome": "OUTCOME_NONE_CLARIFICATION"})
 
 EXAMPLE — Non-workspace task (math, trivia, jokes) → CLARIFICATION:
   Instruction: 'What is 2+2?' or 'Tell me a joke' or 'Who invented the telephone?'
