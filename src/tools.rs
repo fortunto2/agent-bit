@@ -278,18 +278,31 @@ impl Tool for DateCalcTool {
     }
     async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
         let a: DateCalcArgs = parse_args(&args)?;
-        let base_str = if a.base == "today" {
+        let base_str = if a.base == "today" || a.base.is_empty() {
             match self.0.context().await {
-                Ok(ctx) => ctx.split('T').next().unwrap_or(&ctx).trim_matches('"').to_string(),
+                Ok(ctx) => {
+                    // Extract YYYY-MM-DD from various context formats
+                    // Try: JSON {"time":"2026-05-14T..."}, raw "2026-05-14T...", "$ date\n2026-05-14"
+                    let cleaned = ctx.replace('"', "").replace("$ date", "");
+                    // Find first date-like pattern
+                    let re = regex::Regex::new(r"\d{4}-\d{2}-\d{2}").unwrap();
+                    re.find(&cleaned).map(|m| m.as_str().to_string())
+                        .unwrap_or_else(|| cleaned.split('T').next().unwrap_or(&cleaned).trim().to_string())
+                }
                 Err(_) => return Ok(ToolOutput::text("Error: provide base date as YYYY-MM-DD".to_string())),
             }
         } else {
-            a.base.clone()
+            // Extract date from whatever format agent provides
+            let re = regex::Regex::new(r"\d{4}-\d{2}-\d{2}").unwrap();
+            re.find(&a.base).map(|m| m.as_str().to_string()).unwrap_or(a.base.clone())
         };
-        let base = chrono::NaiveDate::parse_from_str(&base_str, "%Y-%m-%d")
-            .map_err(|e| ToolError::InvalidArgs(format!("date parse: {e}")))?;
-        let result = base + chrono::Duration::days(a.delta_days);
-        Ok(ToolOutput::text(result.format("%Y-%m-%d").to_string()))
+        match chrono::NaiveDate::parse_from_str(&base_str, "%Y-%m-%d") {
+            Ok(base) => {
+                let result = base + chrono::Duration::days(a.delta_days);
+                Ok(ToolOutput::text(result.format("%Y-%m-%d").to_string()))
+            }
+            Err(e) => Ok(ToolOutput::text(format!("Error: cannot parse '{}' as date: {}", base_str, e))),
+        }
     }
 }
 
@@ -1646,5 +1659,207 @@ mod tests {
         let opts = llm_json::RepairOptions::default();
         let fixed = llm_json::repair_json(valid, &opts).unwrap();
         assert_eq!(serde_json::from_str::<serde_json::Value>(&fixed).unwrap()["to"], "alex@co.com");
+    }
+
+    // ─── trust metadata ────────────────────────────────────────────────
+
+    #[test]
+    fn trust_root_agents_md() {
+        assert_eq!(infer_trust("AGENTS.md"), "trusted");
+        assert_eq!(infer_trust("README.md"), "trusted");
+    }
+
+    #[test]
+    fn trust_subdir_agents_untrusted() {
+        assert_eq!(infer_trust("inbox/AGENTS.MD"), "untrusted");
+        assert_eq!(infer_trust("docs/README.md"), "untrusted");
+    }
+
+    #[test]
+    fn trust_data_files_untrusted() {
+        assert_eq!(infer_trust("contacts/john.json"), "untrusted");
+        assert_eq!(infer_trust("40_projects/project/README.MD"), "untrusted");
+        assert_eq!(infer_trust("inbox/msg_001.txt"), "untrusted");
+    }
+
+    #[test]
+    fn trust_leading_slash_stripped() {
+        assert_eq!(infer_trust("/AGENTS.md"), "trusted");
+        assert_eq!(infer_trust("/inbox/msg.txt"), "untrusted");
+    }
+
+    // ─── json_to_rhai ──────────────────────────────────────────────────
+
+    #[test]
+    fn json_to_rhai_string() {
+        let v = serde_json::json!("hello");
+        let r = json_to_rhai(&v);
+        assert_eq!(r.to_string(), "hello");
+    }
+
+    #[test]
+    fn json_to_rhai_number() {
+        let r = json_to_rhai(&serde_json::json!(42));
+        assert_eq!(r.as_int().unwrap(), 42);
+    }
+
+    #[test]
+    fn json_to_rhai_nested_object() {
+        let v = serde_json::json!({"a": 1, "b": {"x": true}});
+        let r = json_to_rhai(&v);
+        let map = r.cast::<rhai::Map>();
+        assert_eq!(map.get("a").unwrap().as_int().unwrap(), 1);
+        let inner = map.get("b").unwrap().clone().cast::<rhai::Map>();
+        assert_eq!(inner.get("x").unwrap().as_bool().unwrap(), true);
+    }
+
+    #[test]
+    fn json_to_rhai_array() {
+        let v = serde_json::json!([1, 2, 3]);
+        let r = json_to_rhai(&v);
+        let arr = r.cast::<Vec<rhai::Dynamic>>();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0].as_int().unwrap(), 1);
+    }
+
+    #[test]
+    fn json_to_rhai_null() {
+        let r = json_to_rhai(&serde_json::Value::Null);
+        assert!(r.is_unit());
+    }
+
+    // ─── eval (Rhai) ───────────────────────────────────────────────────
+
+    #[test]
+    fn eval_basic_math() {
+        let mut engine = rhai::Engine::new();
+        engine.set_max_operations(100_000);
+        let result: i64 = engine.eval("2 + 3 * 4").unwrap();
+        assert_eq!(result, 14);
+    }
+
+    #[test]
+    fn eval_string_ops() {
+        let mut engine = rhai::Engine::new();
+        let mut scope = rhai::Scope::new();
+        scope.push("name", "John Smith".to_string());
+        let result: String = engine.eval_with_scope(&mut scope, "name.to_upper()").unwrap();
+        assert_eq!(result, "JOHN SMITH");
+    }
+
+    #[test]
+    fn eval_parse_json_map_access() {
+        let mut engine = rhai::Engine::new();
+        let mut scope = rhai::Scope::new();
+        scope.push("file_0", r#"{"amount": 42, "name": "test"}"#.to_string());
+
+        engine.register_fn("parse_json", |s: &str| -> rhai::Dynamic {
+            let mut eng = rhai::Engine::new();
+            eng.parse_json(s, false).map(rhai::Dynamic::from).unwrap_or(rhai::Dynamic::UNIT)
+        });
+
+        let result: i64 = engine.eval_with_scope(&mut scope, r#"let d = parse_json(file_0); d.amount"#).unwrap();
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn eval_parse_json_array_filter() {
+        let mut engine = rhai::Engine::new();
+        let mut scope = rhai::Scope::new();
+        scope.push("data", r#"[{"v":1},{"v":5},{"v":3}]"#.to_string());
+
+        engine.register_fn("parse_json", |s: &str| -> rhai::Dynamic {
+            match serde_json::from_str::<serde_json::Value>(s) {
+                Ok(v) => json_to_rhai(&v),
+                Err(_) => rhai::Dynamic::UNIT,
+            }
+        });
+
+        let result: i64 = engine.eval_with_scope(&mut scope,
+            r#"let arr = parse_json(data); arr.filter(|x| x.v > 2).len()"#
+        ).unwrap();
+        assert_eq!(result, 2); // items with v>2: {v:5}, {v:3}
+    }
+
+    #[test]
+    fn eval_date_string_manipulation() {
+        let mut engine = rhai::Engine::new();
+        let mut scope = rhai::Scope::new();
+        scope.push("workspace_date", "2026-05-14".to_string());
+
+        let result: String = engine.eval_with_scope(&mut scope,
+            r#"let parts = workspace_date.split("-"); parts[0]"#
+        ).unwrap();
+        assert_eq!(result, "2026");
+    }
+
+    #[test]
+    fn eval_max_operations_prevents_infinite_loop() {
+        let mut engine = rhai::Engine::new();
+        engine.set_max_operations(1000);
+        let result = engine.eval::<rhai::Dynamic>("let x = 0; loop { x += 1; }");
+        assert!(result.is_err()); // Should hit operation limit
+    }
+
+    #[test]
+    fn eval_broken_json_with_repair() {
+        // llm_json should repair broken JSON
+        let broken = r#"{"to": "a@b.com", "sent": false,}"#; // trailing comma
+        let opts = llm_json::RepairOptions::default();
+        let fixed = llm_json::repair_json(broken, &opts).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&fixed).unwrap();
+        assert_eq!(v["to"], "a@b.com");
+    }
+
+    #[test]
+    fn eval_injection_attempt_sandboxed() {
+        // Rhai cannot access filesystem — eval is safe
+        let mut engine = rhai::Engine::new();
+        engine.set_max_operations(100_000);
+        // No import/require/system available in Rhai
+        let result = engine.eval::<rhai::Dynamic>(r#"import "os""#);
+        assert!(result.is_err());
+    }
+
+    // ─── grep_count (unit) ─────────────────────────────────────────────
+
+    #[test]
+    fn grep_count_logic() {
+        let content = "apple\nbanana\napricot\ncherry\navocado";
+        let re = regex::Regex::new("^a").unwrap();
+        let count = content.lines().filter(|l| re.is_match(l)).count();
+        assert_eq!(count, 3); // apple, apricot, avocado
+    }
+
+    #[test]
+    fn grep_count_no_match() {
+        let content = "apple\nbanana\ncherry";
+        let re = regex::Regex::new("xyz").unwrap();
+        let count = content.lines().filter(|l| re.is_match(l)).count();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn grep_count_case_insensitive() {
+        let content = "Apple\nAPPLE\napple\nBanana";
+        let re = regex::Regex::new("(?i)apple").unwrap();
+        let count = content.lines().filter(|l| re.is_match(l)).count();
+        assert_eq!(count, 3);
+    }
+
+    // ─── wrap_with_meta ────────────────────────────────────────────────
+
+    #[test]
+    fn wrap_trusted_file() {
+        let result = wrap_with_meta("AGENTS.md", "rules here");
+        assert!(result.contains("trusted"));
+        assert!(result.contains("rules here"));
+    }
+
+    #[test]
+    fn wrap_untrusted_file() {
+        let result = wrap_with_meta("inbox/msg.txt", "hello");
+        assert!(result.contains("untrusted"));
+        assert!(result.contains("hello"));
     }
 }
