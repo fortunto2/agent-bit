@@ -20,67 +20,16 @@ const LEDGER_MAX: usize = 25;
 
 /// Router: filter tool definitions by task_type and step number.
 /// Returns a subset of `all_defs` appropriate for the current routing state.
-fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> Vec<ToolDef> {
+// AI-NOTE: Router simplified — all tools always available (like Codex/Claude Code).
+// Old approach: ML task_type → tool restriction. Fragile: wrong classification → wrong tools.
+// Only exception: "security" blocks write/delete (DENIED = zero mutations by spec).
+// Rollback: git checkout v0.10.1-before-router-removal -- src/agent.rs
+fn filter_tools_for_task(task_type: &str, _step: u32, all_defs: Vec<ToolDef>) -> Vec<ToolDef> {
     match task_type {
-        // AI-NOTE: security allows read/search (not just answer) — t29 OTP needs read docs/channels + otp.txt
         "security" => all_defs
             .into_iter()
-            .filter(|t| {
-                matches!(
-                    t.name.as_str(),
-                    "read" | "read_all" | "search" | "eval" | "find" | "list" | "answer"
-                )
-            })
+            .filter(|t| !matches!(t.name.as_str(), "write" | "delete" | "mkdir" | "move_file"))
             .collect(),
-        // "search" → read-only on step 0, full toolkit after (safety net if misclassified)
-        "search" if step == 0 => all_defs
-            .into_iter()
-            .filter(|t| {
-                matches!(
-                    t.name.as_str(),
-                    "read" | "read_all" | "search" | "eval" | "find" | "list" | "tree" | "answer" | "context"
-                )
-            })
-            .collect(),
-        // "delete" → read-only + delete (NO write/mkdir/move) — permanent restriction
-        "delete" => all_defs
-            .into_iter()
-            .filter(|t| {
-                matches!(
-                    t.name.as_str(),
-                    "search" | "read" | "read_all" | "find" | "list" | "delete" | "answer"
-                )
-            })
-            .collect(),
-        "edit" => all_defs
-            .into_iter()
-            .filter(|t| {
-                matches!(
-                    t.name.as_str(),
-                    "read"
-                        | "read_all"
-                        | "write"
-                        | "delete"
-                        | "mkdir"
-                        | "move_file"
-                        | "search"
-                        | "find"
-                        | "list"
-                        | "answer"
-                )
-            })
-            .collect(),
-        // "analyze" → read-only first pass, then full toolkit after ≥1 step
-        "analyze" if step == 0 => all_defs
-            .into_iter()
-            .filter(|t| {
-                matches!(
-                    t.name.as_str(),
-                    "read" | "read_all" | "search" | "find" | "list" | "tree" | "context" | "answer"
-                )
-            })
-            .collect(),
-        // unknown, or search/analyze with step > 0 → full toolkit
         _ => all_defs,
     }
 }
@@ -711,100 +660,27 @@ mod tests {
     }
 
     #[test]
-    // AI-NOTE: security now allows read/search for OTP verification (t29)
-    fn router_security_only_answer() {
+    fn router_security_blocks_mutations() {
         let defs = filter_tools_for_task("security", 0, fake_tool_defs());
         let names = tool_names(&defs);
         assert!(names.contains(&"read"));
         assert!(names.contains(&"search"));
         assert!(names.contains(&"answer"));
-        assert!(!names.contains(&"write"));
-        assert!(!names.contains(&"delete"));
+        assert!(!names.contains(&"write"), "security must not have write");
+        assert!(!names.contains(&"delete"), "security must not have delete");
     }
 
     #[test]
-    fn router_search_step0_read_only() {
-        let defs = filter_tools_for_task("search", 0, fake_tool_defs());
-        let names = tool_names(&defs);
-        assert!(names.contains(&"read"));
-        assert!(names.contains(&"search"));
-        assert!(names.contains(&"answer"));
-        assert!(!names.contains(&"write"), "search step 0 must not have write");
-        assert!(!names.contains(&"delete"), "search step 0 must not have delete");
-    }
-
-    #[test]
-    fn router_search_step1_full_toolkit() {
-        let defs = filter_tools_for_task("search", 1, fake_tool_defs());
-        let names = tool_names(&defs);
-        assert!(names.contains(&"write"), "search step 1+ must have write");
-        assert!(names.contains(&"delete"), "search step 1+ must have delete");
-        assert!(names.contains(&"read"));
-        assert!(names.contains(&"answer"));
-    }
-
-    #[test]
-    fn router_edit_always_has_write_delete() {
-        for step in [0, 1, 5] {
-            let defs = filter_tools_for_task("edit", step, fake_tool_defs());
+    fn router_non_security_has_all_tools() {
+        for task_type in ["edit", "delete", "search", "analyze", "unknown"] {
+            let defs = filter_tools_for_task(task_type, 0, fake_tool_defs());
             let names = tool_names(&defs);
-            assert!(names.contains(&"write"), "edit step {step} must have write");
-            assert!(names.contains(&"delete"), "edit step {step} must have delete");
+            assert!(names.contains(&"read"));
+            assert!(names.contains(&"write"));
+            assert!(names.contains(&"delete"));
+            assert!(names.contains(&"search"));
+            assert!(names.contains(&"answer"));
         }
-    }
-
-    #[test]
-    fn router_delete_no_write() {
-        for step in [0, 1, 5] {
-            let defs = filter_tools_for_task("delete", step, fake_tool_defs());
-            let names = tool_names(&defs);
-            assert!(!names.contains(&"write"), "delete step {step} must not have write");
-            assert!(!names.contains(&"mkdir"), "delete step {step} must not have mkdir");
-            assert!(!names.contains(&"move_file"), "delete step {step} must not have move_file");
-            assert!(!names.contains(&"tree"), "delete step {step} must not have tree");
-            assert!(!names.contains(&"context"), "delete step {step} must not have context");
-        }
-    }
-
-    #[test]
-    fn router_delete_has_delete() {
-        for step in [0, 1, 5] {
-            let defs = filter_tools_for_task("delete", step, fake_tool_defs());
-            let names = tool_names(&defs);
-            assert!(names.contains(&"delete"), "delete step {step} must have delete");
-            assert!(names.contains(&"search"), "delete step {step} must have search");
-            assert!(names.contains(&"read"), "delete step {step} must have read");
-            assert!(names.contains(&"answer"), "delete step {step} must have answer");
-            assert!(names.contains(&"find"), "delete step {step} must have find");
-            assert!(names.contains(&"list"), "delete step {step} must have list");
-        }
-    }
-
-    #[test]
-    fn router_delete_all_steps() {
-        // Verify "delete" restriction is permanent (no step-based safety net)
-        let defs_s0 = filter_tools_for_task("delete", 0, fake_tool_defs());
-        let defs_s5 = filter_tools_for_task("delete", 5, fake_tool_defs());
-        let names_s0 = tool_names(&defs_s0);
-        let names_s5 = tool_names(&defs_s5);
-        assert_eq!(names_s0, names_s5, "delete routing must be identical at all steps");
-    }
-
-    #[test]
-    fn router_analyze_step0_read_only() {
-        let defs = filter_tools_for_task("analyze", 0, fake_tool_defs());
-        let names = tool_names(&defs);
-        assert!(names.contains(&"read"));
-        assert!(!names.contains(&"write"), "analyze step 0 must not have write");
-        assert!(!names.contains(&"delete"), "analyze step 0 must not have delete");
-    }
-
-    #[test]
-    fn router_analyze_step1_full_toolkit() {
-        let defs = filter_tools_for_task("analyze", 1, fake_tool_defs());
-        let names = tool_names(&defs);
-        assert!(names.contains(&"write"), "analyze step 1+ must have write");
-        assert!(names.contains(&"delete"), "analyze step 1+ must have delete");
     }
 
     // consecutive_reads_counter test removed — tracking moved to WorkflowState (workflow.rs)
