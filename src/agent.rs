@@ -28,7 +28,7 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
             .filter(|t| {
                 matches!(
                     t.name.as_str(),
-                    "read" | "read_all" | "search" | "search_and_read" | "grep_count" | "date_calc" | "json_extract" | "eval" | "find" | "list" | "answer"
+                    "read" | "read_all" | "search" | "search_and_read" | "grep_count" | "eval" | "find" | "list" | "answer"
                 )
             })
             .collect(),
@@ -38,7 +38,7 @@ fn filter_tools_for_task(task_type: &str, step: u32, all_defs: Vec<ToolDef>) -> 
             .filter(|t| {
                 matches!(
                     t.name.as_str(),
-                    "read" | "read_all" | "search" | "search_and_read" | "grep_count" | "date_calc" | "json_extract" | "eval" | "find" | "list" | "tree" | "answer" | "context"
+                    "read" | "read_all" | "search" | "search_and_read" | "grep_count" | "eval" | "find" | "list" | "tree" | "answer" | "context"
                 )
             })
             .collect(),
