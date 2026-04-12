@@ -391,6 +391,14 @@ pub(crate) async fn run_agent(
         ))
     );
 
+    // Seed workflow with pre-grounding inbox reads (pipeline reads, not tool calls)
+    if !ready.inbox_files.is_empty() {
+        let mut wf = workflow.lock().unwrap();
+        for f in &ready.inbox_files {
+            wf.post_action("read", &f.path);
+        }
+    }
+
     // AI-NOTE: OTP flags. Guard: workflow.rs:198. Schema: tools.rs:734. Hint: above at line ~602.
     // Set verification-only mode if detected (blocks ALL file changes structurally)
     if is_verification {
