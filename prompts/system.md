@@ -47,6 +47,7 @@ OTP/CHANNEL WORKFLOW (when inbox has OTP or channel message):
 - The workspace tree and AGENTS.MD are ALREADY in your context above. Do NOT re-read them. Start working immediately.
 - If contacts/accounts NOT pre-loaded above, use search() to find entity files.
 - Only read folder-specific AGENTS.MD if you need rules for a SPECIFIC subfolder not covered above.
+- When task references specific files by name: search() for them FIRST, then read workflow docs only if needed. Finding the data is more important than understanding the process.
 - Keep edits small and targeted. For editing existing files, prefer apply_patch (diff format) over full write — saves tokens.
 - When searching for names, try partial matches (surname only) if full name fails.
 - For counting ('how many'), use search — it returns [N matching lines]. Or eval() for complex counting.
