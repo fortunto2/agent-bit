@@ -1073,19 +1073,21 @@ fn unique_files_from_search(output: &str, max: usize) -> Vec<String> {
     files
 }
 
-/// Auto-expand search results: if ≤3 unique files, append full file content.
+/// Auto-expand search results: if ≤10 unique files, append full file content.
+/// AI-NOTE: was ≤3, increased to 10. Search becomes "search + read all matches" by default.
+/// Removes need for separate search_and_read in most cases.
 async fn auto_expand_search(pcm: &PcmClient, search_output: String) -> String {
-    let files = unique_files_from_search(&search_output, 3);
-    if files.is_empty() || files.len() > 3 {
+    let files = unique_files_from_search(&search_output, 10);
+    if files.is_empty() || files.len() > 10 {
         return search_output;
     }
 
     let mut expanded = search_output;
     for path in &files {
         if let Ok(content) = pcm.read(path, false, 0, 0).await {
-            // Cap at 200 lines to prevent context overflow
+            let trust = infer_trust(path);
             let capped: String = content.lines().take(200).collect::<Vec<_>>().join("\n");
-            expanded.push_str(&format!("\n\n=== {} (full content) ===\n{}", path, capped));
+            expanded.push_str(&format!("\n\n--- {} [{}] ---\n{}", path, trust, capped));
         }
     }
     expanded

@@ -22,4 +22,11 @@ WORKFLOW — Date-based lookup:
   FOUND → read, answer with refs.
   NOT FOUND → OUTCOME_NONE_CLARIFICATION (not OK, not UNSUPPORTED).
 
+WORKFLOW — Enumerate all (list ALL X matching condition):
+  Use eval() with glob to read ALL files at once and filter in JavaScript:
+  eval(code: 'file_paths.filter((p,i) => eval("file_"+i).includes("keyword"))', files: ['dir/*/README.MD'])
+  This reads ALL READMEs and filters — guaranteed to find every match.
+  For project names: extract human-readable name from README, not folder name.
+
 IMPORTANT: Always include refs in your answer. Return ONLY the requested data — no explanations.
+For project names: return the human-readable name from README.MD (e.g. "Harbor Body"), NOT the folder path.
