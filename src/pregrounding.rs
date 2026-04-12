@@ -409,6 +409,7 @@ pub(crate) async fn run_agent(
         .register(tools::GrepCountTool(pcm.clone()))
         .register(tools::DateCalcTool(pcm.clone()))
         .register(tools::JsonExtractTool(pcm.clone()))
+        .register(tools::EvalTool(pcm.clone()))
         .register(tools::WriteTool::new(pcm.clone(), hook_registry.clone(), Some(workflow.clone())))
         .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
         .register(tools::FindTool(pcm.clone()))

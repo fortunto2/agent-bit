@@ -252,7 +252,7 @@ impl Tool for SearchAndReadTool {
 
 // ─── date_calc ──────────────────────────────────────────────────────────────
 
-// AI-NOTE: date_calc — agent miscalculates "168 days ago" mentally. This does it correctly.
+// AI-NOTE: date_calc — agent miscalculates "168 days ago" mentally. chrono does it correctly.
 pub struct DateCalcTool(pub Arc<PcmClient>);
 
 #[derive(Deserialize, JsonSchema)]
@@ -279,48 +279,17 @@ impl Tool for DateCalcTool {
     async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
         let a: DateCalcArgs = parse_args(&args)?;
         let base_str = if a.base == "today" {
-            // Fetch workspace date from context
             match self.0.context().await {
-                Ok(ctx) => {
-                    // Parse date from context response (format: "2026-05-14T00:00:00Z" or similar)
-                    ctx.split('T').next().unwrap_or(&ctx).trim_matches('"').to_string()
-                }
-                Err(_) => return Ok(ToolOutput::text("Error: cannot fetch workspace date. Provide base date as YYYY-MM-DD.".to_string())),
+                Ok(ctx) => ctx.split('T').next().unwrap_or(&ctx).trim_matches('"').to_string(),
+                Err(_) => return Ok(ToolOutput::text("Error: provide base date as YYYY-MM-DD".to_string())),
             }
         } else {
             a.base.clone()
         };
-        // Parse YYYY-MM-DD
-        let parts: Vec<&str> = base_str.split('-').collect();
-        if parts.len() != 3 {
-            return Ok(ToolOutput::text(format!("Error: invalid date format '{}'. Use YYYY-MM-DD.", base_str)));
-        }
-        let (y, m, d) = match (parts[0].parse::<i32>(), parts[1].parse::<u32>(), parts[2].parse::<u32>()) {
-            (Ok(y), Ok(m), Ok(d)) => (y, m, d),
-            _ => return Ok(ToolOutput::text(format!("Error: cannot parse date '{}'", base_str))),
-        };
-        // Simple date arithmetic using chrono-free approach (Julian day number)
-        fn to_jdn(y: i32, m: u32, d: u32) -> i64 {
-            let a = (14 - m as i64) / 12;
-            let y2 = y as i64 + 4800 - a;
-            let m2 = m as i64 + 12 * a - 3;
-            d as i64 + (153 * m2 + 2) / 5 + 365 * y2 + y2 / 4 - y2 / 100 + y2 / 400 - 32045
-        }
-        fn from_jdn(jdn: i64) -> (i32, u32, u32) {
-            let a = jdn + 32044;
-            let b = (4 * a + 3) / 146097;
-            let c = a - (146097 * b) / 4;
-            let d = (4 * c + 3) / 1461;
-            let e = c - (1461 * d) / 4;
-            let m = (5 * e + 2) / 153;
-            let day = (e - (153 * m + 2) / 5 + 1) as u32;
-            let month = (m + 3 - 12 * (m / 10)) as u32;
-            let year = (100 * b + d - 4800 + m / 10) as i32;
-            (year, month, day)
-        }
-        let jdn = to_jdn(y, m, d) + a.delta_days;
-        let (ry, rm, rd) = from_jdn(jdn);
-        Ok(ToolOutput::text(format!("{:04}-{:02}-{:02}", ry, rm, rd)))
+        let base = chrono::NaiveDate::parse_from_str(&base_str, "%Y-%m-%d")
+            .map_err(|e| ToolError::InvalidArgs(format!("date parse: {e}")))?;
+        let result = base + chrono::Duration::days(a.delta_days);
+        Ok(ToolOutput::text(result.format("%Y-%m-%d").to_string()))
     }
 }
 
@@ -417,6 +386,121 @@ impl Tool for GrepCountTool {
         let content = self.0.read(&a.path, false, 0, 0).await.map_err(pcm_err)?;
         let count = content.lines().filter(|line| re.is_match(line)).count();
         Ok(ToolOutput::text(count.to_string()))
+    }
+}
+
+// ─── eval (Rhai scripting) ───────────────────────────────────────────────────
+
+// AI-NOTE: eval tool — agent writes Rhai script to process data. Inspired by competitor evaljs(code, files[]).
+// Files are pre-read and available as string variables. Date mocked to workspace date.
+pub struct EvalTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct EvalArgs {
+    /// Rhai script code to execute. Available: file contents as variables (file_0, file_1, ...),
+    /// workspace_date as string. Use parse_json(s) to parse JSON strings. Return value = tool output.
+    code: String,
+    /// Workspace file paths to pre-read. Contents available as file_0, file_1, etc.
+    #[serde(default)]
+    files: Vec<String>,
+}
+
+#[async_trait]
+impl Tool for EvalTool {
+    fn name(&self) -> &str { "eval" }
+    fn description(&self) -> &str {
+        "Execute a Rhai script with access to workspace files. \
+         Pass file paths in 'files' array — contents available as file_0, file_1, etc. \
+         Use for: date math, JSON parsing, filtering, counting, regex, complex logic. \
+         Available functions: parse_json(s), workspace_date (string). \
+         Example: eval(code: 'let d = parse_json(file_0); d[\"amount\"]', files: ['invoices/inv1.json'])"
+    }
+    fn is_read_only(&self) -> bool { true }
+    fn parameters_schema(&self) -> Value { json_schema_for::<EvalArgs>() }
+    async fn execute(&self, args: Value, ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        self.execute_readonly(args, ctx).await
+    }
+    async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: EvalArgs = parse_args(&args)?;
+
+        // Pre-read files (async)
+        let mut file_contents = Vec::new();
+        for path in &a.files {
+            let content = self.0.read(path, false, 0, 0).await.map_err(pcm_err)?;
+            let clean = if content.starts_with("$ ") {
+                content.find('\n').map(|j| content[j+1..].to_string()).unwrap_or(content)
+            } else {
+                content
+            };
+            file_contents.push(clean);
+        }
+
+        // Workspace date
+        let ws_date = self.0.context().await
+            .ok()
+            .and_then(|ctx| ctx.split('T').next().map(|s| s.trim_matches('"').to_string()))
+            .unwrap_or_else(|| "2026-01-01".to_string());
+
+        // Run rhai in blocking thread (Engine is !Send)
+        let code = a.code.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut engine = rhai::Engine::new();
+            let mut scope = rhai::Scope::new();
+
+            for (i, content) in file_contents.into_iter().enumerate() {
+                scope.push(format!("file_{i}"), content);
+            }
+            scope.push("workspace_date".to_string(), ws_date);
+
+            engine.register_fn("parse_json", |s: &str| -> rhai::Dynamic {
+                match serde_json::from_str::<serde_json::Value>(s) {
+                    Ok(v) => json_to_rhai(&v),
+                    Err(_) => {
+                        let opts = llm_json::RepairOptions::default();
+                        match llm_json::repair_json(s, &opts) {
+                            Ok(fixed) => match serde_json::from_str::<serde_json::Value>(&fixed) {
+                                Ok(v) => json_to_rhai(&v),
+                                Err(_) => rhai::Dynamic::UNIT,
+                            },
+                            Err(_) => rhai::Dynamic::UNIT,
+                        }
+                    }
+                }
+            });
+
+            engine.set_max_operations(100_000);
+            match engine.eval_with_scope::<rhai::Dynamic>(&mut scope, &code) {
+                Ok(result) => format!("{result}"),
+                Err(e) => format!("Script error: {e}"),
+            }
+        }).await.unwrap_or_else(|e| format!("Eval failed: {e}"));
+
+        Ok(ToolOutput::text(result))
+    }
+}
+
+/// Convert serde_json::Value to rhai::Dynamic
+fn json_to_rhai(v: &serde_json::Value) -> rhai::Dynamic {
+    match v {
+        serde_json::Value::Null => rhai::Dynamic::UNIT,
+        serde_json::Value::Bool(b) => rhai::Dynamic::from(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() { rhai::Dynamic::from(i) }
+            else if let Some(f) = n.as_f64() { rhai::Dynamic::from(f) }
+            else { rhai::Dynamic::UNIT }
+        }
+        serde_json::Value::String(s) => rhai::Dynamic::from(s.clone()),
+        serde_json::Value::Array(arr) => {
+            let v: Vec<rhai::Dynamic> = arr.iter().map(json_to_rhai).collect();
+            rhai::Dynamic::from(v)
+        }
+        serde_json::Value::Object(map) => {
+            let mut m = rhai::Map::new();
+            for (k, v) in map {
+                m.insert(k.clone().into(), json_to_rhai(v));
+            }
+            rhai::Dynamic::from(m)
+        }
     }
 }
 
