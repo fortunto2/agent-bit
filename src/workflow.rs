@@ -230,8 +230,10 @@ impl WorkflowState {
         // AI-NOTE: inbox delete Block — NOT a костыль. Tested: skill-only=0.00, Block=1.00.
         // Models follow tool output (Block) but ignore skill text for critical actions.
         // This is the correct delivery mechanism, not a hack.
-        if tool == "answer" && self.intent == "intent_inbox" {
-            let has_inbox_read = self.read_paths.iter().any(|p| p.contains("inbox"));
+        // AI-NOTE: check inbox read/delete regardless of intent — ML classifier is non-deterministic.
+        // If agent read ANY inbox file, it must delete it before answering OK.
+        if tool == "answer" {
+            let has_inbox_read = self.read_paths.iter().any(|p| p.contains("inbox") && !p.contains("AGENTS") && !p.contains("README"));
             let has_inbox_delete = self.delete_paths.iter().any(|p| p.contains("inbox"));
             let outcome = path.to_lowercase();
             if has_inbox_read && !has_inbox_delete && outcome.contains("ok") {
