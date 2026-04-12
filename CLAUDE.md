@@ -20,6 +20,38 @@ cargo run -- --provider nemotron --list            # list tasks WITH hints
 cargo run -- --audit-store                         # audit adaptive kNN store
 ```
 
+### Phoenix Observability (OTEL tracing)
+
+Phoenix runs locally, receives OTEL spans from every LLM call. Requires `OTEL_EXPORTER_OTLP_ENDPOINT` in `.env`.
+
+```bash
+make phoenix                    # start Phoenix server (localhost:6006)
+make phoenix-results            # CLI table: task/outcome/steps/score
+cargo run --bin pac1-dash       # TUI dashboard (reads from Phoenix DB)
+```
+
+**What Phoenix shows:**
+- **Spans tab** — every LLM call with input/output JSON, model, tokens, task_id
+- **Traces tab** — trace-level view with score/outcome/task_id annotations
+- **Sessions tab** — grouped by trial (session_id = `{task_id}_{trial_id}`)
+- **Metrics tab** — score trends, token usage, annotation graphs
+
+**How tracing works (sgr-agent `telemetry` feature):**
+1. `init_telemetry(".agent", "pac1")` — sets up OTEL provider + simple exporter to Phoenix
+2. Every LLM call → `record_llm_span()` → `chat.completions.api` span with input/output/tokens/session.id/task_id
+3. After trial → `annotate_session()` → `trial.result` evaluator span + span/trace annotations via Phoenix REST API
+4. `set_session_id()` / `set_task_id()` — called per trial, task_id falls back to parsing from session_id
+
+**Debugging with Phoenix:**
+1. Open `http://localhost:6006` → project `pac1`
+2. Spans tab → filter by `metadata.task_id == 't16'` → see all LLM calls for that task
+3. Click span → Info tab shows input/output JSON, Attributes tab shows tokens/model
+4. Sessions tab → click session → see all spans in a trial grouped together
+5. Traces tab → annotations columns show score/outcome per trace
+
+**Phoenix data lives in:** `~/.phoenix/phoenix.db` (SQLite, survives restarts)
+**OTEL config:** `.env` → `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:6006`
+
 ### Dump-Based Analysis (ALWAYS use dumps, not stdout)
 
 Every run writes to `benchmarks/tasks/{task}/{model}_{trial}/`:
