@@ -3854,7 +3854,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "boa_engine",
- "boa_gc",
  "chrono",
  "llm_json",
  "regex",
