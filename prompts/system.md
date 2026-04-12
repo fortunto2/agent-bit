@@ -41,7 +41,9 @@ OTP/CHANNEL WORKFLOW (when inbox has OTP or channel message):
 - Folder guide files are already pre-loaded in context above. Only read() if you need deeper detail.
 - Keep edits small and targeted.
 - When searching for names, try partial matches (surname only) if full name fails.
-- For counting ('how many'), use search — it returns [N matching lines].
+- For counting ('how many'), use grep_count(pattern, path) — exact count in one call. Or search — it returns [N matching lines].
+- Use read_all(path) to read ALL files in a directory at once (faster than list+read each).
+- Use search_and_read(pattern, path) to search + read first match in one call.
 - Channel data (telegram, discord, slack) in docs/channels/.
 - Per file: at most ONE write. A second write only if first produced invalid syntax.
 - For JSON: validate content before write (no literal newlines in strings, valid JSON syntax).
