@@ -250,9 +250,14 @@ pub(crate) async fn run_agent(
                 Ok(scores) if !scores.is_empty() && scores[0].1 > 0.30 => {
                     let (label, conf) = &scores[0];
                     let normalized = if label == "intent_capture" { "intent_inbox".to_string() } else { label.clone() };
-                    eprintln!("  ↳ OpenAI intent classify: {} ({:.2}) → {} ({:.3})", ready.intent, intent_confidence, normalized, conf);
-                    ready.intent = normalized;
-                    resolved = true;
+                    // AI-NOTE: don't accept intent_inbox when label=non_work — non-English should stay non_work
+                    if normalized == "intent_inbox" && instruction_label == "non_work" {
+                        eprintln!("  ↳ OpenAI intent: {} ({:.3}) suppressed (label=non_work)", normalized, conf);
+                    } else {
+                        eprintln!("  ↳ OpenAI intent classify: {} ({:.2}) → {} ({:.3})", ready.intent, intent_confidence, normalized, conf);
+                        ready.intent = normalized;
+                        resolved = true;
+                    }
                 }
                 Ok(_) => eprintln!("  ↳ OpenAI intent: low confidence, falling through"),
                 Err(e) => eprintln!("  ↳ OpenAI intent error: {:#}", e),
@@ -280,8 +285,13 @@ pub(crate) async fn run_agent(
 
             if let Some(ref llm_label) = llm_intent {
                 let normalized = if llm_label == "intent_capture" { "intent_inbox".to_string() } else { llm_label.clone() };
-                eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, normalized);
-                ready.intent = normalized;
+                // AI-NOTE: same guard — don't accept intent_inbox when label=non_work
+                if normalized == "intent_inbox" && instruction_label == "non_work" {
+                    eprintln!("  ↳ LLM intent: {} suppressed (label=non_work)", normalized);
+                } else {
+                    eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, normalized);
+                    ready.intent = normalized;
+                }
             // AI-NOTE: don't override to inbox when label is non_work — prod expects UNSUPPORTED for non-English
             } else if !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" && instruction_label != "non_work" {
                 // Layer 4: structural fallback (inbox files exist → inbox task)
