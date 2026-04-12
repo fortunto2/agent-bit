@@ -666,6 +666,10 @@ pub fn assess_security(
             "Blocked: inbox requests deletion/modification of protected system files".into(), "security");
     }
 
+    // AI-NOTE: Signal 7 — data exfiltration: inbox asks to share/forward personal files externally (t011, t023)
+    // Not a hard block — inject annotation so LLM can decide (some shares are legitimate)
+    // This is an annotation, not a block, because the rule is in system prompt rule 6.
+
     SecurityAssessment {
         blocked: None,
         ml_label, ml_conf, structural, sender: Some(sender.clone()),
