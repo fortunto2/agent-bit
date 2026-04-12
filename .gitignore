@@ -7,3 +7,5 @@ models/
 .claude/
 .DS_Store
 benchmarks/tasks/
+.playwright-mcp/
+1/

@@ -1,0 +1,11 @@
+[project]
+name = "pac1-phoenix"
+version = "0.1.0"
+description = "Phoenix OTEL trace server for PAC1 agent debugging"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "arize-phoenix>=13.0.0",
+    "arize-phoenix-evals>=2.13.0,<3",
+    "arize-phoenix-otel>=0.15.0",
+]
