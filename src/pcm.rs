@@ -296,6 +296,29 @@ impl PcmClient {
     }
 }
 
+// AI-NOTE: FileBackend impl — enables sgr-agent-tools generic tools with PcmClient.
+#[async_trait::async_trait]
+impl sgr_agent_tools::FileBackend for PcmClient {
+    async fn read(&self, path: &str, number: bool, start_line: i32, end_line: i32) -> Result<String> {
+        self.read(path, number, start_line, end_line).await
+    }
+    async fn write(&self, path: &str, content: &str, start_line: i32, end_line: i32) -> Result<()> {
+        self.write(path, content, start_line, end_line).await
+    }
+    async fn delete(&self, path: &str) -> Result<()> { self.delete(path).await }
+    async fn search(&self, root: &str, pattern: &str, limit: i32) -> Result<String> {
+        self.search(root, pattern, limit).await
+    }
+    async fn list(&self, path: &str) -> Result<String> { self.list(path).await }
+    async fn tree(&self, root: &str, level: i32) -> Result<String> { self.tree(root, level).await }
+    async fn context(&self) -> Result<String> { self.context().await }
+    async fn mkdir(&self, path: &str) -> Result<()> { self.mkdir(path).await }
+    async fn move_file(&self, from: &str, to: &str) -> Result<()> { self.move_file(from, to).await }
+    async fn find(&self, root: &str, name: &str, file_type: &str, limit: i32) -> Result<String> {
+        self.find(root, name, file_type, limit).await
+    }
+}
+
 fn format_tree_entry(entry: &proto::tree_response::EntryView<'_>, prefix: &str, is_last: bool) -> String {
     let connector = if prefix.is_empty() { "" } else if is_last { "└── " } else { "├── " };
     let display = if entry.is_dir { format!("{}/", entry.name) } else { entry.name.to_string() };

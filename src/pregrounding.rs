@@ -402,28 +402,23 @@ pub(crate) async fn run_agent(
     // Old approach: hardcoded outbox path guessing. New: agent-driven, workspace-agnostic.
 
     // ── Tool Registry (Claude Code / Codex inspired: core + extended + management) ──
-    let mut registry = ToolRegistry::new()
-        // CORE (7 tools — like Claude Code Read/Write/Edit/Bash/Glob/Grep + PAC1 answer)
-        .register(tools::ReadTool::new(pcm.clone(), Some(workflow.clone())))   // = FileReadTool
-        .register(tools::WriteTool::new(pcm.clone(), hook_registry.clone(), Some(workflow.clone()))) // = FileWriteTool
-        .register(tools::DeleteTool::new(pcm.clone(), Some(workflow.clone()))) // (no Claude equiv — through Bash)
-        .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))     // = GrepTool (auto-expand ≤10 files)
-        .register(tools::ListTool(pcm.clone()))                                 // = GlobTool / list_dir
-        .register(tools::TreeTool(pcm.clone()))                                 // workspace overview
-        .register(tools::EvalTool(pcm.clone()))                                 // = BashTool / js_repl (Boa JS + glob)
+    let registry = ToolRegistry::new()
+        // CORE (Claude Code equivalents + PAC1 answer)
+        .register(tools::ReadTool::new(pcm.clone(), Some(workflow.clone())))
+        .register(tools::WriteTool::new(pcm.clone(), hook_registry.clone(), Some(workflow.clone())))
+        .register(tools::DeleteTool::new(pcm.clone(), Some(workflow.clone())))
+        .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
+        .register(sgr_agent_tools::ListTool(pcm.clone()))                        // → sgr-agent-tools
+        .register(sgr_agent_tools::TreeTool(pcm.clone()))                        // → sgr-agent-tools
+        .register(tools::EvalTool(pcm.clone()))                                  // local (Boa deps)
         .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone(), Some(workflow.clone()))) // PAC1-specific
-        .register(tools::ContextTool(pcm.clone()))                              // PAC1-specific (date/time)
-        // EXTENDED (batch tools — justified by PCM round-trip savings)
-        .register(tools::ReadAllTool(pcm.clone()))                              // = read entire directory
-        // D-TEST: disabled search_and_read + grep_count (search auto-expand + eval cover them)
-        // .register(tools::SearchAndReadTool(pcm.clone()))
-        // .register(tools::GrepCountTool(pcm.clone()))
-        // MANAGEMENT (deferred — register via ReadAllTool chain above)
-        ;
-    registry = registry
-        .register_deferred(tools::MkDirTool(pcm.clone()))
-        .register_deferred(tools::MoveTool(pcm.clone()))
-        .register_deferred(tools::FindTool(pcm.clone()))
+        .register(tools::ContextTool(pcm.clone()))                               // PAC1-specific
+        // EXTENDED
+        .register(sgr_agent_tools::ReadAllTool(pcm.clone()))                     // → sgr-agent-tools
+        // DEFERRED
+        .register_deferred(sgr_agent_tools::MkDirTool(pcm.clone()))              // → sgr-agent-tools
+        .register_deferred(sgr_agent_tools::MoveTool(pcm.clone()))               // → sgr-agent-tools
+        .register_deferred(sgr_agent_tools::FindTool(pcm.clone()))
         .register_deferred(tools::ListSkillsTool(skill_registry.clone()))
         .register_deferred(tools::GetSkillTool(skill_registry.clone()));
 
