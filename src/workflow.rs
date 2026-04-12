@@ -225,6 +225,19 @@ impl WorkflowState {
             }
         }
 
+        // Inbox delete guard: warn if inbox was read but not deleted before answer
+        if tool == "answer" && self.intent == "intent_inbox" {
+            let has_inbox_read = self.read_paths.iter().any(|p| p.contains("inbox"));
+            let has_inbox_delete = self.delete_paths.iter().any(|p| p.contains("inbox"));
+            if has_inbox_read && !has_inbox_delete {
+                return Guard::Warn(
+                    "⚠ You read inbox but didn't DELETE the source file. \
+                     DELETE 00_inbox/000_next-task.md (or the inbox file you processed) BEFORE answering."
+                        .to_string(),
+                );
+            }
+        }
+
         // AI-NOTE: OTP+task guard. Flag set: pregrounding.rs:664. Hint: pregrounding.rs:602. Prompt: prompts.rs:29.
         // After writes (= OTP verified + task done), only OK. Before writes, all outcomes valid.
         if tool == "answer" && self.otp_with_task && self.has_writes() {
