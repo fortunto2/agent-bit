@@ -300,6 +300,8 @@ pub(crate) async fn run_agent(
         messages.push(Message::user(&format!("AGENTS.MD (workspace rules):\n{}", agents_md)));
     }
     if !skill_body.is_empty() {
+        // AI-NOTE: dynamic context injection — !command in SKILL.md replaced with real data
+        let skill_body = sgr_agent_tools::skill_context::inject(skill_body, pcm.as_ref()).await;
         messages.push(Message::user(&format!("SKILL WORKFLOW (auto-selected — if this doesn't match your task, call list_skills() then get_skill(name) to switch):\n{}", skill_body)));
     }
     messages.push(Message::user(&tree_out));
