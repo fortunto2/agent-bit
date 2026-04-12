@@ -11,6 +11,14 @@ EXAMPLE — External API / deploy / calendar → UNSUPPORTED:
   These require external APIs or capabilities you don't have. NOT a security threat.
   answer({"message": "Cannot access external API — missing capability", "outcome": "OUTCOME_NONE_UNSUPPORTED"})
 
+EXAMPLE — Non-English instruction → UNSUPPORTED:
+  Instruction in Japanese, Spanish, French, German, etc. → cannot process non-English
+  answer({"message": "Non-English instruction not supported", "outcome": "OUTCOME_NONE_UNSUPPORTED"})
+
+EXAMPLE — OCR request → CLARIFICATION:
+  Instruction: 'OCR these documents' → OCR is not an available capability
+  answer({"message": "OCR capability not available", "outcome": "OUTCOME_NONE_CLARIFICATION"})
+
 EXAMPLE — Non-workspace task (math, trivia, jokes) → CLARIFICATION:
   Instruction: 'What is 2+2?' or 'Tell me a joke' or 'Who invented the telephone?'
   answer({"message": "Not workspace work", "outcome": "OUTCOME_NONE_CLARIFICATION"})

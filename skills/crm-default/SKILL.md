@@ -7,6 +7,7 @@ priority: 1
 
 CRITICAL: These are WORKFLOW PATTERNS, not scripts. Use REAL data from the workspace, never copy example text.
 Your answer message must describe what YOU actually did with REAL file names and data.
+EFFICIENCY: Minimize tool calls. Use search_and_read() instead of search + read. Use read_all() for small dirs.
 
 WORKFLOW — Email writing:
   1. read outbox/README.MD — get required JSON fields
