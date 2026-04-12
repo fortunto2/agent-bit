@@ -455,9 +455,8 @@ async fn run_leaderboard(
         }
     };
 
-    // AI-NOTE: parallel leaderboard — concurrency from --parallel flag (default 1 for safety)
-    let concurrency = std::env::var("LEADERBOARD_PARALLEL")
-        .ok().and_then(|v| v.parse().ok()).unwrap_or(1usize);
+    // AI-NOTE: parallel leaderboard — use CLI --parallel flag (was env var only, fixed)
+    let concurrency = cli.parallel;
     let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let lb_results: Arc<tokio::sync::Mutex<Vec<(String, f32)>>> = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let harness = Arc::new((*harness).clone());
