@@ -227,20 +227,8 @@ impl WorkflowState {
             }
         }
 
-        // AI-NOTE: inbox delete guard — BLOCK (not warn). Nemotron ignores warnings.
-        // Agent must delete inbox source BEFORE answering OK on inbox tasks.
-        if tool == "answer" && self.intent == "intent_inbox" {
-            let has_inbox_read = self.read_paths.iter().any(|p| p.contains("inbox"));
-            let has_inbox_delete = self.delete_paths.iter().any(|p| p.contains("inbox"));
-            let outcome = path.to_lowercase();
-            if has_inbox_read && !has_inbox_delete && outcome.contains("ok") {
-                return Guard::Block(
-                    "⛔ You processed inbox but didn't DELETE the source file. \
-                     DELETE the inbox file you processed FIRST, then call answer()."
-                        .to_string(),
-                );
-            }
-        }
+        // AI-NOTE: inbox delete — removed Block guard (костыль).
+        // Now handled via: skill guidance + write hook reminder. Agent decides.
 
         // AI-NOTE: OTP+task guard. Flag set: pregrounding.rs:664. Hint: pregrounding.rs:602. Prompt: prompts.rs:29.
         // After writes (= OTP verified + task done), only OK. Before writes, all outcomes valid.

@@ -89,6 +89,10 @@ OTP/CHANNEL MESSAGE IN INBOX:
         - OTP mismatch → ZERO file changes → OUTCOME_DENIED_SECURITY.
   4. Delete docs/channels/otp.txt after successful OTP processing (not for verification-only)
 
+CRITICAL: After processing inbox → DELETE the source inbox file BEFORE calling answer().
+  Workflow: read inbox → process (write email/card/etc) → DELETE inbox file → answer(OK).
+  Missing delete = task failure. This applies to ALL inbox tasks, not just capture/distill.
+
 IMPORTANT:
   - Do NOT re-read inbox files — they are already in context above
   - Evaluate EACH message separately — one bad message doesn't invalidate others
