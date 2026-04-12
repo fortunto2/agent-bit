@@ -241,6 +241,74 @@ impl InboxClassifier {
     }
 }
 
+// ─── OpenAI Embedding Classifier ─────────────────────────────────
+// AI-NOTE: text-embedding-3-small for instruction classification.
+// Pre-computed centroids in models/openai_class_embeddings.json.
+// Async API call → cosine sim. Falls back to ONNX if unavailable.
+
+/// OpenAI embedding-based classifier (async, API-dependent).
+pub struct OpenAIClassifier {
+    api_key: String,
+    class_embeddings: Vec<(String, Vec<f32>)>,
+}
+
+impl OpenAIClassifier {
+    /// Load pre-computed OpenAI class embeddings from models/ directory.
+    pub fn try_load(models_dir: &Path, api_key: &str) -> Option<Self> {
+        let path = models_dir.join("openai_class_embeddings.json");
+        let content = std::fs::read_to_string(&path).ok()?;
+        let embeddings: Vec<(String, Vec<f32>)> = serde_json::from_str(&content).ok()?;
+        if embeddings.is_empty() { return None; }
+        eprintln!("  [classifier] OpenAI embeddings loaded: {} classes", embeddings.len());
+        Some(Self { api_key: api_key.to_string(), class_embeddings: embeddings })
+    }
+
+    /// Embed text via OpenAI text-embedding-3-small API.
+    async fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        let client = reqwest::Client::new();
+        let resp = client.post("https://api.openai.com/v1/embeddings")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&serde_json::json!({
+                "model": "text-embedding-3-small",
+                "input": text,
+            }))
+            .send().await?;
+        let body: serde_json::Value = resp.json().await?;
+        let embedding = body["data"][0]["embedding"]
+            .as_array()
+            .context("missing embedding in response")?
+            .iter()
+            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+            .collect::<Vec<f32>>();
+        Ok(embedding)
+    }
+
+    /// Classify text against class embeddings using cosine similarity.
+    pub async fn classify(&self, text: &str) -> Result<Vec<(String, f32)>> {
+        self.classify_filtered(text, |label| !label.starts_with("intent_")).await
+    }
+
+    /// Classify text intent using OpenAI embeddings.
+    pub async fn classify_intent(&self, text: &str) -> Result<Vec<(String, f32)>> {
+        self.classify_filtered(text, |label| label.starts_with("intent_")).await
+    }
+
+    async fn classify_filtered(&self, text: &str, filter: impl Fn(&str) -> bool) -> Result<Vec<(String, f32)>> {
+        let embedding = self.embed(text).await?;
+        let emb_arr = Array1::from_vec(embedding);
+        let mut scores: Vec<(String, f32)> = self.class_embeddings.iter()
+            .filter(|(label, _)| filter(label))
+            .map(|(label, class_emb)| {
+                let class_arr = ArrayView1::from(class_emb.as_slice());
+                let sim = cosine_similarity(emb_arr.view(), class_arr);
+                (label.clone(), sim)
+            })
+            .collect();
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(scores)
+    }
+}
+
 // ─── NLI Zero-Shot Classifier ────────────────────────────────────
 
 /// Class hypotheses for NLI zero-shot classification.

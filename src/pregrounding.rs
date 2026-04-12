@@ -235,24 +235,60 @@ pub(crate) async fn run_agent(
     // ── Pipeline Stage 4: Ready ─────────────────────────────────────
     let mut ready = checked.ready();
 
-    // Low-confidence intent: ML unsure → ask LLM → structural fallback
+    // Low-confidence intent: ML unsure → OpenAI embedding classify → LLM fallback → structural
     // Skip fallback for intent_delete — structural forcing already handles it via detect_forced_task_type
     if intent_confidence < 0.30 && ready.intent != "intent_delete" {
-        // Layer 2: quick LLM classify (1 function call)
-        let llm_intent = classify_intent_via_llm(
-            instruction, model, base_url, api_key, extra_headers, temperature,
-        ).await;
+        // AI-NOTE: Layer 2: OpenAI embedding classify (fast, ~100ms, $0.000001/call)
+        let openai_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
+        let openai_clf = if !openai_key.is_empty() {
+            classifier::OpenAIClassifier::try_load(&classifier::InboxClassifier::models_dir(), &openai_key)
+        } else { None };
 
-        if let Some(ref llm_label) = llm_intent {
-            let normalized = if llm_label == "intent_capture" { "intent_inbox".to_string() } else { llm_label.clone() };
-            eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, normalized);
-            ready.intent = normalized;
-        // AI-NOTE: don't override to inbox when label is non_work — prod expects UNSUPPORTED for non-English
-        } else if !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" && instruction_label != "non_work" {
-            // Layer 3: structural fallback (inbox files exist → inbox task)
-            eprintln!("  ↳ Structural intent fallback: {} ({:.2}) → intent_inbox (inbox_files={})",
-                ready.intent, intent_confidence, ready.inbox_files.len());
-            ready.intent = "intent_inbox".to_string();
+        let mut resolved = false;
+        if let Some(ref clf) = openai_clf {
+            match clf.classify_intent(instruction).await {
+                Ok(scores) if !scores.is_empty() && scores[0].1 > 0.30 => {
+                    let (label, conf) = &scores[0];
+                    let normalized = if label == "intent_capture" { "intent_inbox".to_string() } else { label.clone() };
+                    eprintln!("  ↳ OpenAI intent classify: {} ({:.2}) → {} ({:.3})", ready.intent, intent_confidence, normalized, conf);
+                    ready.intent = normalized;
+                    resolved = true;
+                }
+                Ok(_) => eprintln!("  ↳ OpenAI intent: low confidence, falling through"),
+                Err(e) => eprintln!("  ↳ OpenAI intent error: {:#}", e),
+            }
+            // Also reclassify security label if ONNX was low confidence
+            if instruction_label == "non_work" || instruction_label == "credential" {
+                match clf.classify(instruction).await {
+                    Ok(scores) if !scores.is_empty() && scores[0].1 > 0.35 => {
+                        let (label, conf) = &scores[0];
+                        if label != &instruction_label {
+                            eprintln!("  ↳ OpenAI security reclassify: {} → {} ({:.3})", instruction_label, label, conf);
+                            // instruction_label is immutable, but we can use it for skill selection later
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if !resolved {
+            // Layer 3: quick LLM classify (1 function call) — fallback
+            let llm_intent = classify_intent_via_llm(
+                instruction, model, base_url, api_key, extra_headers, temperature,
+            ).await;
+
+            if let Some(ref llm_label) = llm_intent {
+                let normalized = if llm_label == "intent_capture" { "intent_inbox".to_string() } else { llm_label.clone() };
+                eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, normalized);
+                ready.intent = normalized;
+            // AI-NOTE: don't override to inbox when label is non_work — prod expects UNSUPPORTED for non-English
+            } else if !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" && instruction_label != "non_work" {
+                // Layer 4: structural fallback (inbox files exist → inbox task)
+                eprintln!("  ↳ Structural intent fallback: {} ({:.2}) → intent_inbox (inbox_files={})",
+                    ready.intent, intent_confidence, ready.inbox_files.len());
+                ready.intent = "intent_inbox".to_string();
+            }
         }
     }
 
