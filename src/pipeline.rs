@@ -187,8 +187,189 @@ pub(crate) fn has_external_url(instruction: &str) -> bool {
     instruction.contains("http://") || instruction.contains("https://")
 }
 
-// ── Transitions ─────────────────────────────────────────────────────────
+// ── Flattened Pipeline ──────────────────────────────────────────────────
 
+// AI-NOTE: flattened from 4-struct state machine (New->Classified->InboxScanned->SecurityChecked->Ready)
+//   into single run_pipeline() function. Same logic, same checks, less boilerplate.
+//   Old structs kept for test backward compat but no longer used in production call site.
+
+/// Run the full pre-LLM pipeline: classify -> scan inbox -> check security -> ready.
+/// Returns Ready on success, BlockReason on first short-circuit.
+pub async fn run_pipeline(
+    instruction: &str,
+    pcm: &crate::pcm::PcmClient,
+    shared_clf: &SharedClassifier,
+    shared_nli: &crate::scanner::SharedNliClassifier,
+    crm_graph: CrmGraph,
+    account_domains: &[(String, String)],
+) -> Result<Ready, BlockReason> {
+
+    // ── Stage 1: Classify instruction ───────────────────────────────
+
+    // Prescan: literal HTML injection
+    if let Some((outcome, msg)) = scanner::prescan_instruction(instruction) {
+        return Err(BlockReason {
+            outcome, message: msg.to_string(), stage: "prescan",
+        });
+    }
+
+    // ML security classification
+    let instruction_label = {
+        let mut guard = shared_clf.lock().unwrap();
+        let fc = scanner::semantic_classify_inbox_file(instruction, guard.as_mut(), None, None);
+        eprintln!("  [STAGE:classify] Instruction class: {} ({:.2})", fc.label, fc.confidence);
+
+        if fc.label == "injection" && fc.confidence > 0.5 {
+            return Err(BlockReason {
+                outcome: "OUTCOME_DENIED_SECURITY",
+                message: "Blocked: instruction classified as injection attempt".into(),
+                stage: "classify",
+            });
+        }
+        if fc.label == "non_work" && fc.confidence > 0.5 {
+            return Err(BlockReason {
+                outcome: "OUTCOME_NONE_CLARIFICATION",
+                message: "This request is unrelated to CRM/knowledge management work".into(),
+                stage: "classify",
+            });
+        }
+        fc.label
+    };
+
+    // Completeness check: detect truncated instructions via tokenizer
+    if looks_truncated(instruction, shared_clf) {
+        eprintln!("  [STAGE:classify] Instruction looks truncated (tokenizer: subword split)");
+        return Err(BlockReason {
+            outcome: "OUTCOME_NONE_CLARIFICATION",
+            message: "Instruction appears truncated or incomplete".into(),
+            stage: "classify",
+        });
+    }
+
+    // ML intent classification
+    let (intent, intent_confidence) = {
+        let mut guard = shared_clf.lock().unwrap();
+        if let Some(clf) = guard.as_mut() {
+            match clf.classify_intent(instruction) {
+                Ok(scores) if !scores.is_empty() => {
+                    let (label, conf) = &scores[0];
+                    eprintln!("  [STAGE:classify] Instruction intent: {} ({:.2})", label, conf);
+                    (label.clone(), *conf)
+                }
+                _ => (String::new(), 0.0),
+            }
+        } else {
+            (String::new(), 0.0)
+        }
+    };
+
+    // Question-word override: "What is the email of..." is a query, not an email task
+    let first_word = instruction.split_whitespace().next().unwrap_or("").to_lowercase();
+    let is_question = matches!(first_word.as_str(), "what" | "who" | "which" | "how" | "where" | "when" | "list" | "return" | "find" | "look" | "show");
+    let intent = if is_question && intent != "intent_query" && intent != "intent_delete" {
+        eprintln!("  [STAGE:classify] question-word override: {} -> intent_query", intent);
+        "intent_query".to_string()
+    } else {
+        intent
+    };
+
+    // ── Stage 2: Scan inbox ─────────────────────────────────────────
+
+    let mut inbox_files = Vec::new();
+
+    // Find inbox directory
+    let found_inbox = if let Ok(l) = pcm.list("inbox").await {
+        Some(("inbox", l))
+    } else if let Ok(l) = pcm.list("00_inbox").await {
+        Some(("00_inbox", l))
+    } else {
+        None
+    };
+
+    if let Some((dir, list)) = found_inbox {
+        let mut filenames = Vec::new();
+        for line in list.lines() {
+            let filename = line.trim().trim_end_matches('/');
+            if filename.is_empty() || filename.starts_with('$')
+                || filename.eq_ignore_ascii_case("README.MD") {
+                continue;
+            }
+            // AI-NOTE: prod has AGENTS.MD in every folder including 00_inbox/ — skip, don't block.
+            if filename.eq_ignore_ascii_case("AGENTS.MD") || filename.eq_ignore_ascii_case("AGENTS.md") {
+                continue;
+            }
+            filenames.push(format!("{}/{}", dir, filename));
+        }
+
+        // Parallel read: fetch all inbox files concurrently
+        let read_futures: Vec<_> = filenames.iter()
+            .map(|path| pcm.read(path, false, 0, 0))
+            .collect();
+        let read_results = futures::future::join_all(read_futures).await;
+
+        // Sequential classify (ML model is single-threaded, but IO is done)
+        for (path, result) in filenames.into_iter().zip(read_results) {
+            let content = match result {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let sender_email = scanner::extract_sender_email(&content);
+            let sender = assess_sender(
+                sender_email.as_deref(), &content, Some(&crm_graph), account_domains,
+            );
+            let security = assess_security(&content, &sender, shared_clf, shared_nli);
+
+            eprintln!("  [STAGE:scan_inbox] {}: {} ({:.2}) | sender: {} | {}",
+                path, security.ml_label, security.ml_conf, sender.trust,
+                if security.blocked.is_some() { "BLOCKED" } else { "pass" });
+
+            inbox_files.push(InboxFile { path, content, security });
+        }
+    }
+
+    // ── Stage 3: Check security ─────────────────────────────────────
+
+    for file in &inbox_files {
+        if let Some(ref block) = file.security.blocked {
+            eprintln!("  [STAGE:security] {} -- {}", file.path, block.message);
+            return Err(block.clone());
+        }
+    }
+
+    // Structural guarantee: if ALL inbox files are non_work -> CLARIFICATION
+    if !inbox_files.is_empty()
+        && inbox_files.iter().all(|f| f.security.ml_label == "non_work")
+        && intent == "intent_inbox"
+    {
+        eprintln!("  [STAGE:security] All {} inbox files are non_work -> CLARIFICATION", inbox_files.len());
+        return Err(BlockReason {
+            outcome: "OUTCOME_NONE_CLARIFICATION",
+            message: "All inbox messages are non-CRM content (not work-related)".into(),
+            stage: "security",
+        });
+    }
+
+    eprintln!("  [STAGE:security] All {} inbox files passed", inbox_files.len());
+
+    // ── Stage 4: Ready ──────────────────────────────────────────────
+
+    eprintln!("  [STAGE:ready] intent={} label={} inbox_files={}",
+        intent, instruction_label, inbox_files.len());
+
+    Ok(Ready {
+        instruction: instruction.to_string(),
+        intent,
+        intent_confidence,
+        instruction_label,
+        inbox_files,
+        crm_graph,
+    })
+}
+
+// ── Legacy Transitions (kept for test backward compat) ──────────────────
+
+#[allow(dead_code)]
 impl New {
     /// Stage 1: Classify instruction — prescan + ML security label + ML intent.
     pub fn classify(self, shared_clf: &SharedClassifier) -> Result<Classified, BlockReason> {
@@ -271,6 +452,7 @@ impl New {
     }
 }
 
+#[allow(dead_code)]
 impl Classified {
     /// Stage 2: Scan inbox — read files, classify each with sender trust.
     /// This is async because it reads from PCM.
@@ -353,6 +535,7 @@ impl Classified {
     }
 }
 
+#[allow(dead_code)]
 impl InboxScanned {
     /// Stage 3: Check security — evaluate all inbox assessments, block on first threat.
     pub fn check_security(self) -> Result<SecurityChecked, BlockReason> {
@@ -390,6 +573,7 @@ impl InboxScanned {
     }
 }
 
+#[allow(dead_code)]
 impl SecurityChecked {
     /// Stage 4: Prepare for execution — mark ready for LLM agent loop.
     pub fn ready(self) -> Ready {

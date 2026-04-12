@@ -96,6 +96,23 @@ evolve-fails:
 probe:
 	cargo run --release -- --provider $(or $(PROVIDER),nemotron) --probe
 
+phoenix:
+	cd tools/phoenix && PHOENIX_PORT=6006 uv run phoenix serve
+
+phoenix-results:
+	@echo "═══ PAC1 Phoenix Trial Results ═══"
+	@sqlite3 -header -column ~/.phoenix/phoenix.db "\
+		SELECT \
+			json_extract(s.attributes, '\$$.task_id') as task, \
+			json_extract(s.attributes, '\$$.outcome') as outcome, \
+			json_extract(s.attributes, '\$$.steps') as steps, \
+			printf('%.0f%%', json_extract(s.attributes, '\$$.score') * 100) as score, \
+			strftime('%H:%M:%S', s.start_time) as time \
+		FROM spans s JOIN traces t ON s.trace_rowid=t.id \
+		WHERE t.project_rowid=(SELECT id FROM projects WHERE name='pac1') \
+			AND s.name='trial.result' \
+		ORDER BY s.start_time DESC LIMIT 30;"
+
 preflight:
 	@echo "=== PAC1 Pre-flight Check ==="
 	@printf "Rust toolchain: " && rustc --version

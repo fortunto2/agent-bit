@@ -105,7 +105,9 @@ async fn main() -> Result<()> {
     // Load .env file (API keys) — silent if missing
     dotenvy::dotenv().ok();
 
-    let _telemetry = sgr_agent::init_telemetry(".agent", "pac1");
+    // AI-NOTE: telemetry_guard must be dropped explicitly before tokio exits for OTLP flush
+    let telemetry_guard = sgr_agent::init_telemetry(".agent", "pac1");
+
     let cli = Cli::parse();
 
     if cli.audit_store {
@@ -152,7 +154,9 @@ async fn main() -> Result<()> {
         .collect();
 
     if let Some(ref run_name) = cli.run {
-        return run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, run_name, &prompt_mode, temperature, planning_temperature, &fallbacks).await;
+        let result = run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, run_name, &prompt_mode, temperature, planning_temperature, &fallbacks).await;
+        drop(telemetry_guard); // flush OTLP spans
+        return result;
     }
 
     let bm = harness.get_benchmark(benchmark).await?;
@@ -319,6 +323,9 @@ async fn main() -> Result<()> {
             };
             let log_url = format!("https://{}.eu.bitgn.com", trial.trial_id);
             eprintln!("  Trial: {}", trial.trial_id);
+            // AI-NOTE: Phoenix — session.id groups spans per trial, task_id labels each span
+            sgr_agent::set_session_id(format!("{}_{}", task_id, trial.trial_id));
+            sgr_agent::set_task_id(task_id.clone());
             eprintln!("  📋 Log: {}", log_url);
 
             // Auto-create dump dir if DUMP_TRIAL set, or auto-generate for single-task runs
@@ -382,6 +389,14 @@ async fn main() -> Result<()> {
                 agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), &[], &history,
             );
 
+            // AI-NOTE: Phoenix trace annotations — score/outcome/task/steps per session
+            // Extract outcome from agent's submitted answer (last answer() call in history)
+            let outcome = if let Some(pos) = history.rfind("\"outcome\":\"") {
+                let rest = &history[pos + 11..];
+                rest.split('"').next().unwrap_or("OK")
+            } else if score >= 1.0 { "OK" } else { "UNKNOWN" };
+            sgr_agent::annotate_session(&task_id, score, outcome, steps as u32);
+
             res.lock().await.push((task_id, score));
         });
         handles.push(handle);
@@ -394,6 +409,7 @@ async fn main() -> Result<()> {
     let scored = results.iter().filter(|(_, s)| *s > 0.0).count();
     eprintln!("\n═══ Average: {:.1}% ({}/{} tasks) ═══",
         total_score / results.len() as f32 * 100.0, scored, results.len());
+    drop(telemetry_guard); // flush OTLP spans before tokio exits
     Ok(())
 }
 
@@ -471,6 +487,10 @@ async fn run_leaderboard(
         };
         eprintln!("\n━━━ Trial {}/{}: {} (task {}) ━━━",
             i + 1, total_trials, trial.trial_id, trial.task_id);
+
+        // AI-NOTE: Phoenix — session.id groups spans per trial, task_id labels each span
+        sgr_agent::set_session_id(format!("{}_{}", trial.task_id, trial.trial_id));
+        sgr_agent::set_task_id(trial.task_id.clone());
 
         // Auto-dump trial data for dashboard
         // Extract short provider name from model path for dump dir
