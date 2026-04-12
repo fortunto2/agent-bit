@@ -392,11 +392,14 @@ pub(crate) async fn run_agent(
     );
 
     // Seed workflow with pre-grounding inbox reads (pipeline reads, not tool calls)
+    // AI-NOTE: also enable delete — if inbox was read, agent must delete after processing.
+    // Can't rely on ML intent (non-deterministic). Read paths = ground truth.
     if !ready.inbox_files.is_empty() {
         let mut wf = workflow.lock().unwrap();
         for f in &ready.inbox_files {
             wf.post_action("read", &f.path);
         }
+        wf.allows_delete = true; // inbox read → delete allowed
     }
 
     // AI-NOTE: OTP flags. Guard: workflow.rs:198. Schema: tools.rs:734. Hint: above at line ~602.

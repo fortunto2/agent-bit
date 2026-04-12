@@ -56,7 +56,7 @@ pub struct WorkflowState {
     /// Whether instruction mentions capture/distill
     is_capture: bool,
     /// Whether instruction explicitly mentions delete/remove
-    allows_delete: bool,
+    pub allows_delete: bool,
     /// Consecutive reads since last write/delete (detects read-loops)
     reads_since_write: usize,
     /// Verification-only mode — ZERO file changes allowed (OTP oracle)
@@ -74,15 +74,14 @@ impl WorkflowState {
             && !instr_lower.contains("delete all")
             && !instr_lower.contains("remove all");
         // Instruction explicitly allows deletion
-        // AI-NOTE: inbox tasks MUST delete source after processing (harness requires it)
-        let allows_delete = intent == "intent_delete"
-            || intent == "intent_inbox"  // inbox processing always needs delete
+            let allows_delete = intent == "intent_delete"
+            || intent == "intent_inbox"
             || instr_lower.contains("delete")
             || instr_lower.contains("remove")
             || instr_lower.contains("discard")
             || instr_lower.contains("clean up")
             || instr_lower.contains("clean out")
-            || is_capture; // capture/distill implies delete source
+            || is_capture;
 
         // Inbox tasks: limit outbox emails to prevent over-processing
         // Most inbox tasks expect 1 email; multi-inbox with 5+ files may need 2
