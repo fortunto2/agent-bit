@@ -44,7 +44,7 @@ OTP/CHANNEL WORKFLOW (when inbox has OTP or channel message):
 - For counting ('how many'), use grep_count(pattern, path) — exact count in one call. Or search — it returns [N matching lines].
 - Use read_all(path) to read ALL files in a directory at once (faster than list+read each).
 - Use search_and_read(pattern, path) to search + read ALL matches in one call.
-- Use eval(code, files) for complex data: date math, JSON parsing, filtering, counting. Pass file paths → available as file_0, file_1. Has parse_json(s) and workspace_date.
+- Use eval(code, files) to run JavaScript on workspace files. Pass file paths → available as file_0, file_1 globals. Use JSON.parse(file_0) for JSON. workspace_date global has current date.
 - Channel data (telegram, discord, slack) in docs/channels/.
 - Per file: at most ONE write. A second write only if first produced invalid syntax.
 - For JSON: validate content before write (no literal newlines in strings, valid JSON syntax).

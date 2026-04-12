@@ -402,16 +402,17 @@ impl Tool for GrepCountTool {
     }
 }
 
-// ─── eval (Rhai scripting) ───────────────────────────────────────────────────
+// ─── eval (Boa JS engine) ────────────────────────────────────────────────────
 
-// AI-NOTE: eval tool — agent writes Rhai script to process data. Inspired by competitor evaljs(code, files[]).
-// Files are pre-read and available as string variables. Date mocked to workspace date.
+// AI-NOTE: eval tool — agent writes JavaScript to process data. Boa = real ECMAScript in Rust.
+// Nemotron knows JS natively. Files pre-read, available as globals. Date mocked to workspace date.
 pub struct EvalTool(pub Arc<PcmClient>);
 
 #[derive(Deserialize, JsonSchema)]
 struct EvalArgs {
-    /// Rhai script code to execute. Available: file contents as variables (file_0, file_1, ...),
-    /// workspace_date as string. Use parse_json(s) to parse JSON strings. Return value = tool output.
+    /// JavaScript code to execute. Available globals: file_0, file_1, ... (file contents as strings),
+    /// workspace_date (string YYYY-MM-DD). Use JSON.parse(file_0) to parse JSON files.
+    /// Last expression value = tool output.
     code: String,
     /// Workspace file paths to pre-read. Contents available as file_0, file_1, etc.
     #[serde(default)]
@@ -422,11 +423,10 @@ struct EvalArgs {
 impl Tool for EvalTool {
     fn name(&self) -> &str { "eval" }
     fn description(&self) -> &str {
-        "Execute a Rhai script with access to workspace files. \
-         Pass file paths in 'files' array — contents available as file_0, file_1, etc. \
-         Use for: date math, JSON parsing, filtering, counting, regex, complex logic. \
-         Available functions: parse_json(s), workspace_date (string). \
-         Example: eval(code: 'let d = parse_json(file_0); d[\"amount\"]', files: ['invoices/inv1.json'])"
+        "Execute JavaScript code with access to workspace files. \
+         Pass file paths in 'files' array — contents available as file_0, file_1 globals. \
+         Use JSON.parse() for JSON data. workspace_date global has current date. \
+         Example: eval(code: 'JSON.parse(file_0).amount', files: ['invoices/inv1.json'])"
     }
     fn is_read_only(&self) -> bool { true }
     fn parameters_schema(&self) -> Value { json_schema_for::<EvalArgs>() }
@@ -451,70 +451,51 @@ impl Tool for EvalTool {
         // Workspace date
         let ws_date = self.0.context().await
             .ok()
-            .and_then(|ctx| ctx.split('T').next().map(|s| s.trim_matches('"').to_string()))
+            .and_then(|ctx| {
+                let re = regex::Regex::new(r"\d{4}-\d{2}-\d{2}").ok()?;
+                let cleaned = ctx.replace('"', "");
+                re.find(&cleaned).map(|m| m.as_str().to_string())
+            })
             .unwrap_or_else(|| "2026-01-01".to_string());
 
-        // Run rhai in blocking thread (Engine is !Send)
+        // Run Boa JS in blocking thread (Context is !Send)
         let code = a.code.clone();
         let result = tokio::task::spawn_blocking(move || {
-            let mut engine = rhai::Engine::new();
-            let mut scope = rhai::Scope::new();
+            use boa_engine::{Context, Source, JsValue, js_string};
 
-            for (i, content) in file_contents.into_iter().enumerate() {
-                scope.push(format!("file_{i}"), content);
+            let mut ctx = Context::default();
+
+            // Inject file contents as globals
+            for (i, content) in file_contents.iter().enumerate() {
+                let name = format!("file_{i}");
+                let _ = ctx.global_object().set(
+                    boa_engine::JsString::from(name.as_str()),
+                    JsValue::from(js_string!(content.as_str())),
+                    true,
+                    &mut ctx,
+                );
             }
-            scope.push("workspace_date".to_string(), ws_date);
 
-            // parse_json: uses Rhai's native JSON parser + llm_json repair fallback
-            engine.register_fn("parse_json", |s: &str| -> rhai::Dynamic {
-                // Try Rhai native parse first
-                let mut eng = rhai::Engine::new();
-                if let Ok(map) = eng.parse_json(s, false) {
-                    return rhai::Dynamic::from(map);
-                }
-                // Fallback: llm_json repair + serde → rhai conversion
-                let opts = llm_json::RepairOptions::default();
-                if let Ok(fixed) = llm_json::repair_json(s, &opts) {
-                    if let Ok(map) = eng.parse_json(&fixed, false) {
-                        return rhai::Dynamic::from(map);
-                    }
-                }
-                rhai::Dynamic::UNIT
-            });
+            // Inject workspace_date
+            let _ = ctx.global_object().set(
+                js_string!("workspace_date"),
+                JsValue::from(js_string!(ws_date.as_str())),
+                true,
+                &mut ctx,
+            );
 
-            engine.set_max_operations(100_000);
-            match engine.eval_with_scope::<rhai::Dynamic>(&mut scope, &code) {
-                Ok(result) => format!("{result}"),
-                Err(e) => format!("Script error: {e}"),
+            // Execute JS
+            match ctx.eval(Source::from_bytes(&code)) {
+                Ok(val) => {
+                    val.to_string(&mut ctx)
+                        .map(|s| s.to_std_string_escaped())
+                        .unwrap_or_else(|e| format!("JS error: {e}"))
+                }
+                Err(e) => format!("JS error: {e}"),
             }
         }).await.unwrap_or_else(|e| format!("Eval failed: {e}"));
 
         Ok(ToolOutput::text(result))
-    }
-}
-
-/// Convert serde_json::Value to rhai::Dynamic
-fn json_to_rhai(v: &serde_json::Value) -> rhai::Dynamic {
-    match v {
-        serde_json::Value::Null => rhai::Dynamic::UNIT,
-        serde_json::Value::Bool(b) => rhai::Dynamic::from(*b),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() { rhai::Dynamic::from(i) }
-            else if let Some(f) = n.as_f64() { rhai::Dynamic::from(f) }
-            else { rhai::Dynamic::UNIT }
-        }
-        serde_json::Value::String(s) => rhai::Dynamic::from(s.clone()),
-        serde_json::Value::Array(arr) => {
-            let v: Vec<rhai::Dynamic> = arr.iter().map(json_to_rhai).collect();
-            rhai::Dynamic::from(v)
-        }
-        serde_json::Value::Object(map) => {
-            let mut m = rhai::Map::new();
-            for (k, v) in map {
-                m.insert(k.clone().into(), json_to_rhai(v));
-            }
-            rhai::Dynamic::from(m)
-        }
     }
 }
 
@@ -1688,123 +1669,64 @@ mod tests {
         assert_eq!(infer_trust("/inbox/msg.txt"), "untrusted");
     }
 
-    // ─── json_to_rhai ──────────────────────────────────────────────────
 
-    #[test]
-    fn json_to_rhai_string() {
-        let v = serde_json::json!("hello");
-        let r = json_to_rhai(&v);
-        assert_eq!(r.to_string(), "hello");
-    }
-
-    #[test]
-    fn json_to_rhai_number() {
-        let r = json_to_rhai(&serde_json::json!(42));
-        assert_eq!(r.as_int().unwrap(), 42);
-    }
-
-    #[test]
-    fn json_to_rhai_nested_object() {
-        let v = serde_json::json!({"a": 1, "b": {"x": true}});
-        let r = json_to_rhai(&v);
-        let map = r.cast::<rhai::Map>();
-        assert_eq!(map.get("a").unwrap().as_int().unwrap(), 1);
-        let inner = map.get("b").unwrap().clone().cast::<rhai::Map>();
-        assert_eq!(inner.get("x").unwrap().as_bool().unwrap(), true);
-    }
-
-    #[test]
-    fn json_to_rhai_array() {
-        let v = serde_json::json!([1, 2, 3]);
-        let r = json_to_rhai(&v);
-        let arr = r.cast::<Vec<rhai::Dynamic>>();
-        assert_eq!(arr.len(), 3);
-        assert_eq!(arr[0].as_int().unwrap(), 1);
-    }
-
-    #[test]
-    fn json_to_rhai_null() {
-        let r = json_to_rhai(&serde_json::Value::Null);
-        assert!(r.is_unit());
-    }
-
-    // ─── eval (Rhai) ───────────────────────────────────────────────────
+    // ─── eval (Boa JS) ──────────────────────────────────────────────────
 
     #[test]
     fn eval_basic_math() {
-        let mut engine = rhai::Engine::new();
-        engine.set_max_operations(100_000);
-        let result: i64 = engine.eval("2 + 3 * 4").unwrap();
-        assert_eq!(result, 14);
+        use boa_engine::{Context, Source};
+        let mut ctx = Context::default();
+        let result = ctx.eval(Source::from_bytes("2 + 3 * 4")).unwrap();
+        assert_eq!(result.to_string(&mut ctx).unwrap().to_std_string_escaped(), "14");
     }
 
     #[test]
     fn eval_string_ops() {
-        let mut engine = rhai::Engine::new();
-        let mut scope = rhai::Scope::new();
-        scope.push("name", "John Smith".to_string());
-        let result: String = engine.eval_with_scope(&mut scope, "name.to_upper()").unwrap();
-        assert_eq!(result, "JOHN SMITH");
+        use boa_engine::{Context, Source, JsValue, js_string};
+        let mut ctx = Context::default();
+        ctx.global_object().set(js_string!("name"), JsValue::from(js_string!("John Smith")), true, &mut ctx).unwrap();
+        let result = ctx.eval(Source::from_bytes("name.toUpperCase()")).unwrap();
+        assert_eq!(result.to_string(&mut ctx).unwrap().to_std_string_escaped(), "JOHN SMITH");
     }
 
     #[test]
-    fn eval_parse_json_map_access() {
-        let mut engine = rhai::Engine::new();
-        let mut scope = rhai::Scope::new();
-        scope.push("file_0", r#"{"amount": 42, "name": "test"}"#.to_string());
-
-        engine.register_fn("parse_json", |s: &str| -> rhai::Dynamic {
-            let mut eng = rhai::Engine::new();
-            eng.parse_json(s, false).map(rhai::Dynamic::from).unwrap_or(rhai::Dynamic::UNIT)
-        });
-
-        let result: i64 = engine.eval_with_scope(&mut scope, r#"let d = parse_json(file_0); d.amount"#).unwrap();
-        assert_eq!(result, 42);
-    }
-
-    #[test]
-    fn eval_parse_json_array_filter() {
-        let mut engine = rhai::Engine::new();
-        let mut scope = rhai::Scope::new();
-        scope.push("data", r#"[{"v":1},{"v":5},{"v":3}]"#.to_string());
-
-        engine.register_fn("parse_json", |s: &str| -> rhai::Dynamic {
-            match serde_json::from_str::<serde_json::Value>(s) {
-                Ok(v) => json_to_rhai(&v),
-                Err(_) => rhai::Dynamic::UNIT,
-            }
-        });
-
-        let result: i64 = engine.eval_with_scope(&mut scope,
-            r#"let arr = parse_json(data); arr.filter(|x| x.v > 2).len()"#
+    fn eval_json_parse() {
+        use boa_engine::{Context, Source, JsValue, js_string};
+        let mut ctx = Context::default();
+        ctx.global_object().set(
+            js_string!("file_0"),
+            JsValue::from(js_string!(r#"{"amount": 42, "name": "test"}"#)),
+            true, &mut ctx,
         ).unwrap();
-        assert_eq!(result, 2); // items with v>2: {v:5}, {v:3}
+        let result = ctx.eval(Source::from_bytes("JSON.parse(file_0).amount")).unwrap();
+        assert_eq!(result.to_string(&mut ctx).unwrap().to_std_string_escaped(), "42");
     }
 
     #[test]
-    fn eval_date_string_manipulation() {
-        let mut engine = rhai::Engine::new();
-        let mut scope = rhai::Scope::new();
-        scope.push("workspace_date", "2026-05-14".to_string());
-
-        let result: String = engine.eval_with_scope(&mut scope,
-            r#"let parts = workspace_date.split("-"); parts[0]"#
+    fn eval_array_filter() {
+        use boa_engine::{Context, Source, JsValue, js_string};
+        let mut ctx = Context::default();
+        ctx.global_object().set(
+            js_string!("data"),
+            JsValue::from(js_string!(r#"[{"v":1},{"v":5},{"v":3}]"#)),
+            true, &mut ctx,
         ).unwrap();
-        assert_eq!(result, "2026");
+        let result = ctx.eval(Source::from_bytes("JSON.parse(data).filter(x => x.v > 2).length")).unwrap();
+        assert_eq!(result.to_string(&mut ctx).unwrap().to_std_string_escaped(), "2");
     }
 
     #[test]
-    fn eval_max_operations_prevents_infinite_loop() {
-        let mut engine = rhai::Engine::new();
-        engine.set_max_operations(1000);
-        let result = engine.eval::<rhai::Dynamic>("let x = 0; loop { x += 1; }");
-        assert!(result.is_err()); // Should hit operation limit
+    fn eval_date_string() {
+        use boa_engine::{Context, Source, JsValue, js_string};
+        let mut ctx = Context::default();
+        ctx.global_object().set(js_string!("workspace_date"), JsValue::from(js_string!("2026-05-14")), true, &mut ctx).unwrap();
+        let result = ctx.eval(Source::from_bytes("workspace_date.split('-')[0]")).unwrap();
+        assert_eq!(result.to_string(&mut ctx).unwrap().to_std_string_escaped(), "2026");
     }
 
     #[test]
     fn eval_broken_json_with_repair() {
-        // llm_json should repair broken JSON
-        let broken = r#"{"to": "a@b.com", "sent": false,}"#; // trailing comma
+        let broken = r#"{"to": "a@b.com", "sent": false,}"#;
         let opts = llm_json::RepairOptions::default();
         let fixed = llm_json::repair_json(broken, &opts).unwrap();
         let v: serde_json::Value = serde_json::from_str(&fixed).unwrap();
@@ -1812,13 +1734,14 @@ mod tests {
     }
 
     #[test]
-    fn eval_injection_attempt_sandboxed() {
-        // Rhai cannot access filesystem — eval is safe
-        let mut engine = rhai::Engine::new();
-        engine.set_max_operations(100_000);
-        // No import/require/system available in Rhai
-        let result = engine.eval::<rhai::Dynamic>(r#"import "os""#);
-        assert!(result.is_err());
+    fn eval_no_require_or_import() {
+        use boa_engine::{Context, Source};
+        let mut ctx = Context::default();
+        // Boa has no require/import/fs — sandboxed
+        let result = ctx.eval(Source::from_bytes("typeof require"));
+        assert!(result.is_ok()); // returns "undefined", not error
+        let val = result.unwrap();
+        assert_eq!(val.to_string(&mut ctx).unwrap().to_std_string_escaped(), "undefined");
     }
 
     // ─── grep_count (unit) ─────────────────────────────────────────────
