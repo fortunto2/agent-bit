@@ -188,7 +188,7 @@ impl Tool for ReadTool {
 
 // ─── search_and_read ─────────────────────────────────────────────────────────
 
-// AI-NOTE: search_and_read = search + read first result in one call. Saves 1 tool call per lookup.
+// AI-NOTE: search_and_read = search + read ALL matching files in one call.
 pub struct SearchAndReadTool(pub Arc<PcmClient>);
 
 #[derive(Deserialize, JsonSchema)]
@@ -198,15 +198,18 @@ struct SearchAndReadArgs {
     /// Directory to search in
     #[serde(default = "def_root")]
     path: String,
+    /// Max files to read (default 3, max 10)
+    #[serde(default)]
+    max_results: Option<u32>,
 }
 
 #[async_trait]
 impl Tool for SearchAndReadTool {
     fn name(&self) -> &str { "search_and_read" }
     fn description(&self) -> &str {
-        "Search for a pattern, then automatically read the first matching file. \
-         Returns both search results and full file content in one call. \
-         Use when you need to find AND read a file (e.g., find a contact then read their details)."
+        "Search for a pattern, then read ALL matching files (up to max_results, default 3). \
+         Returns search results + full content of each unique file. \
+         Use for: find contact details, enumerate matching records, lookup data across files."
     }
     fn is_read_only(&self) -> bool { true }
     fn parameters_schema(&self) -> Value { json_schema_for::<SearchAndReadArgs>() }
@@ -215,27 +218,30 @@ impl Tool for SearchAndReadTool {
     }
     async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
         let a: SearchAndReadArgs = parse_args(&args)?;
-        let limit = 5;
-        let search_result = self.0.search(&a.path, &a.pattern, limit).await.map_err(pcm_err)?;
+        let max = (a.max_results.unwrap_or(3)).min(10) as usize;
+        let search_result = self.0.search(&a.path, &a.pattern, (max * 3) as i32).await.map_err(pcm_err)?;
 
-        // Extract first file from search results
-        let first_file = search_result.lines()
+        // Extract unique file paths from search results
+        let mut seen = std::collections::HashSet::new();
+        let files: Vec<String> = search_result.lines()
             .filter(|l| !l.starts_with('$') && !l.is_empty())
             .filter_map(|l| l.split(':').next())
             .map(|p| p.trim().to_string())
-            .find(|p| !p.is_empty());
+            .filter(|p| !p.is_empty() && seen.insert(p.clone()))
+            .take(max)
+            .collect();
 
         let mut output = search_result.clone();
 
-        if let Some(path) = first_file {
-            match self.0.read(&path, false, 0, 0).await {
+        for path in &files {
+            match self.0.read(path, false, 0, 0).await {
                 Ok(content) => {
                     let capped: String = content.lines().take(200).collect::<Vec<_>>().join("\n");
-                    let trust = infer_trust(&path);
+                    let trust = infer_trust(path);
                     output.push_str(&format!("\n\n--- {} [{}] ---\n{}", path, trust, capped));
                 }
                 Err(e) => {
-                    output.push_str(&format!("\n\n--- {} (read error: {}) ---", path, e));
+                    output.push_str(&format!("\n\n--- {} (error: {}) ---", path, e));
                 }
             }
         }
