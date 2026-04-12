@@ -301,7 +301,7 @@ pub(crate) async fn run_agent(
         messages.push(Message::user(&format!("AGENTS.MD (workspace rules):\n{}", agents_md)));
     }
     if !skill_body.is_empty() {
-        messages.push(Message::user(&format!("SKILL WORKFLOW:\n{}", skill_body)));
+        messages.push(Message::user(&format!("SKILL WORKFLOW (auto-selected — if this doesn't match your task, call list_skills() then get_skill(name) to switch):\n{}", skill_body)));
     }
     messages.push(Message::user(&tree_out));
     messages.push(Message::user(&format!("$ date\n{}", ctx_time)));
