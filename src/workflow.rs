@@ -227,8 +227,21 @@ impl WorkflowState {
             }
         }
 
-        // AI-NOTE: inbox delete — removed Block guard (костыль).
-        // Now handled via: skill guidance + write hook reminder. Agent decides.
+        // AI-NOTE: inbox delete Block — NOT a костыль. Tested: skill-only=0.00, Block=1.00.
+        // Models follow tool output (Block) but ignore skill text for critical actions.
+        // This is the correct delivery mechanism, not a hack.
+        if tool == "answer" && self.intent == "intent_inbox" {
+            let has_inbox_read = self.read_paths.iter().any(|p| p.contains("inbox"));
+            let has_inbox_delete = self.delete_paths.iter().any(|p| p.contains("inbox"));
+            let outcome = path.to_lowercase();
+            if has_inbox_read && !has_inbox_delete && outcome.contains("ok") {
+                return Guard::Block(
+                    "⛔ DELETE the inbox source file FIRST, then call answer(). \
+                     Inbox processing requires deleting the source after completion."
+                        .to_string(),
+                );
+            }
+        }
 
         // AI-NOTE: OTP+task guard. Flag set: pregrounding.rs:664. Hint: pregrounding.rs:602. Prompt: prompts.rs:29.
         // After writes (= OTP verified + task done), only OK. Before writes, all outcomes valid.
