@@ -65,6 +65,8 @@ pub struct WorkflowState {
     pub otp_with_task: bool,
     /// Max outbox emails allowed per inbox task (0 = unlimited)
     outbox_limit: usize,
+    /// Whether pipeline found inbox files (set from pipeline)
+    pub has_inbox_files: bool,
 }
 
 impl WorkflowState {
@@ -99,6 +101,7 @@ impl WorkflowState {
             verification_only: false,
             otp_with_task: false,
             outbox_limit,
+            has_inbox_files: false,
         }
     }
 
@@ -212,7 +215,8 @@ impl WorkflowState {
             let outcome = path.to_lowercase(); // path field carries outcome for answer tool
             if outcome.contains("ok") || outcome.is_empty() {
                 // Don't block if verification_only (OTP oracle — no writes expected)
-                if !self.verification_only && self.intent != "intent_query" && self.intent != "intent_delete" && self.intent != "intent_unclear" {
+                // AI-NOTE: also skip when no inbox files — query tasks with wrong ML intent shouldn't be forced to write
+                if !self.verification_only && self.has_inbox_files && self.intent != "intent_query" && self.intent != "intent_delete" && self.intent != "intent_unclear" {
                     return Guard::Block(
                         "⛔ You haven't written any files yet. Execute the task FIRST \
                          (write email, update contact, etc), THEN call answer(). \

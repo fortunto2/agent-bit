@@ -426,21 +426,37 @@ pub(crate) fn extract_sender_domain(content: &str) -> Option<String> {
 /// e.g. "acme-logistics.example.com" → "acme logistics"
 /// e.g. "blue-harbor-bank.biz" → "blue harbor bank"
 pub(crate) fn domain_stem(domain: &str) -> String {
+    // AI-NOTE: strip TLDs + common fake suffixes (.bak, .old, .test) used in social engineering
     let stripped = domain
-        .trim_end_matches(".example.com")
+        .trim_end_matches(".example.com").trim_end_matches(".example.bak")
+        .trim_end_matches(".example.old").trim_end_matches(".example.test")
+        .trim_end_matches(".example")
         .trim_end_matches(".com").trim_end_matches(".nl")
         .trim_end_matches(".biz").trim_end_matches(".org")
-        .trim_end_matches(".net").trim_end_matches(".io");
+        .trim_end_matches(".net").trim_end_matches(".io")
+        .trim_end_matches(".bak").trim_end_matches(".old");
     stripped.replace('-', " ").replace('.', " ").replace('_', " ").to_lowercase()
 }
 
 /// Collect known (account_name, domain) pairs from CRM accounts.
+/// AI-NOTE: tries multiple paths — dev uses accounts/, prod uses 10_entities/cast/
 pub(crate) async fn collect_account_domains(pcm: &pcm::PcmClient) -> Vec<(String, String)> {
     let mut result = Vec::new();
-    let list = match pcm.list("accounts").await {
-        Ok(l) => l,
-        Err(_) => return result,
-    };
+    // Try multiple account/entity directories
+    let dirs = ["accounts", "10_entities/cast", "10_entities/accounts", "entities/accounts"];
+    let mut list_content = String::new();
+    let mut found_dir = "";
+    for dir in &dirs {
+        if let Ok(l) = pcm.list(dir).await {
+            if !l.trim().is_empty() {
+                list_content = l;
+                found_dir = dir;
+                break;
+            }
+        }
+    }
+    if list_content.is_empty() { return result; }
+    let list = &list_content;
     for line in list.lines() {
         let filename = line.trim().trim_end_matches('/');
         if filename.is_empty() || filename.starts_with('$')
@@ -448,7 +464,7 @@ pub(crate) async fn collect_account_domains(pcm: &pcm::PcmClient) -> Vec<(String
         {
             continue;
         }
-        let path = format!("accounts/{}", filename);
+        let path = format!("{}/{}", found_dir, filename);
         if let Ok(content) = pcm.read(&path, false, 0, 0).await {
             // Try JSON parse for structured account data
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(
@@ -481,18 +497,41 @@ pub(crate) async fn collect_account_domains(pcm: &pcm::PcmClient) -> Vec<(String
                     }
                 }
             } else {
-                // Fallback: line-scan for domains
+                // Fallback: line-scan for domains + emails (handles YAML frontmatter in .md files)
                 let lower = content.to_lowercase();
+                // AI-NOTE: extract entity name from first heading or name/alias field
+                let mut entity_name = String::new();
+                for cline in lower.lines() {
+                    if cline.starts_with("# ") {
+                        entity_name = cline.trim_start_matches("# ").trim().to_string();
+                        break;
+                    }
+                    if (cline.contains("name:") || cline.contains("alias:")) && entity_name.is_empty() {
+                        if let Some(val) = cline.split(':').nth(1) {
+                            let v = val.trim().trim_matches('`').trim_matches('"').trim_matches('\'');
+                            if !v.is_empty() { entity_name = v.to_string(); }
+                        }
+                    }
+                }
                 for cline in lower.lines() {
                     if cline.contains("website") || cline.contains("domain") || cline.contains("email") {
                         for word in cline.split(&['"', ' ', ',', '/', ':'][..]) {
                             let w = word.trim().trim_end_matches('.');
-                            if w.contains('.') && !w.contains(' ') && w.len() > 3 {
+                            // Extract domain from email addresses
+                            if w.contains('@') && w.contains('.') {
+                                if let Some(domain_part) = w.split('@').nth(1) {
+                                    if !domain_part.is_empty() {
+                                        let name = if entity_name.is_empty() { String::new() } else { entity_name.clone() };
+                                        result.push((name, domain_part.to_string()));
+                                    }
+                                }
+                            } else if w.contains('.') && !w.contains(' ') && w.len() > 3 && !w.contains('@') {
                                 let d = w.trim_start_matches("http://")
                                     .trim_start_matches("https://")
                                     .trim_start_matches("www.");
                                 if !d.is_empty() {
-                                    result.push((String::new(), d.to_string()));
+                                    let name = if entity_name.is_empty() { String::new() } else { entity_name.clone() };
+                                    result.push((name, d.to_string()));
                                 }
                             }
                         }

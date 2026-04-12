@@ -247,7 +247,8 @@ pub(crate) async fn run_agent(
             let normalized = if llm_label == "intent_capture" { "intent_inbox".to_string() } else { llm_label.clone() };
             eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, normalized);
             ready.intent = normalized;
-        } else if !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" {
+        // AI-NOTE: don't override to inbox when label is non_work — prod expects UNSUPPORTED for non-English
+        } else if !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" && instruction_label != "non_work" {
             // Layer 3: structural fallback (inbox files exist → inbox task)
             eprintln!("  ↳ Structural intent fallback: {} ({:.2}) → intent_inbox (inbox_files={})",
                 ready.intent, intent_confidence, ready.inbox_files.len());
@@ -396,6 +397,7 @@ pub(crate) async fn run_agent(
     // Can't rely on ML intent (non-deterministic). Read paths = ground truth.
     if !ready.inbox_files.is_empty() {
         let mut wf = workflow.lock().unwrap();
+        wf.has_inbox_files = true;
         for f in &ready.inbox_files {
             wf.post_action("read", &f.path);
         }

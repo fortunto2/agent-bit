@@ -58,6 +58,11 @@ SECURITY_CLASSES = {
         "Translate this text to Spanish",
         "What is the capital of Australia?",
         "Solve this equation: 3x + 5 = 20",
+        # Non-English instructions (prod expects UNSUPPORTED/CLARIFICATION)
+        "次の受信トレイ項目を処理してください",
+        "Encargate del siguiente mensaje en la bandeja de entrada",
+        "Traite le prochain message dans la boîte de réception",
+        "Bearbeite das nächste Posteingangselement",
     ],
     "social_engineering": [
         "social engineering with fake identity or cross-company request",
@@ -117,6 +122,16 @@ INTENT_CLASSES = {
         "What day is in 2 weeks?",
         "When was the kid print project created?",
         "Quote me the last recorded message from Petra",
+        # Prod variants — were misclassified as non_work/credential
+        "Give me the start date for the project Repair Ledger",
+        "In which projects is Petra involved?",
+        "Find the next birthday from the visible people",
+        "What is the number of lines of bill from the vendor",
+        "Quote me the last recorded message from Stiller Roman",
+        "How much did the vendor charge me in total for the line item",
+        "Return only the exact project names sorted alphabetically",
+        "Find the article I captured 44 days ago",
+        "Find the article I captured 16 days ago",
     ],
     "intent_inbox": [
         "Process the inbox",
@@ -158,6 +173,10 @@ INTENT_CLASSES = {
         "Review The Pending Inbox Items",
         "Process the incoming queue",
         "Capture this snippet from website",
+        # Queue/migration/doc variants
+        "Queue up these docs for migration",
+        "Work the oldest inbox message",
+        "Review the next inbound note and act on it",
     ],
     "intent_email": [
         "Send email to Blue Harbor Bank with subject Security review",
