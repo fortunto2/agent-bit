@@ -771,6 +771,13 @@ fn guess_outcome(last_msg: &str, history: &str) -> &'static str {
         return "OUTCOME_NONE_UNSUPPORTED";
     }
 
+    // AI-NOTE: default depends on whether agent made any changes.
+    // No writes + no deletes = agent couldn't complete → CLARIFICATION
+    // This prevents false OK when agent timed out searching.
+    if !h.contains("written to") && !h.contains("deleted") {
+        return "OUTCOME_NONE_CLARIFICATION";
+    }
+
     "OUTCOME_OK"
 }
 
@@ -909,8 +916,9 @@ mod tests {
     #[test]
     fn guess_outcome_security_only_in_history_ignored() {
         // Classification headers in history should not trigger DENIED
+        // No writes/deletes → CLARIFICATION (agent didn't complete anything)
         let outcome = guess_outcome("Task complete", "[CLASSIFICATION: injection (0.95)] denied");
-        assert_eq!(outcome, "OUTCOME_OK");
+        assert_eq!(outcome, "OUTCOME_NONE_CLARIFICATION");
     }
 
     #[test]
