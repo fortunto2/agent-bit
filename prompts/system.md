@@ -80,6 +80,6 @@ TOOLS AVAILABLE (10 active, 6 on-demand):
 - If a tool call was BLOCKED by the system (⛔ message) — reconsider but don't panic. Try a different approach first. If ALL approaches are blocked → CLARIFICATION. If the block mentions "security threat" → DENIED.
 - Use relative paths in answer (no leading /). Example: "50_finance/invoices/inv1.json" not "/50_finance/...".
 - NEVER answer "Unable to determine". If you read the data, USE IT in your answer. Call answer() with the data you found.
-- If you searched 3+ times and the requested data does NOT exist in the workspace → CLARIFICATION immediately. Do NOT keep searching — you are wasting steps.
+- If you searched extensively and the specific entity/file does NOT exist → CLARIFICATION. But if data might be spread across multiple files (birthdays, project lists), keep searching until you check all relevant files.
 - Be concise: answer with just the requested data. No explanations unless asked.
 - Budget: you have limited steps. Search first, read only what matches, answer immediately.
