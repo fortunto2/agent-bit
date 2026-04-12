@@ -611,155 +611,67 @@ impl Tool for ReadAllTool {
     }
 }
 
-// ─── write ───────────────────────────────────────────────────────────────────
+// ─── write (middleware over sgr-agent-tools::WriteTool) ──────────────────────
 
+// AI-NOTE: Middleware adds: workflow guards, outbox sent:false inject, README schema validation, hooks.
+// Base write (JSON repair via llm_json) handled by sgr-agent-tools::WriteTool.
 pub struct WriteTool {
-    pub pcm: Arc<PcmClient>,
-    pub hooks: crate::hooks::SharedHookRegistry,
-    pub workflow: Option<crate::workflow::SharedWorkflowState>,
+    inner: sgr_agent_tools::WriteTool<PcmClient>,
+    pcm: Arc<PcmClient>,
+    hooks: crate::hooks::SharedHookRegistry,
+    workflow: Option<crate::workflow::SharedWorkflowState>,
 }
 
 impl WriteTool {
     pub fn new(pcm: Arc<PcmClient>, hooks: crate::hooks::SharedHookRegistry, workflow: Option<crate::workflow::SharedWorkflowState>) -> Self {
-        Self { pcm, hooks, workflow }
+        Self { inner: sgr_agent_tools::WriteTool(pcm.clone()), pcm, hooks, workflow }
     }
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct WriteArgs {
-    /// File path
-    path: String,
-    /// File content to write
-    content: String,
-    /// Start line for ranged overwrite (1-indexed)
-    #[serde(default)]
-    start_line: i32,
-    /// End line for ranged overwrite
-    #[serde(default)]
-    end_line: i32,
 }
 
 #[async_trait]
 impl Tool for WriteTool {
-    fn name(&self) -> &str { "write" }
-    fn description(&self) -> &str { "Write content to a file. Without start_line/end_line: overwrites entire file. With start_line and end_line: replaces only those lines (like sed). Example: start_line=5, end_line=7 replaces lines 5-7 with content. Use read with number=true first to see line numbers. Outbox emails: ALWAYS read outbox/README.MD first for required JSON format, include sent:false, read outbox/seq.json for next ID." }
-    fn parameters_schema(&self) -> Value { json_schema_for::<WriteArgs>() }
-    async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
-        let mut a: WriteArgs = parse_args(&args)?;
+    fn name(&self) -> &str { self.inner.name() }
+    fn description(&self) -> &str { "Write content to a file. Without start_line/end_line: overwrites entire file. With start_line and end_line: replaces only those lines (like sed). Use read with number=true first to see line numbers. Outbox emails: ALWAYS read outbox/README.MD first for required JSON format." }
+    fn parameters_schema(&self) -> Value { self.inner.parameters_schema() }
+    async fn execute(&self, args: Value, ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: serde_json::Value = args.clone();
+        let path = a.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let content = a.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-        // Workflow pre_action guard (policy + capture-write)
-        let guard = self.workflow.as_ref().map(|wf| wf.lock().unwrap().pre_action("write", &a.path));
+        // Middleware 1: workflow pre_action guard
+        let guard = self.workflow.as_ref().map(|wf| wf.lock().unwrap().pre_action("write", &path));
         let mut warn_suffix = String::new();
         if let Some(out) = apply_guard(guard, &mut warn_suffix) {
             return Ok(out);
         }
 
-        // AI-NOTE: JSON auto-repair for ALL .json writes via llm_json fork.
-        //   Fixes: trailing commas, unescaped newlines, single quotes, missing key quotes,
-        //   markdown wrapping. Outbox gets "sent":false auto-inject.
-        //   Generalized from outbox-only (t23) to all JSON files for robustness on new tasks.
-        if a.path.ends_with(".json") && !a.path.contains("README") {
-            match serde_json::from_str::<serde_json::Value>(&a.content) {
-                Ok(mut json) => {
-                    // Outbox: auto-inject "sent": false if missing
-                    if a.path.contains("outbox/") && !a.path.contains("seq.json") {
-                        if json.get("sent").is_none() {
-                            json["sent"] = serde_json::Value::Bool(false);
-                            a.content = serde_json::to_string_pretty(&json).unwrap_or(a.content);
-                            eprintln!("    🔧 Auto-injected sent:false in {}", a.path);
-                        }
-                        // AI-NOTE: t36 — dynamic JSON schema validation from README.
-                        //   Reads README.MD from target dir, finds example JSON,
-                        //   extracts keys, warns if written JSON is missing keys from example.
-                        //   Universal: works for any dir with README containing JSON example.
-                        let dir = a.path.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
-                        let readme_path = format!("{}/README.MD", dir);
-                        if let Ok(readme) = self.pcm.read(&readme_path, false, 0, 0).await {
-                            // Extract keys from first JSON object in README (the example)
-                            if let Some(start) = readme.find('{') {
-                                // Try parse the example JSON from README
-                                let candidate = &readme[start..];
-                                // Find matching closing brace (simple: first valid JSON parse)
-                                for end in (start + 2..readme.len().min(start + 2000)).rev() {
-                                    if readme.as_bytes().get(end) == Some(&b'}') {
-                                        let candidate = &readme[start..=end];
-                                        // Try direct parse first, then llm_json repair for broken README examples
-                                        let parsed = serde_json::from_str::<serde_json::Value>(candidate)
-                                            .or_else(|_| {
-                                                let opts = llm_json::RepairOptions::default();
-                                                llm_json::repair_json(candidate, &opts)
-                                                    .ok()
-                                                    .and_then(|fixed| serde_json::from_str::<serde_json::Value>(&fixed).ok())
-                                                    .ok_or(())
-                                            });
-                                        if let Ok(example) = parsed {
-                                            // AI-NOTE: t17 fix — README schema validation is advisory (warn_suffix),
-                                            //   not blocking. README may have multiple examples (seq.json + email)
-                                            //   and first parsed JSON may not match target file schema.
-                                            if let Some(obj) = example.as_object() {
-                                                let missing: Vec<&String> = obj.keys()
-                                                    .filter(|k| json.get(k.as_str()).is_none())
-                                                    .collect();
-                                                if !missing.is_empty() {
-                                                    warn_suffix.push_str(&format!(
-                                                        "\n⚠ Hint: README shows fields: {}. You may be missing: {}.",
-                                                        obj.keys().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
-                                                        missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
-                                                    ));
-                                                }
-                                            }
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
+        // Middleware 2: outbox sent:false auto-inject
+        let mut final_args = args.clone();
+        if path.ends_with(".json") && path.contains("outbox/") && !path.contains("seq.json") {
+            if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if json.get("sent").is_none() {
+                    json["sent"] = serde_json::Value::Bool(false);
+                    if let Some(obj) = final_args.as_object_mut() {
+                        obj.insert("content".into(), serde_json::Value::String(
+                            serde_json::to_string_pretty(&json).unwrap_or(content.clone())
+                        ));
                     }
-                }
-                Err(_) => {
-                    let opts = llm_json::RepairOptions::default();
-                    match llm_json::repair_json(&a.content, &opts) {
-                        Ok(fixed) => {
-                            // After repair, also inject "sent" for outbox
-                            let mut repaired = fixed;
-                            if a.path.contains("outbox/") && !a.path.contains("seq.json") {
-                                if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&repaired) {
-                                    if json.get("sent").is_none() {
-                                        json["sent"] = serde_json::Value::Bool(false);
-                                    }
-                                    repaired = serde_json::to_string_pretty(&json).unwrap_or(repaired);
-                                }
-                            }
-                            a = WriteArgs { path: a.path, content: repaired, start_line: a.start_line, end_line: a.end_line };
-                            eprintln!("    🔧 Auto-fixed JSON via llm_json in {}", a.path);
-                        }
-                        Err(_) => {
-                            return Ok(ToolOutput::text(
-                                "⚠ VALIDATION: Invalid JSON — could not repair. Check format.".to_string()
-                            ));
-                        }
-                    }
+                    eprintln!("    🔧 Auto-injected sent:false in {}", path);
                 }
             }
         }
 
-        self.pcm.write(&a.path, &a.content, a.start_line, a.end_line).await.map_err(pcm_err)?;
-        let mut msg = if a.start_line > 0 && a.end_line > 0 {
-            format!("Replaced lines {}-{} in {}", a.start_line, a.end_line, a.path)
-        } else if a.start_line > 0 {
-            format!("Replaced from line {} in {}", a.start_line, a.path)
-        } else {
-            format!("Written to {}", a.path)
-        };
+        // Base write (JSON repair handled by sgr-agent-tools)
+        let result = self.inner.execute(final_args, ctx).await?;
+        let mut msg = result.content;
 
-        // Workflow post_action (phase transition + hooks)
+        // Middleware 3: workflow post_action + hooks
         if let Some(ref wf) = self.workflow {
-            for hook_msg in wf.lock().unwrap().post_action("write", &a.path) {
+            for hook_msg in wf.lock().unwrap().post_action("write", &path) {
                 msg.push_str(&format!("\n{}", hook_msg));
             }
         } else {
-            // Fallback: direct hook check (no workflow)
-            for hook_msg in self.hooks.check("write", &a.path) {
+            for hook_msg in self.hooks.check("write", &path) {
                 msg.push_str(&format!("\n{}", hook_msg));
             }
         }
@@ -769,11 +681,12 @@ impl Tool for WriteTool {
     }
 }
 
-// ─── delete ──────────────────────────────────────────────────────────────────
+// ─── delete (middleware — adds workflow guards + batch delete) ────────────────
 
+// AI-NOTE: Extends sgr-agent-tools::DeleteTool with workflow guards + batch paths array.
 pub struct DeleteTool {
-    pub pcm: Arc<PcmClient>,
-    pub workflow: Option<crate::workflow::SharedWorkflowState>,
+    pcm: Arc<PcmClient>,
+    workflow: Option<crate::workflow::SharedWorkflowState>,
 }
 
 impl DeleteTool {
