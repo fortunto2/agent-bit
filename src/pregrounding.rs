@@ -416,13 +416,13 @@ pub(crate) async fn run_agent(
         // EXTENDED (batch tools — justified by PCM round-trip savings)
         .register(tools::ReadAllTool(pcm.clone()))                              // = read entire directory
         .register(tools::SearchAndReadTool(pcm.clone()))                        // = grep + read all matches
-        .register(tools::GrepCountTool(pcm.clone()));                            // = grep -c (one call)
-        // MANAGEMENT (disabled — testing with 12 core+extended tools only)
-        // .register(tools::MkDirTool(pcm.clone()))
-        // .register(tools::MoveTool(pcm.clone()))
-        // .register(tools::FindTool(pcm.clone()))
-        // .register(tools::ListSkillsTool(skill_registry.clone()))
-        // .register(tools::GetSkillTool(skill_registry.clone()))
+        .register(tools::GrepCountTool(pcm.clone()))                             // = grep -c (one call)
+        // MANAGEMENT (deferred — model sees names only, schema loaded on demand)
+        .register_deferred(tools::MkDirTool(pcm.clone()))
+        .register_deferred(tools::MoveTool(pcm.clone()))
+        .register_deferred(tools::FindTool(pcm.clone()))
+        .register_deferred(tools::ListSkillsTool(skill_registry.clone()))
+        .register_deferred(tools::GetSkillTool(skill_registry.clone()));
 
     let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, Some(workflow.clone()));
     agent.set_intent(&instruction_intent);
