@@ -207,9 +207,10 @@ struct SearchAndReadArgs {
 impl Tool for SearchAndReadTool {
     fn name(&self) -> &str { "search_and_read" }
     fn description(&self) -> &str {
-        "Search for a pattern, then read ALL matching files (up to max_results, default 3). \
+        "Search for a regex pattern, then read ALL matching files (up to max_results, default 5). \
          Returns search results + full content of each unique file. \
-         Use for: find contact details, enumerate matching records, lookup data across files."
+         Use (?i) prefix for case-insensitive search. \
+         Use for: find contacts, enumerate matching records, list all files containing a keyword."
     }
     fn is_read_only(&self) -> bool { true }
     fn parameters_schema(&self) -> Value { json_schema_for::<SearchAndReadArgs>() }
@@ -218,7 +219,7 @@ impl Tool for SearchAndReadTool {
     }
     async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
         let a: SearchAndReadArgs = parse_args(&args)?;
-        let max = (a.max_results.unwrap_or(3)).min(10) as usize;
+        let max = (a.max_results.unwrap_or(5)).min(10) as usize;
         let search_result = self.0.search(&a.path, &a.pattern, (max * 3) as i32).await.map_err(pcm_err)?;
 
         // Extract unique file paths from search results
@@ -405,16 +406,17 @@ impl Tool for GrepCountTool {
 // ─── eval (Boa JS engine) ────────────────────────────────────────────────────
 
 // AI-NOTE: eval tool — agent writes JavaScript to process data. Boa = real ECMAScript in Rust.
-// Nemotron knows JS natively. Files pre-read, available as globals. Date mocked to workspace date.
+// Supports glob patterns in files: "40_projects/*/README.MD" reads all matching files.
 pub struct EvalTool(pub Arc<PcmClient>);
 
 #[derive(Deserialize, JsonSchema)]
 struct EvalArgs {
-    /// JavaScript code to execute. Available globals: file_0, file_1, ... (file contents as strings),
-    /// workspace_date (string YYYY-MM-DD). Use JSON.parse(file_0) to parse JSON files.
-    /// Last expression value = tool output.
+    /// JavaScript code to execute. Globals: file_0..file_N (file contents), file_paths (array of paths),
+    /// workspace_date (YYYY-MM-DD string). Use JSON.parse(file_0) for JSON.
+    /// Last expression = output.
     code: String,
-    /// Workspace file paths to pre-read. Contents available as file_0, file_1, etc.
+    /// File paths to pre-read. Supports glob: "projects/*/README.MD" expands to all matching.
+    /// Contents available as file_0, file_1, etc. Paths available as file_paths array.
     #[serde(default)]
     files: Vec<String>,
 }
@@ -423,10 +425,11 @@ struct EvalArgs {
 impl Tool for EvalTool {
     fn name(&self) -> &str { "eval" }
     fn description(&self) -> &str {
-        "Execute JavaScript code with access to workspace files. \
-         Pass file paths in 'files' array — contents available as file_0, file_1 globals. \
-         Use JSON.parse() for JSON data. workspace_date global has current date. \
-         Example: eval(code: 'JSON.parse(file_0).amount', files: ['invoices/inv1.json'])"
+        "Execute JavaScript with workspace file access. Supports glob patterns in files. \
+         Globals: file_0..N (contents), file_paths (array of resolved paths), workspace_date. \
+         Use for: batch JSON processing, filtering, date math, counting across files. \
+         Example: eval(code: 'file_paths.filter((p,i) => JSON.parse(eval(\"file_\"+i)).active)', files: ['accounts/*.json']). \
+         Glob example: files: ['40_projects/*/README.MD'] reads ALL project READMEs."
     }
     fn is_read_only(&self) -> bool { true }
     fn parameters_schema(&self) -> Value { json_schema_for::<EvalArgs>() }
@@ -436,16 +439,48 @@ impl Tool for EvalTool {
     async fn execute_readonly(&self, args: Value, _ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
         let a: EvalArgs = parse_args(&args)?;
 
-        // Pre-read files (async)
+        // Pre-read files with glob expansion
         let mut file_contents = Vec::new();
+        let mut file_paths = Vec::new();
         for path in &a.files {
-            let content = self.0.read(path, false, 0, 0).await.map_err(pcm_err)?;
-            let clean = if content.starts_with("$ ") {
-                content.find('\n').map(|j| content[j+1..].to_string()).unwrap_or(content)
+            if path.contains('*') {
+                // Glob: "dir/*/file" → list dir, expand each subdir
+                let parts: Vec<&str> = path.splitn(2, '*').collect();
+                let parent = parts[0].trim_end_matches('/');
+                let suffix = parts.get(1).map(|s| s.trim_start_matches('/')).unwrap_or("");
+                if let Ok(listing) = self.0.list(parent).await {
+                    for line in listing.lines().skip(1) {
+                        let name = line.trim().trim_end_matches('/');
+                        if name.is_empty() { continue; }
+                        let full = if suffix.is_empty() {
+                            format!("{}/{}", parent, name)
+                        } else {
+                            format!("{}/{}/{}", parent, name, suffix)
+                        };
+                        if let Ok(content) = self.0.read(&full, false, 0, 0).await {
+                            let clean = if content.starts_with("$ ") {
+                                content.find('\n').map(|j| content[j+1..].to_string()).unwrap_or(content)
+                            } else { content };
+                            file_paths.push(full);
+                            file_contents.push(clean);
+                        }
+                    }
+                }
             } else {
-                content
-            };
-            file_contents.push(clean);
+                match self.0.read(path, false, 0, 0).await {
+                    Ok(content) => {
+                        let clean = if content.starts_with("$ ") {
+                            content.find('\n').map(|j| content[j+1..].to_string()).unwrap_or(content)
+                        } else { content };
+                        file_paths.push(path.clone());
+                        file_contents.push(clean);
+                    }
+                    Err(e) => {
+                        file_paths.push(path.clone());
+                        file_contents.push(format!("(read error: {e})"));
+                    }
+                }
+            }
         }
 
         // Workspace date
@@ -474,6 +509,14 @@ impl Tool for EvalTool {
                     true,
                     &mut ctx,
                 );
+            }
+
+            // Inject file_paths array
+            {
+                let arr_code = format!("[{}]", file_paths.iter()
+                    .map(|p| format!("\"{}\"", p.replace('\\', "\\\\").replace('"', "\\\"")))
+                    .collect::<Vec<_>>().join(","));
+                let _ = ctx.eval(Source::from_bytes(&format!("var file_paths = {arr_code}")));
             }
 
             // Inject workspace_date
