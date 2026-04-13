@@ -101,13 +101,13 @@ WORKFLOW — Inbox contains bill/invoice/purchase:
 
 WORKFLOW — "OCR" / "run through OCR workflow" / "process bills":
   Inbox says "run these docs through our OCR workflow" with a file list.
-  1. Read 99_system/schemas/finance-record-frontmatter.md — get the EXACT field names and format
-  2. For EACH file listed in the inbox message: read the file
-  3. Write EACH file back to the SAME path, reformatted to match the schema EXACTLY
-     - Use the EXACT field names from the schema (e.g. "lines" not "line_items")
-     - Preserve all data values from the original file
-  4. Delete inbox source → answer(OK) with refs to ALL written files
-  CRITICAL: Read the schema FIRST. Field names must match EXACTLY or validation fails.
+  1. Read 99_system/schemas/finance-record-frontmatter.md — get the EXACT field names
+  2. For EACH file: use reformat() tool — provide only the YAML frontmatter fields,
+     the tool automatically preserves the original body content.
+     reformat(path: "50_finance/purchases/file.md", frontmatter: "record_type: bill\nbill_id: ...\nlines:\n  - item: PLA spool\n    qty: 3\n    unit_eur: 24\n    line_eur: 72")
+  3. Delete inbox source → answer(OK) with refs to ALL written files
+  CRITICAL: Use reformat() NOT write(). It preserves body content automatically.
+  CRITICAL: Read the schema FIRST. Field names must match EXACTLY.
 
 CRITICAL: After processing inbox → DELETE the source inbox file BEFORE calling answer().
   Workflow: read inbox → process (write email/card/etc) → DELETE inbox file → answer(OK).

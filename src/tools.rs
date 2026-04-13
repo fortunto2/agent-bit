@@ -1313,3 +1313,47 @@ impl Tool for LookupContactTool {
         Ok(ToolOutput::text(output))
     }
 }
+
+/// Add/replace YAML frontmatter on an existing file — preserves body content.
+/// Model provides only frontmatter fields, tool handles read→merge→write.
+pub struct ReformatTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct ReformatArgs {
+    /// File path to reformat
+    path: String,
+    /// YAML frontmatter content (without --- delimiters). E.g. "record_type: bill\ntotal_eur: 72"
+    frontmatter: String,
+}
+
+#[async_trait]
+impl Tool for ReformatTool {
+    fn name(&self) -> &str { "reformat" }
+    fn description(&self) -> &str {
+        "Add or replace YAML frontmatter on an existing file. Reads the file, prepends frontmatter, \
+         preserves the full body content. Use for OCR workflows — provide only frontmatter fields, \
+         the tool keeps the original body intact."
+    }
+    fn is_read_only(&self) -> bool { false }
+    fn parameters_schema(&self) -> Value { json_schema_for::<ReformatArgs>() }
+    async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: ReformatArgs = parse_args(&args)?;
+
+        let content = self.0.read(&a.path, false, 0, 0).await.map_err(pcm_err)?;
+        let body = if content.starts_with("$ ") {
+            content.find('\n').map(|i| &content[i + 1..]).unwrap_or(&content)
+        } else { &content[..] };
+
+        // Strip existing frontmatter if present
+        let body_clean = if body.starts_with("---") {
+            if let Some(end) = body[3..].find("---") {
+                body[end + 6..].trim_start_matches('\n')
+            } else { body }
+        } else { body };
+
+        let result = format!("---\n{}\n---\n\n{}", a.frontmatter.trim(), body_clean);
+        self.0.write(&a.path, &result, 0, 0).await.map_err(pcm_err)?;
+
+        Ok(ToolOutput::text(format!("Reformatted {} — frontmatter added, {} bytes body preserved", a.path, body_clean.len())))
+    }
+}
