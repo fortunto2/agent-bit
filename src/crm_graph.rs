@@ -52,12 +52,10 @@ impl std::fmt::Display for SenderTrust {
 /// "AI" in "email to AI labs" → false (too short, < 4 chars)
 fn account_name_in_text(account_lower: &str, text_lower: &str) -> bool {
     account_lower.split_whitespace()
-        .filter(|w| w.len() >= 4) // skip short words (AI, IT, US — too ambiguous)
+        .filter(|w| w.len() >= 4)
         .any(|word| {
-            // Word-boundary match: preceded by space, /, newline, or at start
-            text_lower.find(word).map_or(false, |pos| {
-                pos == 0 || !text_lower.as_bytes()[pos - 1].is_ascii_alphanumeric()
-            })
+            regex::Regex::new(&format!(r"(?i)\b{}\b", regex::escape(word)))
+                .map_or(false, |re| re.is_match(text_lower))
         })
 }
 
@@ -69,8 +67,6 @@ pub struct CrmGraph {
     domain_index: HashMap<String, NodeIndex>,
     /// name (lowercase) → NodeIndex of Contact or Account
     name_index: HashMap<String, NodeIndex>,
-    /// account ID → account name (for resolving contact.account_id)
-    account_id_map: HashMap<String, String>,
     /// Pre-computed account signatures for semantic matching: (account_name, signature_text, embedding)
     account_embeddings: Vec<(String, ndarray::Array1<f32>)>,
 }
@@ -82,7 +78,6 @@ impl CrmGraph {
             email_index: HashMap::new(),
             domain_index: HashMap::new(),
             name_index: HashMap::new(),
-            account_id_map: HashMap::new(),
             account_embeddings: Vec::new(),
         }
     }
@@ -125,9 +120,8 @@ impl CrmGraph {
         });
 
         let items = read_all(pcm, &entity_dir).await;
-        // Ingest as both accounts and contacts (same files in prod workspace)
-        for content in &items { g.ingest_account(content); }
-        for content in &items { g.ingest_contact(content); }
+        // Single pass: each entity file parsed once as both contact and account
+        for content in &items { g.ingest_entity(content); }
 
         g
     }
@@ -141,121 +135,63 @@ impl CrmGraph {
         }
     }
 
-    /// Parse a contact file (JSON or markdown) and add to graph.
-    fn ingest_contact(&mut self, raw: &str) {
+    /// Parse a markdown entity file — extracts contact + account fields in one pass.
+    /// Prod workspace: 10_entities/cast/*.md — people, pets, systems in markdown with YAML-ish fields.
+    fn ingest_entity(&mut self, raw: &str) {
         let content = Self::strip_pcm_header(raw);
-        // Try JSON first
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
-            let name = v.get("name").or(v.get("Name")).or(v.get("full_name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let email = v.get("email").or(v.get("Email"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let company_raw = v.get("company").or(v.get("Company")).or(v.get("account")).or(v.get("account_id"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            // Resolve account_id to account name if possible
-            let company = company_raw.map(|c| {
-                self.account_id_map.get(&c).cloned().unwrap_or(c)
-            });
-            self.add_contact(&name, email.as_deref(), company.as_deref());
-            return;
-        }
 
-        // Fallback: parse markdown/text key-value pairs
+        static EMAIL_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").unwrap()
+        });
+
         let mut name = String::new();
         let mut email = None;
-        let mut company = None;
+        let mut kind = String::new();
+        let mut relationship = None;
+        let mut domain = None;
+        let mut description = None;
+
         for line in content.lines() {
             let lower = line.to_lowercase();
+            let trimmed = line.trim().trim_start_matches("- ");
             if lower.starts_with("# ") {
                 name = line.strip_prefix("# ").unwrap_or("").trim().to_string();
-            } else if lower.starts_with("name:") {
-                name = line.splitn(2, ':').last().unwrap_or("").trim().to_string();
             } else if email.is_none() {
-                // AI-NOTE: universal email extraction via regex — works on any format:
-                //   "email: x@y", "- primary_contact_email: `x@y`", "contact <x@y>", etc.
-                static EMAIL_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-                    regex::Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}").unwrap()
-                });
-                if let Some(m) = EMAIL_RE.find(line) {
+                if let Some(m) = EMAIL_RE.find(trimmed) {
                     email = Some(m.as_str().to_string());
                 }
-            } else if lower.starts_with("company:") || lower.starts_with("account:") || lower.starts_with("organization:")
-                || lower.contains("relationship:") {
-                company = line.splitn(2, ':').last().map(|s| s.trim().to_string());
             }
-        }
-        if !name.is_empty() {
-            self.add_contact(&name, email.as_deref(), company.as_deref());
-        }
-    }
-
-    /// Parse an account file and add to graph.
-    fn ingest_account(&mut self, raw: &str) {
-        let content = Self::strip_pcm_header(raw);
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
-            let name = v.get("name").or(v.get("Name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let domain = v.get("domain").or(v.get("Domain")).or(v.get("website"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let account_manager = v.get("account_manager").or(v.get("accountManager"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let industry = v.get("industry").or(v.get("Industry")).or(v.get("sector"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let country = v.get("country").or(v.get("Country")).or(v.get("region"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let description = v.get("description").or(v.get("Description")).or(v.get("notes"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            // Record ID → name mapping for contact.account_id resolution
-            if let Some(id) = v.get("id").and_then(|v| v.as_str()) {
-                if !name.is_empty() {
-                    self.account_id_map.insert(id.to_string(), name.clone());
+            // YAML-ish fields: "- key: `value`" or "key: value"
+            if let Some((key, val)) = trimmed.split_once(':') {
+                let key = key.trim().to_lowercase();
+                let val = val.trim().trim_matches('`').trim().to_string();
+                if val.is_empty() { continue; }
+                match key.as_str() {
+                    "kind" => kind = val,
+                    "relationship" => relationship = Some(val),
+                    "domain" | "website" => domain = Some(val),
+                    _ => {}
                 }
             }
-            if !name.is_empty() {
-                self.add_account_extended(&name, domain.as_deref(), account_manager.as_deref(),
-                    industry.as_deref(), country.as_deref(), description.as_deref());
+        }
+        // Last paragraph (after blank line) as description
+        if let Some(pos) = content.rfind("\n\n") {
+            let last = content[pos + 2..].trim();
+            if !last.is_empty() && !last.starts_with("- ") && !last.starts_with("#") {
+                description = Some(last.to_string());
             }
-            return;
         }
 
-        let mut name = String::new();
-        let mut domain = None;
-        let mut account_manager = None;
-        let mut industry = None;
-        let mut country = None;
-        let mut description = None;
-        for line in content.lines() {
-            let lower = line.to_lowercase();
-            if lower.starts_with("# ") {
-                name = line.strip_prefix("# ").unwrap_or("").trim().to_string();
-            } else if lower.starts_with("name:") {
-                name = line.splitn(2, ':').last().unwrap_or("").trim().to_string();
-            } else if lower.starts_with("domain:") || lower.starts_with("website:") {
-                domain = line.splitn(2, ':').last().map(|s| s.trim().to_string());
-            } else if lower.starts_with("account_manager:") || lower.starts_with("account manager:") {
-                account_manager = line.splitn(2, ':').last().map(|s| s.trim().to_string());
-            } else if lower.starts_with("industry:") || lower.starts_with("sector:") {
-                industry = line.splitn(2, ':').last().map(|s| s.trim().to_string());
-            } else if lower.starts_with("country:") || lower.starts_with("region:") {
-                country = line.splitn(2, ':').last().map(|s| s.trim().to_string());
-            } else if lower.starts_with("description:") || lower.starts_with("notes:") {
-                description = line.splitn(2, ':').last().map(|s| s.trim().to_string());
-            }
-        }
-        if !name.is_empty() {
-            self.add_account_extended(&name, domain.as_deref(), account_manager.as_deref(),
-                industry.as_deref(), country.as_deref(), description.as_deref());
+        if name.is_empty() { return; }
+
+        // Every entity becomes a contact (for email resolution + fuzzy matching)
+        self.add_contact(&name, email.as_deref(), relationship.as_deref());
+
+        // Entities with kind=company/startup/vendor also become accounts
+        let is_account = matches!(kind.as_str(),
+            "company" | "startup" | "vendor" | "organization" | "agency" | "account");
+        if is_account {
+            self.add_account_extended(&name, domain.as_deref(), None, Some(&kind), None, description.as_deref());
         }
     }
 
@@ -493,7 +429,7 @@ impl CrmGraph {
         })
     }
 
-    /// Find all contacts matching a query (exact, substring, fuzzy).
+    /// Find all contacts matching a query via strsim (exact → Levenshtein).
     /// Returns Vec<(name, score)> sorted by score descending.
     pub fn find_all_matching_contacts(&self, query: &str) -> Vec<(String, f64)> {
         if query.len() < 2 { return Vec::new(); }
@@ -504,25 +440,17 @@ impl CrmGraph {
             if !matches!(self.graph[idx], Node::Contact { .. }) {
                 continue;
             }
-            if name == &query_lower {
-                matches.push((name.clone(), 1.0));
-            } else if name.contains(&query_lower) || query_lower.contains(name) {
-                matches.push((name.clone(), 0.85));
-            } else {
-                // Partial: check if any word in the query matches any word in the name
-                let query_words: Vec<&str> = query_lower.split_whitespace().collect();
-                let name_words: Vec<&str> = name.split_whitespace().collect();
-                let has_word_match = query_words.iter().any(|qw| {
-                    qw.len() >= 3 && name_words.iter().any(|nw| nw == qw)
-                });
-                if has_word_match {
-                    matches.push((name.clone(), 0.8));
-                } else {
-                    let score = strsim::normalized_levenshtein(&query_lower, name);
-                    if score > 0.6 {
-                        matches.push((name.clone(), score));
-                    }
-                }
+            // Full-name similarity
+            let full_score = strsim::normalized_levenshtein(&query_lower, name);
+            // Word-level: best match between query words and name words
+            let word_score = name.split_whitespace()
+                .map(|nw| query_lower.split_whitespace()
+                    .map(|qw| strsim::normalized_levenshtein(qw, nw))
+                    .fold(0.0f64, f64::max))
+                .fold(0.0f64, f64::max);
+            let score = full_score.max(word_score);
+            if score > 0.5 {
+                matches.push((name.clone(), score));
             }
         }
 
@@ -808,25 +736,25 @@ mod tests {
     }
 
     #[test]
-    fn ingest_json_contact() {
+    fn ingest_entity_markdown() {
         let mut g = CrmGraph::new();
-        g.ingest_contact(r#"{"name": "Test User", "email": "test@example.com", "company": "TestCo"}"#);
+        g.ingest_entity("# Test User\n- primary_contact_email: `test@example.com`\n- kind: `person`\n- relationship: `colleague`");
         assert!(g.is_known_entity("Test User"));
         assert_eq!(g.validate_sender("test@example.com", None), SenderTrust::Known);
     }
 
     #[test]
-    fn ingest_json_with_pcm_header() {
+    fn ingest_entity_with_pcm_header() {
         let mut g = CrmGraph::new();
-        g.ingest_contact("$ cat contacts/test.json\n{\"name\": \"PCM User\", \"email\": \"pcm@example.com\", \"company\": \"PCMCo\"}");
-        assert!(g.is_known_entity("PCM User"), "Should parse JSON after stripping $ cat header");
+        g.ingest_entity("$ cat 10_entities/cast/pcm_user.md\n# PCM User\n- primary_contact_email: `pcm@example.com`\n- kind: `person`");
+        assert!(g.is_known_entity("PCM User"), "Should parse markdown after stripping $ cat header");
     }
 
     #[test]
-    fn ingest_account_with_pcm_header() {
+    fn ingest_entity_account() {
         let mut g = CrmGraph::new();
-        g.ingest_account("$ cat accounts/acme.json\n{\"name\": \"Acme Corp\", \"domain\": \"acme.com\"}");
-        assert!(g.is_known_entity("Acme Corp"), "Should parse account JSON after stripping $ cat header");
+        g.ingest_entity("$ cat 10_entities/cast/acme.md\n# Acme Corp\n- kind: `company`\n- domain: `acme.com`");
+        assert!(g.is_known_entity("Acme Corp"), "Should parse company entity");
     }
 
     #[test]
@@ -921,9 +849,9 @@ mod tests {
     }
 
     #[test]
-    fn ingest_markdown_contact() {
+    fn ingest_entity_email_extraction() {
         let mut g = CrmGraph::new();
-        g.ingest_contact("# Alice Brown\nEmail: alice@wonderland.com\nCompany: Wonderland Inc");
+        g.ingest_entity("# Alice Brown\n- primary_contact_email: `alice@wonderland.com`\n- kind: `person`\n- relationship: `client`");
         assert!(g.is_known_entity("Alice Brown"));
         assert_eq!(g.validate_sender("alice@wonderland.com", None), SenderTrust::Known);
     }
