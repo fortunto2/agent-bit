@@ -73,6 +73,9 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF
 | 04-11 | `effbdd2` | nemotron | 86.0% (37/43) | parallel 10 (pre t02/t11/t17 fix) |
 | 04-11 | `effbdd2` | nemotron | **79.1%** (34/43) | **LEADERBOARD #1** parallel 5 — old binary |
 | 04-11 | `78144b8` | nemotron | **95.3%** (41/43) | **LEADERBOARD #2** parallel 5 — t19, t35 non-det |
+| 04-13 | `6466cbc` | gpt-5.4-mini | 54.8% (57/104) | **PROD** P=104, 3:28 — step optimization baseline |
+| 04-13 | `71bb220` | gpt-5.4 | **74.0%** (74/100) | **PROD** P=104, 3:19 — 19 inbox + 4 NORA + 3 finance |
+| 04-13 | `71bb220` | nemotron | ⏳ running | **PROD** P=5 — v22 stepfix |
 
 ---
 
@@ -542,3 +545,50 @@ doesn't extend TTL.
 - Non-deterministic variance (~5% between runs)
 
 **For 90+:** Need GPT-5.4 or Seed-2.0-pro (paid models).
+
+---
+
+### 2026-04-13: Step optimization + tool improvements (prod benchmark)
+
+**Commits:** `6466cbc` → `71bb220` (10 commits)
+
+**Harness step reduction (162→44 RPCs per task, -73%):**
+- Removed crm_schema pre-grounding (126 RPCs of AGENTS.MD reads — debug-only, not in LLM context)
+- CRM graph: find() instead of 4-dir trial-and-error, cast/ read once not twice
+- PcmClient.rpc_count() tracking for BitGN step metric
+- Fixed stale skill refs (search_and_read, grep_count → removed tools)
+- SearchTool description ≤3 → ≤10 (matched actual auto-expand code)
+
+**New tools + skills:**
+- `date_calc` tool (chrono): diff_days, add_days, next_birthday, compare, format
+- Finance skill: eval() for sums (NEVER mental math)
+- Enumerate skill: eval with glob for ALL project matches
+- Count-by-status skill: eval with entity+status filter
+- Birthday skill: read_all → date_calc (was 16-step eval JS loop → 3 steps)
+
+**CRM graph cleanup (-72 lines):**
+- Single `ingest_entity()` replaces dual ingest_contact+ingest_account
+- Markdown-only (removed JSON parsing), removed account_id_map
+- `contains()` → strsim word-level Levenshtein
+- Manual word-boundary → regex `\b`
+
+**Telemetry fix (parallel isolation):**
+- `tokio::task_local!` for session_id/task_id (was global RwLock — all P=104 tasks shared one session)
+- sgr-agent crate: `with_telemetry_scope()` wrapper
+
+**False DENIED fix:**
+- KNOWN sender now always gets [✓ TRUSTED] (was overridden by domain mismatch)
+- DESTRUCTIVE+UNKNOWN → CLARIFICATION not DENIED (system prompt annotation mapping)
+
+**Prod benchmark results:**
+| Provider | Score | Steps avg | Time |
+|----------|-------|-----------|------|
+| GPT-5.4-mini | 54.8% (57/104) | 43.6 | 3:28 |
+| GPT-5.4 full | **74.0% (74/100)** | 43.6 | 3:19 |
+| Nemotron v22 | ⏳ running | ~44 | ~30min |
+
+**Failure analysis (GPT-5.4 full, 30 failures):**
+- 19 inbox processing (model-dependent)
+- 4 NORA migration (needs separate skill)
+- 4 false DENIED → fixed (KNOWN sender + CLARIFICATION annotation)
+- 3 finance/data lookup (partially fixed with eval)
