@@ -52,6 +52,31 @@ cf-aig-request-timeout = "300000"
 cf-aig-cache-ttl = "3600"
 x-session-affinity = "pac1-agent"
 
+[providers.nemotron-super]
+model = "workers-ai/@cf/nvidia/nemotron-3-super-120b-a12b"
+base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
+api_key_env = "CF_AI_API_KEY"
+[providers.nemotron-super.headers]
+cf-aig-request-timeout = "300000"
+cf-aig-cache-ttl = "3600"
+x-session-affinity = "pac1-super"
+
+[providers.cf-gemma4]
+model = "workers-ai/@cf/google/gemma-4-26b-a4b-it"
+base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
+api_key_env = "CF_AI_API_KEY"
+[providers.cf-gemma4.headers]
+cf-aig-request-timeout = "300000"
+cf-aig-cache-ttl = "3600"
+
+[providers.cf-kimi]
+model = "workers-ai/@cf/moonshotai/kimi-k2.5"
+base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
+api_key_env = "CF_AI_API_KEY"
+[providers.cf-kimi.headers]
+cf-aig-request-timeout = "300000"
+cf-aig-cache-ttl = "3600"
+
 [providers.gpt54-mini]
 model = "gpt-5.4-mini"
 api_key_env = "OPENAI_API_KEY"
