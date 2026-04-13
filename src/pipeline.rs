@@ -403,22 +403,8 @@ impl New {
             fc.label
         };
 
-        // AI-NOTE: Non-English hard block — structural detection, not ML-dependent.
-        // Prod expects UNSUPPORTED/CLARIFICATION for non-English instructions (t010, t035, t060, t085).
-        // LLM ignores unsupported skill, so we must block in pipeline.
-        {
-            let non_ascii_ratio = self.instruction.chars()
-                .filter(|c| !c.is_ascii() && !matches!(*c, 'ü'|'ö'|'ä'|'Ü'|'Ö'|'Ä'|'é'|'è'|'ê'|'ß'))
-                .count() as f32 / self.instruction.len().max(1) as f32;
-            if non_ascii_ratio > 0.3 {
-                eprintln!("  [STAGE:classify] ⚠ Non-English instruction detected (non-ASCII ratio: {:.0}%)", non_ascii_ratio * 100.0);
-                return Err(BlockReason {
-                    outcome: "OUTCOME_NONE_UNSUPPORTED",
-                    message: "Non-English instruction — language not supported".into(),
-                    stage: "classify",
-                });
-            }
-        }
+        // AI-NOTE: non-English pipeline block fully removed — prod t009/t059/t084 expect OK on Arabic/French queries.
+        // LLM decides language support; non-work skill handles truly unsupported cases.
 
         // Completeness check: detect truncated instructions via tokenizer
         if looks_truncated(&self.instruction, shared_clf) {
@@ -556,6 +542,9 @@ impl Classified {
 impl InboxScanned {
     /// Stage 3: Check security — evaluate all inbox assessments, block on first threat.
     pub fn check_security(self) -> Result<SecurityChecked, BlockReason> {
+        // AI-NOTE: non-English block REMOVED — prod shows Arabic/French queries expect OK (t009, t059, t084).
+        // LLM handles language detection; pipeline should not block on script alone.
+
         for file in &self.inbox_files {
             if let Some(ref block) = file.security.blocked {
                 eprintln!("  [STAGE:security] ⛔ {} — {}", file.path, block.message);

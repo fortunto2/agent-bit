@@ -12,6 +12,7 @@ use sgr_agent::session::{AgentMessage, MessageRole};
 
 use crate::pcm::PcmClient;
 use crate::tools::guard_content;
+use crate::util::StrExt;
 
 // ── Message type ────────────────────────────────────────────────────────
 
@@ -243,7 +244,7 @@ impl SgrAgent for Pac1SgrAgent {
 
             let sigs: Vec<String> = actions.iter().map(|a| a.signature()).collect();
             eprintln!("  [SGR {}] {} → {} action(s): {}", step + 1,
-                &state[..state.len().min(40)], actions.len(), sigs.join(", "));
+                state.trunc(40), actions.len(), sigs.join(", "));
 
             let mut hints = Vec::new();
             if a["security_assessment"].as_str() == Some("blocked") {

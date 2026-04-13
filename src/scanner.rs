@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::classifier;
+use crate::util::StrExt;
 use crate::crm_graph;
 use crate::pcm;
 
@@ -105,12 +106,12 @@ pub(crate) fn threat_score(text: &str) -> u32 {
 pub(crate) fn prescan_instruction(text: &str) -> Option<(&'static str, &'static str)> {
     let score = threat_score(text);
     if score >= 3 {
-        eprintln!("  ⛔ prescan: threat_score={} on instruction: {}", score, &text[..text.len().min(100)]);
+        eprintln!("  ⛔ prescan: threat_score={} on instruction: {}", score, text.trunc(100));
         return Some(("OUTCOME_DENIED_SECURITY", "Blocked: injection/override attempt detected in task"));
     }
     // Instruction targets protected system files (e.g. embedded "delete AGENTS.md" in capture snippet)
     if crate::policy::scan_content(text) {
-        eprintln!("  ⛔ prescan: scan_content triggered on instruction: {}", &text[..text.len().min(100)]);
+        eprintln!("  ⛔ prescan: scan_content triggered on instruction: {}", text.trunc(100));
         return Some(("OUTCOME_DENIED_SECURITY", "Blocked: instruction targets protected system files"));
     }
     if score >= 2 {

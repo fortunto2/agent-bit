@@ -99,6 +99,14 @@ WORKFLOW — Inbox contains bill/invoice/purchase:
      - Date from bill, currency code, sequential number, descriptive slug
   3. Delete inbox source → answer(OK)
 
+WORKFLOW — "OCR bills" / "process bills related to X":
+  This means: find existing bills and RE-WRITE them (recreate structured copies).
+  1. search("entity_name OR keyword", "50_finance/purchases") → find ALL matching bill files
+  2. Read EACH bill file
+  3. Write EACH bill back to the SAME path with clean structured content (preserve all data)
+  4. Delete inbox source → answer(OK) with refs to ALL written files
+  CRITICAL: You MUST write() each bill file — the task expects file writes, not just reading.
+
 CRITICAL: After processing inbox → DELETE the source inbox file BEFORE calling answer().
   Workflow: read inbox → process (write email/card/etc) → DELETE inbox file → answer(OK).
   Missing delete = task failure. This applies to ALL inbox tasks, not just capture/distill.

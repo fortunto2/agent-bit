@@ -8,6 +8,8 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::util::StrExt;
+
 use sgr_agent::agent::{Agent, AgentError, Decision};
 use sgr_agent::client::LlmClient;
 use sgr_agent::context::AgentContext;
@@ -57,14 +59,13 @@ fn format_ledger_entry(step: u32, tool_name: &str, key_arg: &str, result: &str) 
         entry.push_str(" → ");
         let remaining = 80usize.saturating_sub(entry.len());
         if result.len() > remaining {
-            let end = result.floor_char_boundary(remaining);
-            entry.push_str(&result[..end]);
+            entry.push_str(result.trunc(remaining));
         } else {
             entry.push_str(result);
         }
     }
-    let trunc = entry.floor_char_boundary(80);
-    entry.truncate(trunc);
+    let trunc_len = entry.floor_char_boundary(80);
+    entry.truncate(trunc_len);
     entry
 }
 
@@ -273,7 +274,7 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         let step = self.step_count.load(Ordering::SeqCst);
         if let Some(ref wf) = self.workflow {
             for nudge in wf.lock().unwrap().advance_step() {
-                eprintln!("  📌 Workflow: {}", &nudge[..nudge.len().min(80)]);
+                eprintln!("  📌 Workflow: {}", nudge.trunc(80));
                 msgs.push(Message::user(&nudge));
             }
         }
@@ -305,17 +306,13 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
 
                 // Log verification self-check
                 if !verification.is_empty() {
-                    let vlen = verification.len().min(120);
-                    let vend = verification.char_indices().map(|(i, _)| i).take_while(|&i| i <= vlen).last().unwrap_or(0);
-                    eprintln!("    🔍 Verify: {}", &verification[..vend]);
+                    eprintln!("    🔍 Verify: {}", verification.trunc(120));
                 }
 
-                let slen = current_state.len().min(80);
-                let send = current_state.char_indices().map(|(i, _)| i).take_while(|&i| i <= slen).last().unwrap_or(0);
                 let situation = format!(
                     "Type: {} | Security: {} | State: {} | Done: [{}]",
                     task_type, security,
-                    &current_state[..send],
+                    current_state.trunc(80),
                     completed.join("; ")
                 );
                 (task_type, security, situation, plan, done, confidence)
@@ -546,14 +543,14 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             "write" => {
                 let written = output.lines().find(|l| l.starts_with("Written to"))
                     .unwrap_or(output).to_string();
-                written[..written.len().min(80)].to_string()
+                written.trunc(80).to_string()
             }
-            "delete" => output[..output.len().min(60)].to_string(),
+            "delete" => output.trunc(60).to_string(),
             "search" => {
                 let matches = output.lines().last().unwrap_or("");
-                format!("search → {}", &matches[..matches.len().min(60)])
+                format!("search → {}", matches.trunc(60))
             }
-            "answer" => format!("answer → {}", &output[..output.len().min(60)]),
+            "answer" => format!("answer → {}", output.trunc(60)),
             _ => format!("{}()", tool_name),
         };
         ctx.observe(summary);

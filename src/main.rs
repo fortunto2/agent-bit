@@ -18,6 +18,8 @@
 
 use std::sync::Arc;
 
+use crate::util::StrExt;
+
 use anyhow::Result;
 use clap::Parser;
 
@@ -39,6 +41,7 @@ mod pac1_sgr;
 mod feature_matrix;
 mod skills;
 mod tools;
+mod util;
 mod workflow;
 
 #[derive(Parser)]
@@ -390,7 +393,7 @@ async fn main() -> Result<()> {
                             if !trial_detail.logs.is_empty() {
                                 eprintln!("  --- Trial logs ---");
                                 for log in &trial_detail.logs {
-                                    eprintln!("  [{}] {}: {}", log.time, log.kind, &log.text[..log.text.len().min(500)]);
+                                    eprintln!("  [{}] {}: {}", log.time, log.kind, log.text.trunc(500));
                                 }
                             }
                         }
@@ -689,7 +692,7 @@ async fn verify_and_submit(
         Some(ref p) => {
             // AI-NOTE: verifier removed — was 3 extra LLM calls per trial.
             // Agent's own answer is final. Competitors (Codex) don't verify.
-            eprintln!("  ✅ Submit: {} — {}", p.outcome, &p.message[..p.message.len().min(100)]);
+            eprintln!("  ✅ Submit: {} — {}", p.outcome, p.message.trunc(100));
             let _ = pcm.submit_proposed(None).await;
         }
         None => {
@@ -701,7 +704,7 @@ async fn verify_and_submit(
                 extract_last_finding(history).unwrap_or("Task processed")
             } else { last_msg };
             let outcome = guess_outcome(text, history);
-            eprintln!("  ⚠ Auto-answer [{}]: {}", outcome, &text[..text.len().min(100)]);
+            eprintln!("  ⚠ Auto-answer [{}]: {}", outcome, text.trunc(100));
             let _ = pcm.answer(text, outcome, &[]).await;
         }
     }

@@ -13,6 +13,7 @@ use sgr_agent::client::LlmClient;
 use crate::agent;
 use crate::classifier;
 use crate::crm_graph;
+use crate::util::StrExt;
 use crate::pcm;
 use crate::prompts;
 use crate::scanner::{self, SharedClassifier, SharedNliClassifier};
@@ -599,13 +600,13 @@ pub(crate) async fn run_agent(
                     let lines = output.lines().count();
                     format!("{} lines", lines)
                 } else if output.starts_with("Written to ") {
-                    output[..output.len().min(60)].to_string()
+                    output.trunc(60).to_string()
                 } else if output.starts_with("Deleted ") {
                     output.to_string()
                 } else if output.starts_with("Answer submitted") {
                     "✓ submitted".to_string()
                 } else {
-                    let p = &output[..output.len().min(50)];
+                    let p = output.trunc(50);
                     p.replace('\n', " ")
                 };
                 eprintln!("    {} = {}", name, summary);
@@ -646,7 +647,7 @@ pub(crate) async fn run_agent(
             eprintln!("  ├─────┼────────────┼─────────────────────────────────────────────────┤");
             for (step, tool, result) in trace.iter() {
                 let t = if tool.len() > 10 { &tool[..10] } else { tool };
-                let r = if result.len() > 47 { &result[..result.floor_char_boundary(47)] } else { result };
+                let r = result.trunc(47);
                 eprintln!("  │{:4} │ {:10} │ {:47} │", step, t, r);
             }
             eprintln!("  └─────┴────────────┴─────────────────────────────────────────────────┘");
@@ -675,7 +676,8 @@ pub(crate) async fn run_agent(
             format!("{}", secs)
         },
         commit: String::new(), // filled by /evolve skill if running
-        title: instruction[..instruction.len().min(80)].to_string(),
+        // AI-NOTE: trunc() avoids panic on multibyte UTF-8 (Chinese/Arabic instructions)
+        title: instruction.trunc(80).to_string(),
         score_before: evolution::baseline_score(".agent"),
         score_after: eff_score,
         status: if run_stats.completed { "complete" } else { "incomplete" }.into(),

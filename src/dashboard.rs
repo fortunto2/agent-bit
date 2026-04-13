@@ -19,6 +19,17 @@ use ratatui::{
 };
 use rusqlite::{Connection, OpenFlags};
 
+/// UTF-8 safe string truncation (local copy — dashboard is a separate binary).
+trait StrExt {
+    fn trunc(&self, max_bytes: usize) -> &str;
+}
+impl StrExt for str {
+    #[inline]
+    fn trunc(&self, max_bytes: usize) -> &str {
+        &self[..self.floor_char_boundary(max_bytes)]
+    }
+}
+
 const PHOENIX_DB: &str = "~/.phoenix/phoenix.db";
 const PROJECT_NAME: &str = "pac1";
 
@@ -370,7 +381,7 @@ fn run_app() -> io::Result<()> {
                         Line::from(vec![
                             Span::styled(format!(" {} ", status), Style::default().fg(color)),
                             Span::styled(format!("{}st {}llm {}+{}tok ", t.steps, t.llm_calls, t.prompt_tokens, t.completion_tokens), Style::default().fg(Color::White)),
-                            Span::styled(&t.start_time[..t.start_time.len().min(19)], Style::default().fg(Color::DarkGray)),
+                            Span::styled(t.start_time.trunc(19), Style::default().fg(Color::DarkGray)),
                         ])
                     })
                     .collect())

@@ -2782,6 +2782,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sgr-agent",
  "sgr-agent-tools",
  "strsim",

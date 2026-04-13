@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use unicode_normalization::UnicodeNormalization;
 
+use crate::util::StrExt;
+
 use anyhow::{Context, Result};
 use ndarray::{Array1, ArrayView1};
 use ort::session::Session;
@@ -1267,7 +1269,7 @@ mod tests {
             if is_correct { correct += 1; }
             if is_low { low_conf += 1; }
             eprintln!("  {:50} → {} ({:.2}) {}",
-                &instr[..instr.len().min(50)], label, conf,
+                instr.trunc(50), label, conf,
                 if is_correct { "✓" } else if is_low { "⚠ low-conf (fallback)" } else { "✗ WRONG" }
             );
         }

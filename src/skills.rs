@@ -77,6 +77,7 @@ const COMPILED_SKILLS: &[(&str, &str)] = &[
     ("invoice-creation", include_str!("../skills/invoice-creation/SKILL.md")),
     ("purchase-ops", include_str!("../skills/purchase-ops/SKILL.md")),
     ("finance-query", include_str!("../skills/finance-query/SKILL.md")),
+    ("nora-migration", include_str!("../skills/nora-migration/SKILL.md")),
 ];
 
 #[cfg(test)]
