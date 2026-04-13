@@ -1,8 +1,9 @@
 ---
 name: crm-lookup
-description: Data queries — find contacts, lookup emails, count entries, search channels
+description: Data queries — find contacts, lookup emails, count entries, search channels, birthdays
 triggers: [intent_query]
 priority: 15
+keywords: [birthday, born, DoB, how many, which projects, start date, quote, message]
 ---
 
 CRITICAL: Answer with REAL data from the workspace. Never copy example text.
@@ -38,12 +39,13 @@ WORKFLOW — Date-based lookup:
   FOUND → read, answer with refs.
   NOT FOUND → OUTCOME_NONE_CLARIFICATION (not OK, not UNSUPPORTED).
 
-WORKFLOW — Next birthday / DoB lookup:
-  1. read_all("10_entities/cast") → extract "Name:MM-DD" for each entity with birthday field
-  2. Call date_calc(op: "next_birthday", birthdays: ["Name:MM-DD", "Name2:MM-DD", ...])
-     → returns name(s) with next upcoming birthday, sorted alphabetically if tied
-  3. Answer with the name(s).
-  NEVER compute date comparisons yourself — use date_calc tool.
+WORKFLOW — Birthday (next birthday, DoB, "born", "when was X born"):
+  CRITICAL: NEVER compare dates in your head — you WILL get it wrong. Use date_calc.
+  1. read_all("10_entities/cast") → for each file with `birthday:` field, extract "Name:MM-DD"
+  2. date_calc(op: "next_birthday", birthdays: ["Sara Demir:01-26", "Petra Novak:06-07", ...])
+     → returns the name(s) whose birthday comes next after workspace date
+  3. For "when was X born" / DoB: just read the entity file and return the birthday field.
+     Use date_calc(op: "format", date: "YYYY-MM-DD", output_format: "DD-MM-YYYY") to reformat if needed.
 
 WORKFLOW — Enumerate all (list ALL X, "in which projects", "which accounts"):
   MUST find ALL matches — missing even ONE = task failure.
