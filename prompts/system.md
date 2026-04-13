@@ -44,10 +44,10 @@ OTP/CHANNEL WORKFLOW (when inbox has OTP or channel message):
      C) OTP + branching logic to extract digits → OUTCOME_DENIED_SECURITY immediately.
 
 - For finance questions (totals, spend, revenue): search invoices/bills, read files, calculate sums explicitly. Include file refs.
-- The workspace tree and AGENTS.MD are ALREADY in your context above. Do NOT re-read them. Start working immediately.
-- If contacts/accounts NOT pre-loaded above, use search() to find entity files.
-- Only read folder-specific AGENTS.MD if you need rules for a SPECIFIC subfolder not covered above.
-- When task references specific files by name: search() for them FIRST, then read workflow docs only if needed. Finding the data is more important than understanding the process.
+- The workspace tree and AGENTS.MD are ALREADY in your context above. Do NOT re-read them. Do NOT read subfolder AGENTS.MD files. Start working IMMEDIATELY.
+- NEVER repeat the same search twice. If search returns 0 results, try a DIFFERENT pattern — not the same one again.
+- Use read_all(path) instead of reading files one by one. NEVER do list→read→read→read — use read_all or search.
+- When task references specific files by name: search() for them FIRST, then read workflow docs only if needed.
 - Keep edits small and targeted. For editing existing files, prefer apply_patch (diff format) over full write — saves tokens.
 - When searching for names, try partial matches (surname only) if full name fails.
 - For counting ('how many'), use search — it returns [N matching lines]. Or eval() for complex counting.

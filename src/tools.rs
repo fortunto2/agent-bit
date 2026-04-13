@@ -982,3 +982,79 @@ mod tests {
         assert_eq!(infer_trust("/inbox/msg.txt"), "untrusted");
     }
 }
+
+// ── Batch Tools: search_and_read + grep_count ─────────────────────────
+// AI-NOTE: reduces harness step count. search+read = 2 RPCs → 1 tool call.
+
+/// Search for pattern and read the first matching file in one tool call.
+pub struct SearchAndReadTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct SearchAndReadArgs {
+    /// Regex pattern to search for
+    pattern: String,
+    /// Directory path to search in (e.g. "contacts", "50_finance/invoices")
+    #[serde(default)]
+    path: Option<String>,
+}
+
+#[async_trait]
+impl Tool for SearchAndReadTool {
+    fn name(&self) -> &str { "search_and_read" }
+    fn description(&self) -> &str { "Search for pattern and read the first matching file — saves a step vs separate search + read." }
+    fn parameters_schema(&self) -> Value { json_schema_for::<SearchAndReadArgs>() }
+    async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: SearchAndReadArgs = parse_args(&args)?;
+        let path = a.path.as_deref().unwrap_or("/");
+        // Search
+        let results = self.0.search(path, &a.pattern, 20).await.map_err(pcm_err)?;
+        if results.trim().is_empty() || results.contains("[0 matching") {
+            return Ok(ToolOutput::text(format!("No matches for '{}' in {}", a.pattern, path)));
+        }
+        // Extract first matching file path
+        let first_file = results.lines()
+            .find(|l| l.contains(':') && !l.starts_with('[') && !l.starts_with("$"))
+            .and_then(|l| l.split(':').next())
+            .map(|p| p.trim().to_string());
+        let mut output = results.clone();
+        if let Some(ref file_path) = first_file {
+            let content = self.0.read(file_path, false, 0, 0).await.map_err(pcm_err)?;
+            output.push_str(&format!("\n\n--- {} ---\n{}", file_path, content));
+        }
+        Ok(ToolOutput::text(output))
+    }
+}
+
+/// Count lines matching a regex pattern in a path — one tool call instead of search + manual count.
+pub struct GrepCountTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct GrepCountArgs {
+    /// Regex pattern to count
+    pattern: String,
+    /// Directory path to search in
+    #[serde(default)]
+    path: Option<String>,
+}
+
+#[async_trait]
+impl Tool for GrepCountTool {
+    fn name(&self) -> &str { "grep_count" }
+    fn description(&self) -> &str { "Count lines matching a regex pattern — returns the count number. Use for 'how many' questions." }
+    fn parameters_schema(&self) -> Value { json_schema_for::<GrepCountArgs>() }
+    async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: GrepCountArgs = parse_args(&args)?;
+        let path = a.path.as_deref().unwrap_or("/");
+        let results = self.0.search(path, &a.pattern, 20).await.map_err(pcm_err)?;
+        // Extract count from "[N matching lines]"
+        let count = if let Some(bracket) = results.lines().last() {
+            if bracket.contains("matching") {
+                bracket.trim_start_matches('[').split_whitespace().next()
+                    .and_then(|n| n.parse::<usize>().ok()).unwrap_or(0)
+            } else {
+                results.lines().filter(|l| l.contains(':') && !l.starts_with('$')).count()
+            }
+        } else { 0 };
+        Ok(ToolOutput::text(format!("{}", count)))
+    }
+}

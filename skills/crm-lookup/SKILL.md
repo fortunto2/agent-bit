@@ -17,6 +17,15 @@ WORKFLOW — Counting (how many X):
   Or use search — result shows [N matching lines]. That number IS the answer.
   Do NOT read files and count manually — you WILL miscount.
 
+WORKFLOW — Sum/total queries (how much, total amount):
+  1. search for matching files (invoices, bills, purchases)
+  2. Read EACH matching file, extract the numeric amount
+  3. Use eval() to sum: eval(code: 'files.map(f => parseFloat(f.match(/total.*?(\\d+)/i)?.[1] || 0)).reduce((a,b)=>a+b, 0)')
+  4. Return the EXACT number — no rounding, no currency symbol unless asked
+
+WORKFLOW — "Return only number/date/name":
+  Answer with EXACTLY what was asked — no extra text. "2" not "2 lines". "April 27, 2026" not "The start date is April 27, 2026".
+
 WORKFLOW — Date-based lookup:
   Use context() to get current date. Calculate target date. Search files by date in filename.
   FOUND → read, answer with refs.
