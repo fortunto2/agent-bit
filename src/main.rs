@@ -175,9 +175,27 @@ async fn main() -> Result<()> {
 
     if let Some(ref run_id) = cli.submit_run {
         eprintln!("[pac1] Force-submitting run: {}", run_id);
-        harness.submit_run(run_id).await?;
-        eprintln!("[pac1] Submitted!");
-        return Ok(());
+        // Try submit, if fails due to stuck trials — end them and retry
+        for attempt in 0..20 {
+            match harness.submit_run(run_id).await {
+                Ok(_) => { eprintln!("[pac1] Submitted!"); return Ok(()); }
+                Err(e) => {
+                    let msg = format!("{}", e);
+                    // Extract stuck trial ID from error: "trial_id=\"vm-xxx\""
+                    if let Some(start) = msg.find("trial_id=\"") {
+                        let rest = &msg[start + 10..];
+                        if let Some(end) = rest.find('"') {
+                            let trial_id = &rest[..end];
+                            eprintln!("  [attempt {}] Ending stuck trial: {}", attempt + 1, trial_id);
+                            let _ = harness.end_trial(trial_id).await;
+                            continue;
+                        }
+                    }
+                    anyhow::bail!("SubmitRun failed: {}", e);
+                }
+            }
+        }
+        anyhow::bail!("Failed to submit after 3 attempts");
     }
 
     // AI-NOTE: FC probe — run once per new model via `make probe` or `--probe`
