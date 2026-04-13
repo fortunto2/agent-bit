@@ -403,7 +403,7 @@ async fn main() -> Result<()> {
                 }
             };
             write_trial_metrics(
-                &dump_dir, &model, score, steps, tool_calls,
+                &dump_dir, &model, score, steps, tool_calls, pcm.rpc_count(),
                 agent_elapsed.as_secs_f64(), total_elapsed.as_secs_f64(), &[], &history,
             );
 
@@ -574,7 +574,7 @@ async fn run_leaderboard(
         }
         let total_elapsed_final = t0.elapsed();
         write_trial_metrics(
-            &dump_dir, &model, score as f32, steps, tool_calls,
+            &dump_dir, &model, score as f32, steps, tool_calls, pcm.rpc_count(),
             agent_elapsed.as_secs_f64(), total_elapsed_final.as_secs_f64(),
             &result.score_detail, &history,
         );
@@ -605,11 +605,11 @@ async fn run_leaderboard(
 /// Write unified metrics + score + run log to dump dir. Used by both single-task and parallel modes.
 fn write_trial_metrics(
     dump_dir: &str, model: &str, score: f32, steps: usize, tool_calls: usize,
-    agent_secs: f64, total_secs: f64, score_detail: &[String], history: &str,
+    harness_steps: u32, agent_secs: f64, total_secs: f64, score_detail: &[String], history: &str,
 ) {
     // Always log to stderr what we're writing
-    eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Steps: {} | Tools: {}",
-        agent_secs, total_secs, steps, tool_calls);
+    eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Steps: {} | Tools: {} | RPCs: {}",
+        agent_secs, total_secs, steps, tool_calls, harness_steps);
     let _ = std::fs::write(format!("{}/metrics.txt", dump_dir), format!(
         "model: {}\nscore: {:.2}\nsteps: {}\ntool_calls: {}\nagent_secs: {:.1}\ntotal_secs: {:.1}\n",
         model, score, steps, tool_calls, agent_secs, total_secs,
@@ -626,6 +626,7 @@ fn write_trial_metrics(
             writeln!(f, "\nscore: {:.2}", score)?;
             writeln!(f, "steps: {}", steps)?;
             writeln!(f, "tool_calls: {}", tool_calls)?;
+            writeln!(f, "harness_steps: {}", harness_steps)?;
             writeln!(f, "agent_secs: {:.1}", agent_secs)?;
             writeln!(f, "total_secs: {:.1}", total_secs)?;
             for d in score_detail { writeln!(f, "detail: {}", d)?; }
@@ -635,8 +636,8 @@ fn write_trial_metrics(
     if !history.is_empty() {
         let _ = std::fs::write(format!("{}/run.log", dump_dir), history);
     }
-    eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Steps: {} | Tools: {}",
-        agent_secs, total_secs, steps, tool_calls);
+    eprintln!("  ⏱ Agent: {:.1}s | Total: {:.1}s | Steps: {} | Tools: {} | RPCs: {}",
+        agent_secs, total_secs, steps, tool_calls, harness_steps);
 }
 
 // ─── Shared ──────────────────────────────────────────────────────────────────

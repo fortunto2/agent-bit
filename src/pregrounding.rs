@@ -170,27 +170,21 @@ pub(crate) async fn run_agent(
         async { pcm.context().await.unwrap_or_default() },
     );
 
+    // AI-NOTE: only read top-level AGENTS.MD files (depth 1). Old code tried 4 variants
+    // per every dir in tree = 128+ RPCs (most 404). Now: ~10 RPCs for top-level dirs only.
     let crm_schema = {
         let mut readmes = String::new();
         for line in tree_out.lines() {
             let trimmed = line.trim().trim_start_matches(|c: char| c == '│' || c == '├' || c == '└' || c == '─' || c == ' ' || c == '|');
-            if trimmed.ends_with('/') {
+            // Only top-level dirs (no '/' in name = direct child of root)
+            if trimmed.ends_with('/') && !trimmed.contains("//") {
                 let dir = trimmed.trim_end_matches('/');
-                if !dir.is_empty() {
-                    // AI-NOTE: prod uses AGENTS.MD not README. Try AGENTS.MD first, then README variants.
-                    let candidates = [
-                        format!("{}/AGENTS.MD", dir),
-                        format!("{}/AGENTS.md", dir),
-                        format!("{}/README.md", dir),
-                        format!("{}/README.MD", dir),
-                    ];
-                    for path in &candidates {
-                        if let Ok(content) = pcm.read(path, false, 0, 0).await {
-                            if !content.is_empty() {
-                                readmes.push_str(&format!("# {}\n{}\n\n", path, content));
-                                if readmes.len() > 2000 { break; }
-                                break; // found one, skip other case variant
-                            }
+                if !dir.is_empty() && !dir.contains('/') {
+                    let path = format!("{}/AGENTS.MD", dir);
+                    if let Ok(content) = pcm.read(&path, false, 0, 0).await {
+                        if !content.is_empty() {
+                            readmes.push_str(&format!("# {}\n{}\n\n", path, content));
+                            if readmes.len() > 2000 { break; }
                         }
                     }
                 }

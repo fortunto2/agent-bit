@@ -1,7 +1,7 @@
 //! BitGN PcmRuntime client — typed Connect-RPC via bitgn-sdk.
 
 use anyhow::Result;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use bitgn_sdk::vm::pcm::{self as proto, PcmRuntimeClient};
 use connectrpc::client::HttpClient;
@@ -23,6 +23,8 @@ pub struct PcmClient {
     /// Read cache — keyed by path. Invalidated by write/delete to same path.
     /// Single owner: PcmClient. All tools share via Arc<PcmClient>.
     read_cache: Mutex<std::collections::HashMap<String, String>>,
+    /// Total RPC calls to harness (= BitGN "steps" metric). Cache hits NOT counted.
+    rpc_count: AtomicU32,
 }
 
 impl PcmClient {
@@ -35,11 +37,22 @@ impl PcmClient {
             proposed_answer: Mutex::new(None),
             recent_reads: Mutex::new(Vec::new()),
             read_cache: Mutex::new(std::collections::HashMap::new()),
+            rpc_count: AtomicU32::new(0),
         }
     }
 
     fn err(method: &str, e: connectrpc::ConnectError) -> anyhow::Error {
         anyhow::anyhow!("PCM {} failed: {}", method, e)
+    }
+
+    /// Total harness RPC calls (= BitGN "steps" metric). Cache hits excluded.
+    pub fn rpc_count(&self) -> u32 {
+        self.rpc_count.load(Ordering::Relaxed)
+    }
+
+    /// Increment RPC counter (called on every actual harness call, not cache hits).
+    fn count_rpc(&self) {
+        self.rpc_count.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Cache-through helper: return cached value or fetch, cache, and return.
@@ -53,6 +66,7 @@ impl PcmClient {
                 return Ok(hit.clone());
             }
         }
+        self.count_rpc();
         let result = fetch().await?;
         if let Ok(mut cache) = self.read_cache.lock() {
             cache.insert(key.to_string(), result.clone());
@@ -108,6 +122,7 @@ impl PcmClient {
             }
         }
 
+        self.count_rpc();
         let resp = self.inner.read(proto::ReadRequest {
             path: path.into(), number, start_line, end_line, ..Default::default()
         }).await.map_err(|e| Self::err("Read", e))?;
@@ -158,6 +173,7 @@ impl PcmClient {
                 }
             }
         }
+        self.count_rpc();
         self.inner.write(proto::WriteRequest {
             path: path.into(), content: content.into(), start_line, end_line, ..Default::default()
         }).await.map_err(|e| Self::err("Write", e))?;
@@ -180,6 +196,7 @@ impl PcmClient {
         if let Some(reason) = crate::policy::check_write(path) {
             anyhow::bail!("BLOCKED: '{}' is protected ({}) — cannot delete", path, reason);
         }
+        self.count_rpc();
         self.inner.delete(proto::DeleteRequest { path: path.into(), ..Default::default() })
             .await.map_err(|e| Self::err("Delete", e))?;
         if let Ok(mut cache) = self.read_cache.lock() {
@@ -189,12 +206,14 @@ impl PcmClient {
     }
 
     pub async fn mkdir(&self, path: &str) -> Result<()> {
+        self.count_rpc();
         self.inner.mk_dir(proto::MkDirRequest { path: path.into(), ..Default::default() })
             .await.map_err(|e| Self::err("MkDir", e))?;
         Ok(())
     }
 
     pub async fn move_file(&self, from: &str, to: &str) -> Result<()> {
+        self.count_rpc();
         self.inner.r#move(proto::MoveRequest {
             from_name: from.into(), to_name: to.into(), ..Default::default()
         }).await.map_err(|e| Self::err("Move", e))?;
@@ -207,6 +226,7 @@ impl PcmClient {
             "dirs" => proto::find_request::Type::TYPE_DIRS,
             _ => proto::find_request::Type::TYPE_ALL,
         };
+        self.count_rpc();
         let resp = self.inner.find(proto::FindRequest {
             root: root.into(), name: name.into(), r#type: type_val.into(), limit, ..Default::default()
         }).await.map_err(|e| Self::err("Find", e))?;
@@ -216,6 +236,7 @@ impl PcmClient {
     }
 
     pub async fn search(&self, root: &str, pattern: &str, limit: i32) -> Result<String> {
+        self.count_rpc();
         let resp = self.inner.search(proto::SearchRequest {
             root: root.into(), pattern: pattern.into(), limit, ..Default::default()
         }).await.map_err(|e| Self::err("Search", e))?;
@@ -256,6 +277,7 @@ impl PcmClient {
             "OUTCOME_ERR_INTERNAL" => proto::Outcome::OUTCOME_ERR_INTERNAL,
             _ => proto::Outcome::OUTCOME_OK,
         };
+        self.count_rpc();
         self.inner.answer(proto::AnswerRequest {
             message: message.into(), outcome: outcome_val.into(), refs: refs.to_vec(), ..Default::default()
         }).await.map_err(|e| Self::err("Answer", e))?;

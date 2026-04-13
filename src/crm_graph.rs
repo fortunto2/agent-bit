@@ -113,16 +113,25 @@ impl CrmGraph {
         }
 
         // AI-NOTE: try multiple paths — dev uses accounts/contacts/, prod uses 10_entities/cast/
+        // Read cast/ once, reuse for both accounts and contacts (saves 25+ RPCs)
+        let mut cast_cache: Option<Vec<String>> = None;
         // Accounts FIRST (builds account_id_map for contact.account_id resolution)
         for dir in &["accounts", "10_entities/cast", "10_entities/accounts", "entities/accounts"] {
             let items = read_all(pcm, dir).await;
             if !items.is_empty() {
+                if *dir == "10_entities/cast" { cast_cache = Some(items.clone()); }
                 for content in items { g.ingest_account(&content); }
                 break;
             }
         }
-        // Contacts (account_id_map now available)
+        // Contacts (account_id_map now available) — reuse cast cache if available
         for dir in &["contacts", "10_entities/cast", "10_entities/contacts", "entities/contacts"] {
+            if *dir == "10_entities/cast" {
+                if let Some(ref cached) = cast_cache {
+                    for content in cached { g.ingest_contact(content); }
+                    break;
+                }
+            }
             let items = read_all(pcm, dir).await;
             if !items.is_empty() {
                 for content in items { g.ingest_contact(&content); }
