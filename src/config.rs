@@ -11,7 +11,34 @@ pub struct Config {
     #[serde(default)]
     pub defaults: DefaultsSection,
     pub providers: HashMap<String, ProviderSection>,
+    #[serde(default)]
+    pub embeddings: EmbeddingsSection,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct EmbeddingsSection {
+    #[serde(default = "default_embed_model")]
+    pub model: String,
+    #[serde(default = "default_embed_base_url")]
+    pub base_url: String,
+    /// Env var name for API key
+    #[serde(default = "default_embed_api_key_env")]
+    pub api_key_env: String,
+}
+
+impl Default for EmbeddingsSection {
+    fn default() -> Self {
+        Self {
+            model: default_embed_model(),
+            base_url: default_embed_base_url(),
+            api_key_env: default_embed_api_key_env(),
+        }
+    }
+}
+
+fn default_embed_model() -> String { "workers-ai/@cf/baai/bge-m3".to_string() }
+fn default_embed_base_url() -> String { "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat".to_string() }
+fn default_embed_api_key_env() -> String { "CF_AI_API_KEY".to_string() }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct DefaultsSection {

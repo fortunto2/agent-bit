@@ -210,11 +210,10 @@ pub(crate) async fn run_agent(
     // Low-confidence intent: ML unsure → OpenAI embedding classify → LLM fallback → structural
     // Skip fallback for intent_delete — structural forcing already handles it via detect_forced_task_type
     if intent_confidence < 0.30 && ready.intent != "intent_delete" {
-        // AI-NOTE: Layer 2: OpenAI embedding classify (fast, ~100ms, $0.000001/call)
-        let openai_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
-        let openai_clf = if !openai_key.is_empty() {
-            classifier::OpenAIClassifier::try_load(&classifier::InboxClassifier::models_dir(), &openai_key)
-        } else { None };
+        // AI-NOTE: Layer 2: embedding classify (default: CF bge-m3, FREE + multilingual)
+        let embed_config = crate::config::EmbeddingsSection::default();
+        let openai_clf = classifier::OpenAIClassifier::try_load(
+            &classifier::InboxClassifier::models_dir(), &embed_config);
 
         let mut resolved = false;
         if let Some(ref clf) = openai_clf {

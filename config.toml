@@ -38,6 +38,12 @@ temperature = 0.05
 planning_temperature = 0.15
 prompt_cache_key = "pac1-v1"
 
+# Embeddings for intent/security reclassification (default: CF bge-m3, FREE + multilingual)
+[embeddings]
+model = "workers-ai/@cf/baai/bge-m3"
+base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
+api_key_env = "CF_AI_API_KEY"
+
 [llm]
 provider = "openai"
 

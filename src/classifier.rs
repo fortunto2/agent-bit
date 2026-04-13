@@ -251,29 +251,36 @@ impl InboxClassifier {
 /// OpenAI embedding-based classifier (async, API-dependent).
 pub struct OpenAIClassifier {
     api_key: String,
+    base_url: String,
+    model: String,
     class_embeddings: Vec<(String, Vec<f32>)>,
 }
 
 impl OpenAIClassifier {
-    /// Load pre-computed OpenAI class embeddings from models/ directory.
-    pub fn try_load(models_dir: &Path, api_key: &str) -> Option<Self> {
+    /// Load pre-computed class embeddings. Uses config for API endpoint.
+    pub fn try_load(models_dir: &Path, config: &crate::config::EmbeddingsSection) -> Option<Self> {
+        let api_key = std::env::var(&config.api_key_env).unwrap_or_default();
+        if api_key.is_empty() { return None; }
         let path = models_dir.join("openai_class_embeddings.json");
         let content = std::fs::read_to_string(&path).ok()?;
         let embeddings: Vec<(String, Vec<f32>)> = serde_json::from_str(&content).ok()?;
         if embeddings.is_empty() { return None; }
-        eprintln!("  [classifier] OpenAI embeddings loaded: {} classes", embeddings.len());
-        Some(Self { api_key: api_key.to_string(), class_embeddings: embeddings })
+        eprintln!("  [classifier] Embeddings loaded: {} classes ({})", embeddings.len(), config.model);
+        Some(Self {
+            api_key,
+            base_url: config.base_url.clone(),
+            model: config.model.clone(),
+            class_embeddings: embeddings,
+        })
     }
 
-    /// Embed text via OpenAI text-embedding-3-small API.
+    /// Embed text via configurable API (default: CF Workers AI bge-m3, multilingual, FREE).
     async fn embed(&self, text: &str) -> Result<Vec<f32>> {
         let client = reqwest::Client::new();
-        let resp = client.post("https://api.openai.com/v1/embeddings")
+        let url = format!("{}/embeddings", self.base_url.trim_end_matches('/'));
+        let resp = client.post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&serde_json::json!({
-                "model": "text-embedding-3-small",
-                "input": text,
-            }))
+            .json(&serde_json::json!({ "model": self.model, "input": text }))
             .send().await?;
         let body: serde_json::Value = resp.json().await?;
         let embedding = body["data"][0]["embedding"]
@@ -281,7 +288,7 @@ impl OpenAIClassifier {
             .context("missing embedding in response")?
             .iter()
             .map(|v| v.as_f64().unwrap_or(0.0) as f32)
-            .collect::<Vec<f32>>();
+            .collect();
         Ok(embedding)
     }
 
