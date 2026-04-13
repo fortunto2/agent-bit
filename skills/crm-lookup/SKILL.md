@@ -46,13 +46,12 @@ WORKFLOW — Next birthday / DoB lookup:
   NEVER compute date comparisons yourself — use date_calc tool.
 
 WORKFLOW — Enumerate all (list ALL X, "in which projects", "which accounts"):
-  MUST use search with BROAD pattern to find ALL matches — NOT just the first one.
-  For person-in-projects: search(pattern: "entity.ALIAS", path: "40_projects") — linked_entities uses lowercase alias.
-  To find alias: search(pattern: "NAME", path: "10_entities/cast") → read alias field → use in project search.
-  Search auto-reads ≤10 matches — extract human-readable project name from README.MD header, NOT folder path.
-  Return ALL matches sorted alphabetically — missing even ONE = task failure.
-  Alternative: eval() with glob to read ALL files at once:
-  eval(code: 'file_paths.filter((p,i) => eval("file_"+i).includes("entity.NAME"))', files: ['40_projects/*/README.MD'])
+  MUST find ALL matches — missing even ONE = task failure.
+  For person-in-projects — ALWAYS use eval with glob (search may miss if >10 matches):
+  1. Find person alias: search(NAME, "10_entities/cast") → read alias field (lowercase)
+  2. eval(code: 'var r=[]; for(var i=0;i<file_paths.length;i++){var f=eval("file_"+i); if(f.includes("entity.ALIAS")){var m=f.match(/^# (.+)/m); if(m) r.push(m[1])}} r.sort().join("\\n")', files: ['40_projects/*/README.MD'])
+  3. Answer with ALL names sorted alphabetically.
+  Return human-readable project name from README.MD header, NOT folder path.
 
 IMPORTANT: Always include refs in your answer. Return ONLY the requested data — no explanations.
 For project names: return the human-readable name from README.MD (e.g. "Harbor Body"), NOT the folder path.

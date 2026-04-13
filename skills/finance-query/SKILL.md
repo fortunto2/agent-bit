@@ -17,10 +17,13 @@ WORKFLOW — Revenue/spend by service line:
   4. Answer with the number only + file refs
 
 WORKFLOW — Bill/purchase lookup:
-  1. search("vendor name", "50_finance/purchases") → find matching files
-  2. Read the file, extract the specific field (amount, date, line count, etc.)
-  3. For "number of lines": count data rows in the table (exclude header/separator)
-  4. Answer with precise value + file refs
+  1. search("vendor name", "50_finance/purchases") OR read the specific file if path given
+  2. Read the file, extract the specific field (amount, date, quantity, line count, etc.)
+  3. For "number of lines" or "how many items": count ONLY data rows in the table body.
+     Exclude: header row, separator lines (---), notes, totals, empty lines. Count ONLY item/product rows.
+  4. For "quantity of X": find the specific line item row, return the quantity column value.
+  5. For "total amount": read the total/sum field, NOT individual line amounts.
+  6. Answer with precise value + file refs
 
 RULES:
   - ALWAYS use eval() for sums/totals — never mental math
