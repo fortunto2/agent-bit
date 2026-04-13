@@ -16,6 +16,6 @@ WORKFLOW:
 
 RULES:
   - ALWAYS include file refs in answer
-  - For counting: use grep_count() — one call, exact result
+  - For counting: use search() — footer shows [N matching lines], that IS the count
   - For totals: read files, extract amounts, sum explicitly
   - Prefer precision — read actual files, don't guess from filenames

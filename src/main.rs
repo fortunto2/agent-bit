@@ -322,7 +322,7 @@ async fn main() -> Result<()> {
         let nli = shared_nli.clone();
         let ov = outcome_validator.clone();
 
-        let handle = tokio::spawn(async move {
+        let handle = tokio::spawn(sgr_agent::with_telemetry_scope(async move {
             let _permit = sem.acquire().await.unwrap();
             eprintln!("\n━━━ Task: {} ━━━", task_id);
             eprintln!("  {}", preview);
@@ -416,7 +416,7 @@ async fn main() -> Result<()> {
             sgr_agent::annotate_session(&task_id, score, outcome, steps as u32);
 
             res.lock().await.push((task_id, score));
-        });
+        }));
         handles.push(handle);
     }
 
@@ -496,7 +496,7 @@ async fn run_leaderboard(
         let lb_results = lb_results.clone();
         let total_trials = run.trial_ids.len();
 
-        let handle = tokio::spawn(async move {
+        let handle = tokio::spawn(sgr_agent::with_telemetry_scope(async move {
         let _permit = sem.acquire().await.unwrap();
         let Ok(trial) = harness.start_trial(&trial_id).await else {
             eprintln!("  ⚠ Failed to start trial {}", trial_id);
@@ -584,7 +584,7 @@ async fn run_leaderboard(
             }
         }
         lb_results.lock().await.push((trial.task_id.clone(), score));
-        });
+        }));
         handles.push(handle);
     }
 

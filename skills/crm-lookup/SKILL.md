@@ -8,14 +8,13 @@ priority: 15
 CRITICAL: Answer with REAL data from the workspace. Never copy example text.
 
 WORKFLOW — Data lookup:
-  1. search or search_and_read to find the file
-  2. Read the file, extract the EXACT answer
+  1. search(pattern, path) to find the file (auto-reads when ≤10 matches)
+  2. Extract the EXACT answer from results
   3. answer() with the real data + refs to source files
 
 WORKFLOW — Counting (how many X):
-  Use grep_count(pattern, path) for exact count — one tool call.
-  Or use search — result shows [N matching lines]. That number IS the answer.
-  Do NOT read files and count manually — you WILL miscount.
+  Use search(pattern, path) — result footer shows [N matching lines]. That number IS the answer.
+  Or eval() for complex counting. Do NOT read files and count manually — you WILL miscount.
 
 WORKFLOW — Sum/total queries (how much, total amount):
   1. search for matching files (invoices, bills, purchases)
@@ -33,12 +32,12 @@ WORKFLOW — Date-based lookup:
 
 WORKFLOW — Enumerate all (list ALL X, "in which projects", "which accounts"):
   MUST use search with BROAD pattern to find ALL matches — NOT just the first one.
-  1. search(pattern: "keyword", path: "dir/") → shows ALL matching files
-  2. If result says "[N matching lines]" with N > 1: read EACH matching file
-  3. Return ALL matches sorted alphabetically — missing even ONE = task failure
+  For person-in-projects: search(pattern: "entity.ALIAS", path: "40_projects") — linked_entities uses lowercase alias.
+  To find alias: search(pattern: "NAME", path: "10_entities/cast") → read alias field → use in project search.
+  Search auto-reads ≤10 matches — extract human-readable project name from README.MD header, NOT folder path.
+  Return ALL matches sorted alphabetically — missing even ONE = task failure.
   Alternative: eval() with glob to read ALL files at once:
-  eval(code: 'file_paths.filter((p,i) => eval("file_"+i).includes("keyword"))', files: ['dir/*/README.MD'])
-  For project names: extract human-readable name from README, not folder name.
+  eval(code: 'file_paths.filter((p,i) => eval("file_"+i).includes("entity.NAME"))', files: ['40_projects/*/README.MD'])
 
 IMPORTANT: Always include refs in your answer. Return ONLY the requested data — no explanations.
 For project names: return the human-readable name from README.MD (e.g. "Harbor Body"), NOT the folder path.

@@ -489,7 +489,7 @@ fn annotate_account_results(output: &str, crm: &CrmGraph) -> String {
 #[async_trait]
 impl Tool for SearchTool {
     fn name(&self) -> &str { "search" }
-    fn description(&self) -> &str { "Search file contents with regex pattern. Smart search: auto-retries with name variants (surname, first name) and fuzzy matching if no results. Auto-expands full file content when ≤3 files match. Output ends with [N matching lines] — use this count directly for 'how many' queries instead of reading and counting manually (files can be >200 lines)." }
+    fn description(&self) -> &str { "Search file contents with regex pattern. Smart search: auto-retries with name variants (surname, first name) and fuzzy matching if no results. Auto-expands full file content when ≤10 files match — no need to read() after search. Output ends with [N matching lines] — use this count directly for 'how many' queries." }
     fn is_read_only(&self) -> bool { true }
     fn parameters_schema(&self) -> Value { json_schema_for::<SearchArgs>() }
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
