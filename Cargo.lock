@@ -3813,6 +3813,7 @@ dependencies = [
  "futures",
  "genai",
  "indexmap 2.13.0",
+ "llm_json",
  "openai-oxide",
  "opentelemetry",
  "opentelemetry-otlp",
