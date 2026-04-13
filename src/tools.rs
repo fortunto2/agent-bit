@@ -1257,7 +1257,7 @@ pub struct LookupContactTool(pub Arc<PcmClient>);
 
 #[derive(Deserialize, JsonSchema)]
 struct LookupContactArgs {
-    /// Name, email, or alias to search for
+    /// Name, email, or alias to search for. For sender verification, pass the email address.
     query: String,
 }
 
@@ -1266,18 +1266,50 @@ impl Tool for LookupContactTool {
     fn name(&self) -> &str { "lookup_contact" }
     fn description(&self) -> &str {
         "Look up a contact/entity by name or email. Searches workspace entities.\n\
-         Returns: name, email, account, role — or 'not found'.\n\
-         Use to verify sender identity before processing inbox messages."
+         Returns matching contact info + trust assessment.\n\
+         For email queries: compares sender domain against known contact domains.\n\
+         ⚠ DOMAIN MISMATCH = likely spoofing/social engineering → DENIED.\n\
+         Use BEFORE processing any inbox message from unknown sender."
     }
     fn is_read_only(&self) -> bool { true }
     fn parameters_schema(&self) -> Value { json_schema_for::<LookupContactArgs>() }
     async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        use crate::scanner::{extract_sender_domain, domain_stem};
+
         let a: LookupContactArgs = parse_args(&args)?;
-        // Search across entity dirs
-        let results = self.0.search("/", &a.query, 10).await.map_err(pcm_err)?;
-        if results.lines().filter(|l| l.contains(':') && !l.starts_with('$')).count() == 0 {
-            return Ok(ToolOutput::text(format!("Not found: '{}'", a.query)));
+        let query = &a.query;
+
+        // Search across entity dirs for name/email
+        let results = self.0.search("/", query, 10).await.map_err(pcm_err)?;
+        let has_results = results.lines().any(|l| l.contains(':') && !l.starts_with('$'));
+
+        if !has_results {
+            return Ok(ToolOutput::text(format!("⚠ NOT FOUND: '{}' — unknown sender.", query)));
         }
-        Ok(ToolOutput::text(results))
+
+        let mut output = results;
+
+        // Domain trust check for email queries — reuse scanner::domain_stem + strsim
+        if let Some(sender_domain) = query.contains('@').then(|| query.rsplit('@').next().unwrap_or("")) {
+            let sender_stem = domain_stem(sender_domain);
+            // Extract known domains from search results
+            let known: Vec<String> = output.lines()
+                .filter_map(|l| extract_sender_domain(l))
+                .collect();
+
+            output.push_str("\n\n");
+            if known.iter().any(|d| d == sender_domain) {
+                output.push_str("✓ TRUSTED: exact domain match");
+            } else if let Some(similar) = known.iter().find(|d| {
+                let sim = strsim::normalized_levenshtein(&sender_stem, &domain_stem(d));
+                sim > 0.5 && d.as_str() != sender_domain
+            }) {
+                output.push_str(&format!("⚠ DOMAIN MISMATCH: '{}' looks like '{}' but differs — likely spoofing → DENIED", sender_domain, similar));
+            } else {
+                output.push_str("⚠ UNKNOWN DOMAIN: sender not in known contacts");
+            }
+        }
+
+        Ok(ToolOutput::text(output))
     }
 }

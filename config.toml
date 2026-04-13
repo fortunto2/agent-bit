@@ -84,6 +84,23 @@ base_url = "https://api.deepinfra.com/v1/openai"
 api_key_env = "DEEPINFRA_API_KEY"
 use_chat_api = true
 
+# --- Free Providers (re-test with lighter pipeline) ---
+
+[providers.cerebras-qwen]
+model = "qwen-3-235b-a22b-instruct-2507"
+base_url = "https://api.cerebras.ai/v1"
+api_key_env = "CEREBRAS_API_KEY"
+
+[providers.cerebras-gpt]
+model = "gpt-oss-120b"
+base_url = "https://api.cerebras.ai/v1"
+api_key_env = "CEREBRAS_API_KEY"
+
+[providers.cerebras-llama]
+model = "llama3.1-8b"
+base_url = "https://api.cerebras.ai/v1"
+api_key_env = "CEREBRAS_API_KEY"
+
 # AI-NOTE: rejected — seed18 (t01 fail), ds-turbo (t01 fail), mistral-med (t16 fail), hermes405 (no FC)
 
 # AI-NOTE: llama405 rejected — "Tool calling is not supported"
