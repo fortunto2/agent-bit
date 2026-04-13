@@ -545,9 +545,10 @@ impl InboxScanned {
         // AI-NOTE: non-English + inbox → block. Queries without inbox pass through.
         // If inbox has security threat → DENIED, otherwise → UNSUPPORTED.
         {
-            let alpha: Vec<char> = self.instruction.chars().filter(|c| c.is_alphabetic()).collect();
-            let latin = alpha.iter().filter(|c| c.is_ascii_alphabetic()).count();
-            let is_non_english = !alpha.is_empty() && (latin as f32 / alpha.len() as f32) < 0.5;
+            let (alpha, latin) = self.instruction.chars().fold((0usize, 0usize), |(a, l), c| {
+                if c.is_alphabetic() { (a + 1, l + c.is_ascii_alphabetic() as usize) } else { (a, l) }
+            });
+            let is_non_english = alpha > 0 && (latin as f32 / alpha as f32) < 0.5;
             if is_non_english && !self.inbox_files.is_empty() {
                 let has_threat = self.inbox_files.iter().any(|f|
                     matches!(f.security.ml_label.as_str(), "injection" | "social_engineering" | "credential"));
@@ -557,7 +558,7 @@ impl InboxScanned {
                     ("OUTCOME_NONE_UNSUPPORTED", "Non-English instruction — language not supported")
                 };
                 eprintln!("  [STAGE:security] ⚠ Non-English + inbox → {} ({}/{} latin, threat={})",
-                    outcome, latin, alpha.len(), has_threat);
+                    outcome, latin, alpha, has_threat);
                 return Err(BlockReason { outcome, message: msg.into(), stage: "security" });
             }
         }

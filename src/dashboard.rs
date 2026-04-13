@@ -19,16 +19,7 @@ use ratatui::{
 };
 use rusqlite::{Connection, OpenFlags};
 
-/// UTF-8 safe string truncation (local copy — dashboard is a separate binary).
-trait StrExt {
-    fn trunc(&self, max_bytes: usize) -> &str;
-}
-impl StrExt for str {
-    #[inline]
-    fn trunc(&self, max_bytes: usize) -> &str {
-        &self[..self.floor_char_boundary(max_bytes)]
-    }
-}
+use sgr_agent::str_ext::StrExt;
 
 const PHOENIX_DB: &str = "~/.phoenix/phoenix.db";
 const PROJECT_NAME: &str = "pac1";

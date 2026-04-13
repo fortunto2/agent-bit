@@ -40,7 +40,7 @@ WORKFLOW — "How much did VENDOR charge for LINE ITEM N days ago?":
   3. Read the bill, find the specific line item row, return its amount
   4. Answer with the exact amount number
 
-WORKFLOW — "How much did I pay VENDOR in total?" (specific bill path given):
+WORKFLOW — "Looking at this bill, how much did I pay in total?" (bill path given):
   1. Read the given bill file → extract vendor name from content
   2. search("vendor name", "50_finance/purchases") → find ALL bills from that vendor  
   3. Use eval() to sum totals from ALL matching bills:
