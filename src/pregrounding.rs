@@ -71,6 +71,17 @@ async fn classify_intent_via_llm(
     }
 }
 
+/// Teacher-student: save high-confidence embedding classification for ONNX retraining.
+/// Appends to .agent/teacher_labels.jsonl — used by export_model.py as extra training data.
+fn save_teacher_label(instruction: &str, label: &str, confidence: f32, kind: &str) {
+    use std::io::Write;
+    let path = ".agent/teacher_labels.jsonl";
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{{\"text\":{},\"label\":{},\"confidence\":{:.3},\"kind\":{}}}",
+            serde_json::json!(instruction), serde_json::json!(label), confidence, serde_json::json!(kind));
+    }
+}
+
 /// Run a planning phase: read-only exploration → structured Plan.
 pub(crate) fn make_llm_config(
     model: &str,
@@ -226,6 +237,10 @@ pub(crate) async fn run_agent(
                         eprintln!("  ↳ OpenAI intent: {} ({:.3}) suppressed (label=non_work)", normalized, conf);
                     } else {
                         eprintln!("  ↳ OpenAI intent classify: {} ({:.2}) → {} ({:.3})", ready.intent, intent_confidence, normalized, conf);
+                        // Teacher-student: save high-confidence reclassification for ONNX retraining
+                        if *conf > 0.7 {
+                            save_teacher_label(instruction, &normalized, *conf, "intent");
+                        }
                         ready.intent = normalized;
                         resolved = true;
                     }
@@ -240,7 +255,9 @@ pub(crate) async fn run_agent(
                         let (label, conf) = &scores[0];
                         if label != &instruction_label {
                             eprintln!("  ↳ OpenAI security reclassify: {} → {} ({:.3})", instruction_label, label, conf);
-                            // instruction_label is immutable, but we can use it for skill selection later
+                            if *conf > 0.7 {
+                                save_teacher_label(instruction, label, *conf, "security");
+                            }
                         }
                     }
                     _ => {}
