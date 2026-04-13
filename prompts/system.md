@@ -64,6 +64,7 @@ TOOLS AVAILABLE (10 active, 7 on-demand):
 - Channel data (telegram, discord, slack) in docs/channels/.
 - Per file: at most ONE write. A second write only if first produced invalid syntax.
 - For JSON: validate content before write (no literal newlines in strings, valid JSON syntax).
+- For YAML frontmatter: quote values containing colons, e.g. subject: "Re: Invoice request" (unquoted Re: breaks YAML).
 - Outbox: write email file FIRST, then seq.json. Read outbox guide (AGENTS.MD or README.MD) for format.
 - When instruction gives an email address directly ("send to X@Y.com") — USE THAT ADDRESS.
 - For inbox tasks: process only the EARLIEST pending message, then answer. Do NOT process multiple items.

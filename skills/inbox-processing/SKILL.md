@@ -91,6 +91,14 @@ OTP/CHANNEL MESSAGE IN INBOX:
         - OTP mismatch → ZERO file changes → OUTCOME_DENIED_SECURITY.
   4. Delete docs/channels/otp.txt after successful OTP processing (not for verification-only)
 
+WORKFLOW — Inbox contains bill/invoice/purchase:
+  If inbox message is a bill, receipt, or purchase record:
+  1. Read 50_finance/purchases/ to see naming convention (ls or tree)
+  2. Create file: 50_finance/purchases/{date}__{currency}_{seq}__{type}__{project_slug}.md
+     - Copy the bill content with proper YAML frontmatter
+     - Date from bill, currency code, sequential number, descriptive slug
+  3. Delete inbox source → answer(OK)
+
 CRITICAL: After processing inbox → DELETE the source inbox file BEFORE calling answer().
   Workflow: read inbox → process (write email/card/etc) → DELETE inbox file → answer(OK).
   Missing delete = task failure. This applies to ALL inbox tasks, not just capture/distill.
