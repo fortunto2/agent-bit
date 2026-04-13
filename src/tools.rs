@@ -120,6 +120,45 @@ impl Tool for ReadTool {
     }
 }
 
+/// Fix YAML frontmatter: quote values containing colons (e.g. "Re: Invoice" breaks YAML).
+/// Returns Some(fixed) if changes were made, None if content is fine.
+fn fix_yaml_frontmatter(content: &str) -> Option<String> {
+    // Split frontmatter from body
+    let rest = content.strip_prefix("---\n")?;
+    let end = rest.find("\n---")?;
+    let fm = &rest[..end];
+    let body = &rest[end..];
+
+    let mut fixed = false;
+    let mut lines: Vec<String> = Vec::new();
+    for line in fm.lines() {
+        let trimmed = line.trim();
+        // Skip list items (- value) and empty lines
+        if trimmed.starts_with('-') || trimmed.is_empty() {
+            lines.push(line.to_string());
+            continue;
+        }
+        // Key: value pattern — check if value has unquoted colon
+        if let Some((key, val)) = trimmed.split_once(':') {
+            let val = val.trim();
+            // Value contains colon and is not already quoted
+            if val.contains(':') && !val.starts_with('"') && !val.starts_with('\'') {
+                let indent = &line[..line.len() - trimmed.len()];
+                lines.push(format!("{}{}: \"{}\"", indent, key, val.replace('"', "\\\"")));
+                fixed = true;
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    if fixed {
+        Some(format!("---\n{}{}", lines.join("\n"), body))
+    } else {
+        None
+    }
+}
+
 // ─── write (middleware over sgr-agent-tools::WriteTool) ──────────────────────
 
 // AI-NOTE: Middleware adds: workflow guards, outbox sent:false inject, README schema validation, hooks.
@@ -165,6 +204,18 @@ impl Tool for WriteTool {
                         ));
                     }
                     eprintln!("    🔧 Auto-injected sent:false in {}", path);
+                }
+            }
+        }
+
+        // Middleware 2b: YAML frontmatter auto-fix (quote values with colons)
+        if let Some(obj) = final_args.as_object_mut() {
+            if let Some(serde_json::Value::String(c)) = obj.get("content") {
+                if c.starts_with("---\n") {
+                    if let Some(fixed) = fix_yaml_frontmatter(c) {
+                        obj.insert("content".into(), serde_json::Value::String(fixed));
+                        eprintln!("    🔧 Auto-fixed YAML frontmatter in {}", path);
+                    }
                 }
             }
         }
@@ -953,6 +1004,28 @@ mod tests {
         let opts = llm_json::RepairOptions::default();
         let fixed = llm_json::repair_json(valid, &opts).unwrap();
         assert_eq!(serde_json::from_str::<serde_json::Value>(&fixed).unwrap()["to"], "alex@co.com");
+    }
+
+    // ─── YAML frontmatter fix ─────────────────────────────────────────
+
+    #[test]
+    fn yaml_fix_colon_in_subject() {
+        let content = "---\nrecord_type: outbound_email\nsubject: Re: Could you resend the invoice?\nto: alice@co.com\n---\nBody text";
+        let fixed = super::fix_yaml_frontmatter(content).unwrap();
+        assert!(fixed.contains("subject: \"Re: Could you resend the invoice?\""), "Should quote subject with colon: {}", fixed);
+        assert!(fixed.contains("to: alice@co.com"), "Simple value should not be quoted");
+    }
+
+    #[test]
+    fn yaml_fix_no_change_needed() {
+        let content = "---\nsubject: Hello\nto: alice@co.com\n---\nBody";
+        assert!(super::fix_yaml_frontmatter(content).is_none(), "No fix needed");
+    }
+
+    #[test]
+    fn yaml_fix_already_quoted() {
+        let content = "---\nsubject: \"Re: Invoice\"\nto: alice@co.com\n---\nBody";
+        assert!(super::fix_yaml_frontmatter(content).is_none(), "Already quoted, no fix needed");
     }
 
     // ─── trust metadata ────────────────────────────────────────────────
