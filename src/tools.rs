@@ -120,41 +120,45 @@ impl Tool for ReadTool {
     }
 }
 
-/// Fix YAML frontmatter: quote values containing colons (e.g. "Re: Invoice" breaks YAML).
-/// Returns Some(fixed) if changes were made, None if content is fine.
+/// Fix YAML frontmatter: validate with serde_yaml, auto-quote broken values.
+/// Returns Some(fixed) if changes were made, None if content is valid.
 fn fix_yaml_frontmatter(content: &str) -> Option<String> {
-    // Split frontmatter from body
     let rest = content.strip_prefix("---\n")?;
     let end = rest.find("\n---")?;
     let fm = &rest[..end];
     let body = &rest[end..];
 
-    let mut fixed = false;
+    // Try parsing — if valid, nothing to fix
+    if serde_yaml::from_str::<serde_yaml::Value>(fm).is_ok() {
+        return None;
+    }
+
+    // Invalid YAML — fix by quoting values with colons
     let mut lines: Vec<String> = Vec::new();
     for line in fm.lines() {
         let trimmed = line.trim();
-        // Skip list items (- value) and empty lines
         if trimmed.starts_with('-') || trimmed.is_empty() {
             lines.push(line.to_string());
             continue;
         }
-        // Key: value pattern — check if value has unquoted colon
         if let Some((key, val)) = trimmed.split_once(':') {
             let val = val.trim();
-            // Value contains colon and is not already quoted
             if val.contains(':') && !val.starts_with('"') && !val.starts_with('\'') {
                 let indent = &line[..line.len() - trimmed.len()];
                 lines.push(format!("{}{}: \"{}\"", indent, key, val.replace('"', "\\\"")));
-                fixed = true;
                 continue;
             }
         }
         lines.push(line.to_string());
     }
 
-    if fixed {
-        Some(format!("---\n{}{}", lines.join("\n"), body))
+    let fixed_fm = lines.join("\n");
+    // Verify the fix actually works
+    if serde_yaml::from_str::<serde_yaml::Value>(&fixed_fm).is_ok() {
+        Some(format!("---\n{}{}", fixed_fm, body))
     } else {
+        // Couldn't fix — return None, let harness report the error
+        eprintln!("    ⚠ YAML frontmatter still invalid after fix attempt");
         None
     }
 }

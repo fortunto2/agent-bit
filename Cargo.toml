@@ -54,6 +54,7 @@ llm_json = { path = "../../shared/rust-code/crates/llm-json" }
 boa_engine = "0.20"
 boa_gc = "0.20"
 chrono = "0.4"
+serde_yaml = "0.9"
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 [patch.crates-io]
