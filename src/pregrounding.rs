@@ -317,8 +317,12 @@ pub(crate) async fn run_agent(
     let template = template.as_str();
     // Skill-based prompt injection (replaces examples_for_class)
     let skill_registry = crate::skills::load(std::path::Path::new("."));
-    let effective_label = if ready.intent == "intent_query" && instruction_label == "non_work" {
-        eprintln!("  ↳ Skill override: non_work → crm (intent_query)");
+    // AI-NOTE: override non_work → crm for English queries (misclassification).
+    // But NOT for non-English instructions (correctly classified as non_work).
+    let is_non_english = instruction.chars().any(|c| !c.is_ascii() && !c.is_ascii_whitespace()
+        && c != 'ü' && c != 'ö' && c != 'ä' && c != 'é' && c != 'è');
+    let effective_label = if ready.intent == "intent_query" && instruction_label == "non_work" && !is_non_english {
+        eprintln!("  ↳ Skill override: non_work → crm (intent_query, English)");
         "crm"
     } else {
         &instruction_label
