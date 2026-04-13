@@ -195,6 +195,11 @@ use_chat_api = true
 x-stainless-helper-method = "chat.completions"
 
 [providers.or-sonnet]
-model = "anthropic/claude-sonnet-4.6"
+model = "anthropic/claude-sonnet-4.6:beta"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-opus]
+model = "anthropic/claude-opus-4.6:beta"
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
