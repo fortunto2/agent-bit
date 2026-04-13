@@ -471,6 +471,7 @@ pub(crate) async fn run_agent(
         .register(tools::ContextTool(pcm.clone()))                               // PAC1-specific
         // EXTENDED
         .register(sgr_agent_tools::ReadAllTool(pcm.clone()))                     // → sgr-agent-tools
+        .register(tools::DateTool(pcm.clone()))                                  // chrono date math
         // DEFERRED
         .register_deferred(sgr_agent_tools::MkDirTool(pcm.clone()))              // → sgr-agent-tools
         .register_deferred(sgr_agent_tools::MoveTool(pcm.clone()))               // → sgr-agent-tools

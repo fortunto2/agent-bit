@@ -1025,6 +1025,121 @@ impl Tool for SearchAndReadTool {
     }
 }
 
+// ─── Date Tool (deferred — on-demand for date math) ────────────────────────
+
+/// Date arithmetic and comparison tool — uses chrono, no JS eval needed.
+pub struct DateTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct DateArgs {
+    /// Operation: "diff_days", "add_days", "next_birthday", "compare", "format"
+    op: String,
+    /// First date (YYYY-MM-DD)
+    #[serde(default)]
+    date: Option<String>,
+    /// Second date or number of days (depending on op)
+    #[serde(default)]
+    arg: Option<String>,
+    /// For next_birthday: list of "Name:MM-DD" pairs
+    #[serde(default)]
+    birthdays: Vec<String>,
+    /// Output date format (for "format" op): "DD-MM-YYYY", "MM/DD/YYYY", "YYYY-MM-DD"
+    #[serde(default)]
+    output_format: Option<String>,
+}
+
+#[async_trait]
+impl Tool for DateTool {
+    fn name(&self) -> &str { "date_calc" }
+    fn description(&self) -> &str {
+        "Date arithmetic. Operations:\n\
+         - diff_days(date, arg) → days between two dates\n\
+         - add_days(date, arg) → date + N days\n\
+         - next_birthday(birthdays: ['Name:MM-DD', ...]) → name(s) with next upcoming birthday, uses workspace date\n\
+         - compare(date, arg) → 'before', 'after', or 'equal'\n\
+         - format(date, output_format) → reformat date (DD-MM-YYYY, MM/DD/YYYY, etc.)\n\
+         All dates in YYYY-MM-DD."
+    }
+    fn is_read_only(&self) -> bool { true }
+    fn parameters_schema(&self) -> Value { json_schema_for::<DateArgs>() }
+    async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: DateArgs = parse_args(&args)?;
+        use chrono::NaiveDate;
+
+        // Get workspace date for relative operations
+        let today = if let Some(ref d) = a.date {
+            NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                .map_err(|e| ToolError::Execution(format!("Bad date '{}': {}", d, e)))?
+        } else {
+            let ctx = self.0.context().await.unwrap_or_default();
+            let date_str = ctx.lines().last().unwrap_or("2026-01-01")
+                .trim().split('T').next().unwrap_or("2026-01-01");
+            NaiveDate::parse_from_str(date_str, "%Y-%m-%d").unwrap_or(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap())
+        };
+
+        let result = match a.op.as_str() {
+            "diff_days" => {
+                let d2 = a.arg.as_deref().ok_or_else(|| ToolError::Execution("arg required".into()))?;
+                let date2 = NaiveDate::parse_from_str(d2, "%Y-%m-%d")
+                    .map_err(|e| ToolError::Execution(format!("Bad arg date: {}", e)))?;
+                format!("{}", (date2 - today).num_days())
+            }
+            "add_days" => {
+                let days: i64 = a.arg.as_deref().unwrap_or("0").parse()
+                    .map_err(|_| ToolError::Execution("arg must be number".into()))?;
+                let result = today + chrono::Duration::days(days);
+                result.format("%Y-%m-%d").to_string()
+            }
+            "next_birthday" => {
+                // Parse "Name:MM-DD" pairs, find whose birthday is next after today
+                let mut candidates: Vec<(String, NaiveDate)> = Vec::new();
+                for entry in &a.birthdays {
+                    let parts: Vec<&str> = entry.splitn(2, ':').collect();
+                    if parts.len() != 2 { continue; }
+                    let name = parts[0].trim();
+                    let md = parts[1].trim();
+                    // Try this year first, if passed → next year
+                    let this_year = format!("{}-{}", today.format("%Y"), md);
+                    if let Ok(d) = NaiveDate::parse_from_str(&this_year, "%Y-%m-%d") {
+                        let next = if d <= today {
+                            NaiveDate::parse_from_str(&format!("{}-{}", today.format("%Y").to_string().parse::<i32>().unwrap() + 1, md), "%Y-%m-%d")
+                                .unwrap_or(d)
+                        } else { d };
+                        candidates.push((name.to_string(), next));
+                    }
+                }
+                if candidates.is_empty() {
+                    return Ok(ToolOutput::text("No valid birthdays".to_string()));
+                }
+                candidates.sort_by_key(|(_, d)| *d);
+                let earliest = candidates[0].1;
+                let mut names: Vec<&str> = candidates.iter()
+                    .filter(|(_, d)| *d == earliest)
+                    .map(|(n, _)| n.as_str())
+                    .collect();
+                names.sort();
+                names.join("\n")
+            }
+            "compare" => {
+                let d2 = a.arg.as_deref().ok_or_else(|| ToolError::Execution("arg required".into()))?;
+                let date2 = NaiveDate::parse_from_str(d2, "%Y-%m-%d")
+                    .map_err(|e| ToolError::Execution(format!("Bad arg date: {}", e)))?;
+                if today < date2 { "before".into() }
+                else if today > date2 { "after".into() }
+                else { "equal".into() }
+            }
+            "format" => {
+                let fmt = a.output_format.as_deref().unwrap_or("YYYY-MM-DD");
+                let chrono_fmt = fmt
+                    .replace("YYYY", "%Y").replace("MM", "%m").replace("DD", "%d");
+                today.format(&chrono_fmt).to_string()
+            }
+            _ => return Err(ToolError::Execution(format!("Unknown op: {}", a.op))),
+        };
+        Ok(ToolOutput::text(result))
+    }
+}
+
 /// Count lines matching a regex pattern in a path — one tool call instead of search + manual count.
 pub struct GrepCountTool(pub Arc<PcmClient>);
 

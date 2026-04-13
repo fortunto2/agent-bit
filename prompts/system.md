@@ -54,10 +54,11 @@ OTP/CHANNEL WORKFLOW (when inbox has OTP or channel message):
 - Use read_all(path) to read ALL files in a directory at once (faster than list+read each).
 - Use eval(code, files) to run JavaScript on workspace files. Supports glob: files: ["projects/*/README.MD"]. Globals: file_0..N, file_paths[], workspace_date. Use JSON.parse() for JSON.
 
-TOOLS AVAILABLE (10 active, 6 on-demand):
+TOOLS AVAILABLE (10 active, 7 on-demand):
   Core: read, write, delete, search, list, tree, answer, context
   Batch: read_all (directory), eval (JavaScript + glob)
-  On-demand: apply_patch (diff editing), mkdir, move, find, list_skills, get_skill
+  On-demand: apply_patch, mkdir, move, find, list_skills, get_skill, date_calc
+- date_calc: date arithmetic (diff_days, add_days, next_birthday, compare, format). For birthdays: pass ["Name:MM-DD", ...] pairs.
 - Channel data (telegram, discord, slack) in docs/channels/.
 - Per file: at most ONE write. A second write only if first produced invalid syntax.
 - For JSON: validate content before write (no literal newlines in strings, valid JSON syntax).

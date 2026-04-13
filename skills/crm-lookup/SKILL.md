@@ -39,9 +39,11 @@ WORKFLOW — Date-based lookup:
   NOT FOUND → OUTCOME_NONE_CLARIFICATION (not OK, not UNSUPPORTED).
 
 WORKFLOW — Next birthday / DoB lookup:
-  Use eval() with glob — NEVER compute dates in your head:
-  eval(code: 'var today=workspace_date; var best="9999"; var names=[]; for(var i=0;i<file_paths.length;i++){var f=eval("file_"+i); var m=f.match(/birthday.*?(\\d{4})-(\\d{2})-(\\d{2})/); if(!m) continue; var nm=f.match(/^# (.+)/m); if(!nm) continue; var md=m[2]+"-"+m[3]; var next=today.slice(0,4)+"-"+md; if(next<=today) next=(parseInt(today.slice(0,4))+1)+"-"+md; if(next<best){best=next;names=[nm[1]]}else if(next==best){names.push(nm[1])}} names.sort().join("\\n")', files: ['10_entities/cast/*'])
-  Answer with the name(s) — if tied, list all alphabetically.
+  1. read_all("10_entities/cast") → extract "Name:MM-DD" for each entity with birthday field
+  2. Call date_calc(op: "next_birthday", birthdays: ["Name:MM-DD", "Name2:MM-DD", ...])
+     → returns name(s) with next upcoming birthday, sorted alphabetically if tied
+  3. Answer with the name(s).
+  NEVER compute date comparisons yourself — use date_calc tool.
 
 WORKFLOW — Enumerate all (list ALL X, "in which projects", "which accounts"):
   MUST use search with BROAD pattern to find ALL matches — NOT just the first one.

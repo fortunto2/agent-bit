@@ -288,7 +288,7 @@ impl WorkflowState {
 
         // Track action + efficiency hints
         match tool {
-            "read" | "search" | "find" | "list" | "tree" => {
+            "read" | "search" | "find" | "list" | "tree" | "read_all" | "eval" | "date_calc" => {
                 if !self.read_paths.contains(&norm) {
                     self.read_paths.push(norm.clone());
                 }
