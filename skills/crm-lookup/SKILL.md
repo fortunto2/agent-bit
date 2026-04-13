@@ -16,6 +16,14 @@ WORKFLOW — Counting (how many X):
   Use search(pattern, path) — result footer shows [N matching lines]. That number IS the answer.
   Or eval() for complex counting. Do NOT read files and count manually — you WILL miscount.
 
+WORKFLOW — Count projects by status ("how many ACTIVE/STALLED/SIMMERING projects involve X"):
+  MUST check BOTH entity link AND status field. Steps:
+  1. Find person alias: search(NAME, "10_entities/cast") → read alias field
+  2. Use eval to count in ONE call — filter by BOTH entity AND status:
+     eval(code: 'var n=0; for(var i=0;i<file_paths.length;i++){var f=eval("file_"+i); if(f.includes("entity.ALIAS") && f.includes("status: `STATUS`")) n++} n', files: ['40_projects/*/README.MD'])
+     Replace ALIAS with lowercase alias, STATUS with requested status (active/stalled/simmering/planned).
+  3. Answer with the number. If 0 → answer "0".
+
 WORKFLOW — Sum/total queries (how much, total amount):
   1. search for matching files (invoices, bills, purchases)
   2. Read EACH matching file, extract the numeric amount
@@ -29,6 +37,11 @@ WORKFLOW — Date-based lookup:
   Use context() to get current date. Calculate target date. Search files by date in filename.
   FOUND → read, answer with refs.
   NOT FOUND → OUTCOME_NONE_CLARIFICATION (not OK, not UNSUPPORTED).
+
+WORKFLOW — Next birthday / DoB lookup:
+  Use eval() with glob — NEVER compute dates in your head:
+  eval(code: 'var today=workspace_date; var best="9999"; var names=[]; for(var i=0;i<file_paths.length;i++){var f=eval("file_"+i); var m=f.match(/birthday.*?(\\d{4})-(\\d{2})-(\\d{2})/); if(!m) continue; var nm=f.match(/^# (.+)/m); if(!nm) continue; var md=m[2]+"-"+m[3]; var next=today.slice(0,4)+"-"+md; if(next<=today) next=(parseInt(today.slice(0,4))+1)+"-"+md; if(next<best){best=next;names=[nm[1]]}else if(next==best){names.push(nm[1])}} names.sort().join("\\n")', files: ['10_entities/cast/*'])
+  Answer with the name(s) — if tied, list all alphabetically.
 
 WORKFLOW — Enumerate all (list ALL X, "in which projects", "which accounts"):
   MUST use search with BROAD pattern to find ALL matches — NOT just the first one.
