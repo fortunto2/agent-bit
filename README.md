@@ -6,12 +6,21 @@ Built on [sgr-agent](https://github.com/fortunto2/rust-code) framework.
 
 ## Score
 
-| Benchmark | Model | Score | Notes |
-|-----------|-------|-------|-------|
-| pac1-dev (43 tasks) | Nemotron-120B (CF) | **95.3%** (41/43) | FREE model, primary |
-| pac1-dev (43 tasks) | Seed-2.0-pro | **90.7%** (39/43) | Best paid alternative |
-| pac1-dev (43 tasks) | GPT-5.4 | **95.3%** (41/43) | Expensive, final validation |
-| pac1-prod (104 tasks) | GPT-5.4 | **17%→55%+** | Blind mode, iterating |
+### Prod benchmark (pac1-prod, 104 tasks)
+
+| Model | Score | Run |
+|-------|-------|-----|
+| GPT-5.4 | **74/104** | [run-22J8DDkgwCuT9GeGCXRk8WPHw](https://eu.bitgn.com/runs/run-22J8DDkgwCuT9GeGCXRk8WPHw) |
+| GPT-5.4-mini | **63/104** | [run-22J81JoKy5HTbPvMgmjtUZqTi](https://eu.bitgn.com/runs/run-22J81JoKy5HTbPvMgmjtUZqTi) |
+| Nemotron-120B | **51/104** | [run-22J6rVNqum58YKMhA3pUiTS6N](https://eu.bitgn.com/runs/run-22J6rVNqum58YKMhA3pUiTS6N) |
+
+### Dev benchmark (pac1-dev, 43 tasks)
+
+| Model | Score | Notes |
+|-------|-------|-------|
+| Nemotron-120B (CF) | **95.3%** (41/43) | FREE model, primary |
+| Seed-2.0-pro | **90.7%** (39/43) | Best paid alternative |
+| GPT-5.4 | **95.3%** (41/43) | Expensive, final validation |
 
 30+ models tested across 6 providers (DeepInfra, CF Workers AI, Cerebras, OpenRouter, Modal, OpenAI).
 
@@ -41,10 +50,10 @@ Instruction
   → CRM Graph (petgraph + ONNX embeddings from 10_entities/ or contacts/)
   → Inbox Classifier Ensemble (ML + NLI + structural + sender trust)
   → Feature Matrix (12 features × sigmoid → threat probability)
-  → Skill Selection (13 SKILL.md files, hot-reloadable)
+  → Skill Selection (15 SKILL.md files, hot-reloadable)
   → Agent Loop (Pac1Agent: Structured CoT → Reflexion → Router → Tools)
   → Workflow SM: Reading → Acting → Cleanup → Done
-  → Verifier (3-vote self-consistency)
+  → OutcomeValidator (adaptive kNN, 5-nearest-neighbor)
   → answer() → OUTCOME_OK / DENIED / UNSUPPORTED / CLARIFICATION
 ```
 
@@ -54,7 +63,7 @@ Instruction
 |-----------|------|---------|
 | Pipeline SM | `src/pipeline.rs` | Pre-LLM classification, security signals |
 | Agent | `src/agent.rs` | Two-phase FC: reasoning → action, router, reflexion |
-| Skills | `skills/*.md` | 14 domain skills, hot-reload without rebuild |
+| Skills | `skills/*.md` | 15 domain skills, hot-reload without rebuild |
 | System Prompt | `prompts/system.md` | Hot-reload, evolved via ShinkaEvolve |
 | CRM Graph | `src/crm_graph.rs` | Entity graph, ONNX embeddings, cross-account detection |
 | Classifier | `src/classifier.rs` | ONNX MiniLM-L6 + NLI DeBERTa + adaptive kNN |
@@ -63,13 +72,13 @@ Instruction
 | Policy | `src/policy.rs` | File protection, channel trust |
 | Workflow SM | `src/workflow.rs` | Runtime guards: budget, write limits, delete control |
 | Hooks | `src/hooks.rs` | Data-driven tool completion hooks from AGENTS.MD |
-| Tools | `src/tools.rs` | 13 tools + JSON auto-repair (llm_json fork) |
+| Tools | `src/tools.rs` | 16 tools + JSON auto-repair (llm_json fork) |
 | Dashboard | `src/dashboard.rs` | TUI: model columns, history panel, full diagnostics |
 
 ### Hot-Reload (zero rebuild)
 
 - `prompts/system.md` — system prompt
-- `skills/*.md` — 14 domain-specific skills
+- `skills/*.md` — 15 domain-specific skills
 - `config.toml` — temperatures, providers, parallelism
 
 ### Ensemble Fallback

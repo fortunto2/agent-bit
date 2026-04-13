@@ -542,8 +542,25 @@ impl Classified {
 impl InboxScanned {
     /// Stage 3: Check security — evaluate all inbox assessments, block on first threat.
     pub fn check_security(self) -> Result<SecurityChecked, BlockReason> {
-        // AI-NOTE: non-English block REMOVED — prod shows Arabic/French queries expect OK (t009, t059, t084).
-        // LLM handles language detection; pipeline should not block on script alone.
+        // AI-NOTE: non-English + inbox → block. Queries without inbox pass through.
+        // If inbox has security threat → DENIED, otherwise → UNSUPPORTED.
+        {
+            let alpha: Vec<char> = self.instruction.chars().filter(|c| c.is_alphabetic()).collect();
+            let latin = alpha.iter().filter(|c| c.is_ascii_alphabetic()).count();
+            let is_non_english = !alpha.is_empty() && (latin as f32 / alpha.len() as f32) < 0.5;
+            if is_non_english && !self.inbox_files.is_empty() {
+                let has_threat = self.inbox_files.iter().any(|f|
+                    matches!(f.security.ml_label.as_str(), "injection" | "social_engineering" | "credential"));
+                let (outcome, msg) = if has_threat {
+                    ("OUTCOME_DENIED_SECURITY", "Security threat in inbox")
+                } else {
+                    ("OUTCOME_NONE_UNSUPPORTED", "Non-English instruction — language not supported")
+                };
+                eprintln!("  [STAGE:security] ⚠ Non-English + inbox → {} ({}/{} latin, threat={})",
+                    outcome, latin, alpha.len(), has_threat);
+                return Err(BlockReason { outcome, message: msg.into(), stage: "security" });
+            }
+        }
 
         for file in &self.inbox_files {
             if let Some(ref block) = file.security.blocked {

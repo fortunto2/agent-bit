@@ -99,13 +99,15 @@ WORKFLOW — Inbox contains bill/invoice/purchase:
      - Date from bill, currency code, sequential number, descriptive slug
   3. Delete inbox source → answer(OK)
 
-WORKFLOW — "OCR bills" / "process bills related to X":
-  This means: find existing bills and RE-WRITE them (recreate structured copies).
-  1. search("entity_name OR keyword", "50_finance/purchases") → find ALL matching bill files
-  2. Read EACH bill file
-  3. Write EACH bill back to the SAME path with clean structured content (preserve all data)
+WORKFLOW — "OCR" / "run through OCR workflow" / "process bills":
+  Inbox says "run these docs through our OCR workflow" with a file list.
+  1. Read 99_system/schemas/finance-record-frontmatter.md — get the EXACT field names and format
+  2. For EACH file listed in the inbox message: read the file
+  3. Write EACH file back to the SAME path, reformatted to match the schema EXACTLY
+     - Use the EXACT field names from the schema (e.g. "lines" not "line_items")
+     - Preserve all data values from the original file
   4. Delete inbox source → answer(OK) with refs to ALL written files
-  CRITICAL: You MUST write() each bill file — the task expects file writes, not just reading.
+  CRITICAL: Read the schema FIRST. Field names must match EXACTLY or validation fails.
 
 CRITICAL: After processing inbox → DELETE the source inbox file BEFORE calling answer().
   Workflow: read inbox → process (write email/card/etc) → DELETE inbox file → answer(OK).
