@@ -180,14 +180,11 @@ pub(crate) async fn run_agent(
         tree_out.len(), agents_md.len(), crm_schema.len());
 
     // ── Pipeline Stage 2: Build CRM graph + scan inbox ──────────────
-    // Parallel: build CRM graph and collect account domains concurrently
-    let (mut crm_graph, account_domains) = tokio::join!(
-        crm_graph::CrmGraph::build_from_pcm(pcm),
-        scanner::collect_account_domains(pcm),
-    );
-    eprintln!("  CRM graph: {} nodes", crm_graph.node_count());
-    // Pre-compute account embeddings for semantic cross-account detection
-    crm_graph.compute_account_embeddings(shared_clf);
+    // AI-NOTE: CRM graph pre-build disabled — saves ~25 RPCs per task.
+    // Ideal agent (103/104) doesn't pre-read cast at all. LLM reads on demand via tools.
+    // Sender trust and cross-account annotations removed — LLM handles it.
+    let crm_graph = crm_graph::CrmGraph::new();
+    let account_domains: Vec<(String, String)> = Vec::new();
     let scanned = match classified.scan_inbox(pcm, shared_clf, shared_nli, crm_graph, &account_domains).await {
         Ok(s) => s,
         Err(block) => {
@@ -475,6 +472,7 @@ pub(crate) async fn run_agent(
         // EXTENDED
         .register(sgr_agent_tools::ReadAllTool(pcm.clone()))                     // → sgr-agent-tools
         .register(tools::DateTool(pcm.clone()))                                  // chrono date math
+        .register(tools::LookupContactTool(pcm.clone()))                          // on-demand entity lookup
         // DEFERRED
         .register_deferred(sgr_agent_tools::MkDirTool(pcm.clone()))              // → sgr-agent-tools
         .register_deferred(sgr_agent_tools::MoveTool(pcm.clone()))               // → sgr-agent-tools

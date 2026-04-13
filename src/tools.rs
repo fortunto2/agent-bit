@@ -1250,3 +1250,34 @@ impl Tool for GrepCountTool {
         Ok(ToolOutput::text(format!("{}", count)))
     }
 }
+
+/// Lookup a contact/entity by name or email — searches cast directory on demand.
+/// Replaces pre-loaded CRM graph for sender trust checks.
+pub struct LookupContactTool(pub Arc<PcmClient>);
+
+#[derive(Deserialize, JsonSchema)]
+struct LookupContactArgs {
+    /// Name, email, or alias to search for
+    query: String,
+}
+
+#[async_trait]
+impl Tool for LookupContactTool {
+    fn name(&self) -> &str { "lookup_contact" }
+    fn description(&self) -> &str {
+        "Look up a contact/entity by name or email. Searches workspace entities.\n\
+         Returns: name, email, account, role — or 'not found'.\n\
+         Use to verify sender identity before processing inbox messages."
+    }
+    fn is_read_only(&self) -> bool { true }
+    fn parameters_schema(&self) -> Value { json_schema_for::<LookupContactArgs>() }
+    async fn execute(&self, args: Value, _ctx: &mut AgentContext) -> Result<ToolOutput, ToolError> {
+        let a: LookupContactArgs = parse_args(&args)?;
+        // Search across entity dirs
+        let results = self.0.search("/", &a.query, 10).await.map_err(pcm_err)?;
+        if results.lines().filter(|l| l.contains(':') && !l.starts_with('$')).count() == 0 {
+            return Ok(ToolOutput::text(format!("Not found: '{}'", a.query)));
+        }
+        Ok(ToolOutput::text(results))
+    }
+}
