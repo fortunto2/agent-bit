@@ -473,7 +473,6 @@ pub(crate) async fn run_agent(
         .register(sgr_agent_tools::ReadAllTool(pcm.clone()))                     // → sgr-agent-tools
         .register(tools::DateTool(pcm.clone()))                                  // chrono date math
         .register(tools::LookupContactTool(pcm.clone()))                          // on-demand entity lookup
-        .register(tools::ReformatTool(pcm.clone()))                               // OCR: add frontmatter, keep body
         // DEFERRED
         .register_deferred(sgr_agent_tools::MkDirTool(pcm.clone()))              // → sgr-agent-tools
         .register_deferred(sgr_agent_tools::MoveTool(pcm.clone()))               // → sgr-agent-tools
