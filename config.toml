@@ -91,15 +91,50 @@ model = "qwen-3-235b-a22b-instruct-2507"
 base_url = "https://api.cerebras.ai/v1"
 api_key_env = "CEREBRAS_API_KEY"
 
-[providers.cerebras-gpt]
-model = "gpt-oss-120b"
-base_url = "https://api.cerebras.ai/v1"
-api_key_env = "CEREBRAS_API_KEY"
+[providers.or-nemotron]
+model = "nvidia/nemotron-3-super-120b-a12b:free"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
 
-[providers.cerebras-llama]
-model = "llama3.1-8b"
-base_url = "https://api.cerebras.ai/v1"
-api_key_env = "CEREBRAS_API_KEY"
+[providers.or-minimax]
+model = "minimax/minimax-m2.5:free"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-gpt-oss]
+model = "openai/gpt-oss-120b:free"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-gemma4]
+model = "google/gemma-4-26b-a4b-it:free"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-qwen-coder]
+model = "qwen/qwen3-coder:free"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-seed-mini]
+model = "bytedance-seed/seed-2.0-mini"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-qwen35]
+model = "qwen/qwen3.5-397b-a17b"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-deepseek]
+model = "deepseek/deepseek-v3.2"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-gpt-nano]
+model = "openai/gpt-5.4-nano"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
 
 # AI-NOTE: rejected — seed18 (t01 fail), ds-turbo (t01 fail), mistral-med (t16 fail), hermes405 (no FC)
 
@@ -119,3 +154,13 @@ api_key_env = "CEREBRAS_API_KEY"
 #   ❌ minimax-v2 (MiniMax-M2.5) — 540s, 2 tools, reasoning overhead
 #   ❌ grok4 (Grok-4.20) — OpenRouter no FC endpoint
 #   ✅ qwen-next-v2 (Qwen-Next-80B) — t01=1.00, 46s, $0.12/M — but 5/7 sample
+
+[providers.or-haiku]
+model = "anthropic/claude-haiku-4.5"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-sonnet]
+model = "anthropic/claude-sonnet-4.6"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
