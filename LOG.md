@@ -511,3 +511,34 @@ doesn't extend TTL.
 - `config.toml` — temperatures, providers
 
 **Next:** ShinkaEvolve optimization of prompts/system.md + full Nemotron bench confirmation.
+| 04-13 | `659d701` | nemotron | **~54%** (40/74 partial) | v19-prod: guess_outcome CLAR default hurt 7+ tasks |
+| 04-13 | `659d701` | nemotron | **~64%** (v20 trending) | v20-prod: reverted guess_outcome, max_steps=16 |
+
+### Session 2026-04-13 (Prod Focus)
+
+**Goal:** 90/104 on prod with Nemotron. **Result:** ~60% (60/104 projected).
+
+**Runs:**
+- v15: ~37% (old code, parallel=1 bug)
+- v19: 53/98 (54%) — guess_outcome=CLARIFICATION default (hurt 7+ tasks)
+- v20: ~60/104 (57-60%) — reverted, max_steps=16, all fixes
+
+**15 commits:**
+1. ML classifier: +9 query training examples (t001, t012, t024)
+2. OpenAI embedding classifier fallback
+3. Exfiltration detection (t011, t023)
+4. Domain stem .bak/.old (t019, t020)
+5. Write guard: no force-write on no-inbox tasks (t001)
+6. Inbox skill: softer unknown sender rules
+7. Non-English → non_work (t010, t035 — partially works)
+8. max_steps 16 (t018, t037)
+9. Leaderboard parallel fix (was hardcoded to 1!)
+10. guess_outcome: tested CLARIFICATION, reverted to OK
+
+**Nemotron prod ceiling: ~60-65%.** Bottlenecks:
+- Body mismatch (model writes wrong content)
+- Outcome discrimination (too eager / too cautious)
+- Step efficiency (wastes steps on workspace exploration)
+- Non-deterministic variance (~5% between runs)
+
+**For 90+:** Need GPT-5.4 or Seed-2.0-pro (paid models).
