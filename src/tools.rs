@@ -1314,25 +1314,22 @@ impl Tool for LookupContactTool {
     }
 }
 
-/// Add/replace YAML frontmatter on an existing file — preserves body content.
-/// Model provides only frontmatter fields, tool handles read→merge→write.
+/// OCR a finance file: extract fields from markdown table → YAML frontmatter, preserve body.
+/// One tool call does read → parse → write. No LLM needed for field extraction.
 pub struct ReformatTool(pub Arc<PcmClient>);
 
 #[derive(Deserialize, JsonSchema)]
 struct ReformatArgs {
-    /// File path to reformat
+    /// File path to reformat (e.g. "50_finance/purchases/2026_01_12__bill.md")
     path: String,
-    /// YAML frontmatter content (without --- delimiters). E.g. "record_type: bill\ntotal_eur: 72"
-    frontmatter: String,
 }
 
 #[async_trait]
 impl Tool for ReformatTool {
     fn name(&self) -> &str { "reformat" }
     fn description(&self) -> &str {
-        "Add or replace YAML frontmatter on an existing file. Reads the file, prepends frontmatter, \
-         preserves the full body content. Use for OCR workflows — provide only frontmatter fields, \
-         the tool keeps the original body intact."
+        "OCR a finance file: reads the file, extracts fields from markdown tables into YAML frontmatter, \
+         preserves body content. One call = full OCR. Use for 'run through OCR workflow' tasks."
     }
     fn is_read_only(&self) -> bool { false }
     fn parameters_schema(&self) -> Value { json_schema_for::<ReformatArgs>() }
@@ -1344,16 +1341,111 @@ impl Tool for ReformatTool {
             content.find('\n').map(|i| &content[i + 1..]).unwrap_or(&content)
         } else { &content[..] };
 
-        // Strip existing frontmatter if present
+        // Strip existing frontmatter
         let body_clean = if body.starts_with("---") {
             if let Some(end) = body[3..].find("---") {
                 body[end + 6..].trim_start_matches('\n')
             } else { body }
         } else { body };
 
-        let result = format!("---\n{}\n---\n\n{}", a.frontmatter.trim(), body_clean);
+        // Parse metadata from | field | value | table
+        let mut fields: Vec<(String, String)> = Vec::new();
+        let mut lines_items: Vec<Vec<(String, String)>> = Vec::new();
+        let mut in_line_items = false;
+        let mut header_cols: Vec<String> = Vec::new();
+
+        for line in body_clean.lines() {
+            let trimmed = line.trim();
+            // Skip table borders and empty lines
+            if trimmed.starts_with('+') || trimmed.starts_with('|') && trimmed.contains("---") {
+                continue;
+            }
+            if !trimmed.starts_with('|') { continue; }
+
+            let cells: Vec<&str> = trimmed.split('|')
+                .map(|c| c.trim())
+                .filter(|c| !c.is_empty())
+                .collect();
+
+            if cells.len() < 2 { continue; }
+
+            // Detect header row for line items table
+            if cells[0] == "#" || cells[0] == "field" {
+                if cells[0] == "#" {
+                    in_line_items = true;
+                    header_cols = cells.iter().skip(1).map(|c| {
+                        // Normalize short names to schema names
+                        match c.trim() {
+                            "qty" => "quantity".to_string(),
+                            other => other.to_string(),
+                        }
+                    }).collect();
+                }
+                continue;
+            }
+
+            if in_line_items {
+                // Skip TOTAL row
+                if cells.len() >= 2 && cells[1].to_uppercase() == "TOTAL" { continue; }
+                // Parse line item
+                let mut item: Vec<(String, String)> = Vec::new();
+                for (i, val) in cells.iter().skip(1).enumerate() {
+                    if i < header_cols.len() && !val.is_empty() {
+                        item.push((header_cols[i].clone(), val.to_string()));
+                    }
+                }
+                if !item.is_empty() { lines_items.push(item); }
+            } else if cells.len() == 2 {
+                // Metadata: | field | value |
+                fields.push((cells[0].to_string(), cells[1].to_string()));
+            }
+        }
+
+        if fields.is_empty() {
+            return Ok(ToolOutput::text(format!("No table fields found in {}", a.path)));
+        }
+
+        // Build YAML frontmatter
+        let mut yaml = String::new();
+        for (k, v) in &fields {
+            // Quote values with special chars
+            if v.contains(':') || v.contains('#') || v.contains('"') {
+                yaml.push_str(&format!("{}: \"{}\"\n", k, v.replace('"', "\\\"")));
+            } else {
+                yaml.push_str(&format!("{}: {}\n", k, v));
+            }
+        }
+        if !lines_items.is_empty() {
+            yaml.push_str("lines:\n");
+            for item in &lines_items {
+                let mut first = true;
+                for (k, v) in item {
+                    if first {
+                        yaml.push_str(&format!("  - {}: {}\n", k, v));
+                        first = false;
+                    } else {
+                        yaml.push_str(&format!("    {}: {}\n", k, v));
+                    }
+                }
+            }
+        }
+
+        // Compose: frontmatter + body (skip tables already parsed)
+        let body_after_tables: String = body_clean.lines()
+            .skip_while(|l| {
+                let t = l.trim();
+                t.is_empty() || t.starts_with('#') || t.starts_with('|') || t.starts_with('+')
+                    || t.starts_with("```")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let result = format!("---\n{}---\n\n{}", yaml, body_after_tables.trim_start());
         self.0.write(&a.path, &result, 0, 0).await.map_err(pcm_err)?;
 
-        Ok(ToolOutput::text(format!("Reformatted {} — frontmatter added, {} bytes body preserved", a.path, body_clean.len())))
+        Ok(ToolOutput::text(format!(
+            "OCR'd {} — {} fields + {} line items → YAML frontmatter, body preserved",
+            a.path, fields.len(), lines_items.len()
+        )))
     }
 }
