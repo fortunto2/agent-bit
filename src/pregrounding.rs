@@ -170,30 +170,10 @@ pub(crate) async fn run_agent(
         async { pcm.context().await.unwrap_or_default() },
     );
 
-    // AI-NOTE: only read top-level AGENTS.MD files (depth 1). Old code tried 4 variants
-    // per every dir in tree = 128+ RPCs (most 404). Now: ~10 RPCs for top-level dirs only.
-    let crm_schema = {
-        let mut readmes = String::new();
-        for line in tree_out.lines() {
-            let trimmed = line.trim().trim_start_matches(|c: char| c == '│' || c == '├' || c == '└' || c == '─' || c == ' ' || c == '|');
-            // Only top-level dirs (no '/' in name = direct child of root)
-            if trimmed.ends_with('/') && !trimmed.contains("//") {
-                let dir = trimmed.trim_end_matches('/');
-                if !dir.is_empty() && !dir.contains('/') {
-                    let path = format!("{}/AGENTS.MD", dir);
-                    if let Ok(content) = pcm.read(&path, false, 0, 0).await {
-                        if !content.is_empty() {
-                            readmes.push_str(&format!("# {}\n{}\n\n", path, content));
-                            if readmes.len() > 2000 { break; }
-                        }
-                    }
-                }
-            }
-        }
-        let trunc = readmes.floor_char_boundary(2000);
-        readmes.truncate(trunc);
-        readmes
-    };
+    // AI-NOTE: crm_schema removed from LLM context (line 356). Only used for debug dump.
+    // Was 126 RPCs (4 variants × all dirs), then 10 RPCs (top-level only).
+    // Now: 0 RPCs. Not worth harness steps for a debug file.
+    let crm_schema = String::new();
 
     eprintln!("  Grounding: tree={} bytes, agents.md={} bytes, crm_schema={} bytes",
         tree_out.len(), agents_md.len(), crm_schema.len());
