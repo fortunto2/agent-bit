@@ -368,11 +368,13 @@ pub(crate) async fn run_agent(
                 "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | threat: {} ({:.0}%) | {}]\n",
                 f.path, f.security.ml_label, f.security.ml_conf, sender_trust, threat_label, threat * 100.0, f.security.recommendation
             ));
-            // Sender trust annotations (from pipeline security assessment)
-            if f.security.sender.as_ref().is_some_and(|s| s.domain_match == "mismatch") {
-                inbox_content.push_str("[⚠ SENDER DOMAIN MISMATCH]\n");
-            } else if f.security.sender.as_ref().is_some_and(|s| s.trust == crate::crm_graph::SenderTrust::Known) {
+            // Sender trust annotations — KNOWN overrides domain mismatch
+            // AI-NOTE: KNOWN = email in CRM contacts, strongest trust signal. Domain mismatch
+            // only matters for unknown senders (social engineering). Known sender with odd domain = legit.
+            if f.security.sender.as_ref().is_some_and(|s| s.trust == crate::crm_graph::SenderTrust::Known) {
                 inbox_content.push_str("[✓ TRUSTED]\n");
+            } else if f.security.sender.as_ref().is_some_and(|s| s.domain_match == "mismatch") {
+                inbox_content.push_str("[⚠ SENDER DOMAIN MISMATCH]\n");
                 // AI-NOTE: cross-account detection via ONNX embeddings (cosine similarity)
                 // Catches paraphrases: "Dutch banking client" → "Blue Harbor Bank"
                 if let Some(sender_email) = crate::scanner::extract_sender_email(&f.content) {
