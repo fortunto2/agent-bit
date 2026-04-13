@@ -168,6 +168,10 @@ fn reasoning_tool_def() -> ToolDef {
                     "type": "string",
                     "description": "Next step to execute. One action."
                 },
+                "verification": {
+                    "type": "string",
+                    "description": "Self-check: repeating? correct file? Trust [CLASSIFICATION] headers."
+                },
                 "confidence": {
                     "type": "number",
                     "description": "0.0-1.0"
@@ -280,8 +284,8 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
                 let task_type = extract_str(args, "task_type");
                 // plan: string (was array) — single next action
                 let plan = extract_str(args, "plan");
-                let completed = Vec::<String>::new(); // removed from schema
-                let verification = String::new(); // removed from schema
+                let completed = Vec::<String>::new();
+                let verification = extract_str(args, "verification");
                 let done = args
                     .get("done")
                     .and_then(|d| d.as_bool())
