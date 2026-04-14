@@ -1,6 +1,6 @@
 ---
 name: nora-migration
-description: Copy workspace docs to knowledge notes for NORA migration
+description: Copy workspace docs in place for NORA migration queue
 triggers: [intent_edit, intent_inbox]
 priority: 25
 keywords: [NORA, migration, migrate]
@@ -10,10 +10,9 @@ WORKFLOW:
   1. Parse file list from instruction: "Queue up these docs for migration to my NORA: file1.md, file2.md, ..."
   2. Find ALL source files in one batch:
      search({"pattern": "file1|file2|file3"}) — pipe-separated, searches entire workspace
-  3. read each found file
-  4. For EACH file: write FULL verbatim content to THE SAME PATH where it was found
-     (if file is at 99_system/workflows/sending-email.md → write to 99_system/workflows/sending-email.md)
-  5. answer(OUTCOME_OK) with refs to ALL written files
+  3. For EACH file: copy_file to THE SAME PATH (in-place rewrite marks it for migration)
+     copy_file({"source": "99_system/workflows/sending-email.md", "target": "99_system/workflows/sending-email.md"})
+  4. answer(OUTCOME_OK) with refs to ALL copied files
 
 EXAMPLE — Queue 3 docs:
   Instruction: "Queue up these docs for migration to my NORA: sending-email.md, parking-lot.md, design-constraints.md"
@@ -23,21 +22,17 @@ EXAMPLE — Queue 3 docs:
     → 30_knowledge/notes/parking-lot.md
     → 30_knowledge/notes/design-constraints.md
 
-  read({"path": "99_system/workflows/sending-email.md"}) → full content
-  read({"path": "30_knowledge/notes/parking-lot.md"}) → full content
-  read({"path": "30_knowledge/notes/design-constraints.md"}) → full content
+  copy_file({"source": "99_system/workflows/sending-email.md", "target": "99_system/workflows/sending-email.md"})
+  copy_file({"source": "30_knowledge/notes/parking-lot.md", "target": "30_knowledge/notes/parking-lot.md"})
+  copy_file({"source": "30_knowledge/notes/design-constraints.md", "target": "30_knowledge/notes/design-constraints.md"})
 
-  write({"path": "99_system/workflows/sending-email.md", "content": "...FULL verbatim..."})
-  write({"path": "30_knowledge/notes/parking-lot.md", "content": "...FULL verbatim..."})
-  write({"path": "30_knowledge/notes/design-constraints.md", "content": "...FULL verbatim..."})
-
-  answer({"message": "Queued 3 docs for NORA migration", "outcome": "OUTCOME_OK", "refs": [...]})
+  answer({"message": "Queued 3 docs for NORA migration", "outcome": "OUTCOME_OK", "refs": ["99_system/workflows/sending-email.md", "30_knowledge/notes/parking-lot.md", "30_knowledge/notes/design-constraints.md"]})
 
 CRITICAL:
-  - Write to the SAME PATH where the file was found — do NOT move files to a different directory
-  - Copy FULL content verbatim — do NOT summarize, truncate, or add frontmatter
+  - Use copy_file — preserves full content byte-for-byte (no truncation)
+  - Target = SAME PATH as source (in-place rewrite)
   - Source files can be ANYWHERE: 99_system/, 30_knowledge/, other dirs — search broadly
-  - If source file NOT found anywhere: create at 30_knowledge/notes/{filename} with title as heading:
+  - If source file NOT found: create at 30_knowledge/notes/{filename} with title as heading:
     write({"path": "30_knowledge/notes/{filename}", "content": "# {Title From Filename}\n\n(queued for NORA migration)\n"})
-  - You MUST write ALL requested files — never skip, never CLARIFICATION
+  - You MUST process ALL requested files — never skip, never CLARIFICATION
   - This is a REAL workspace task — answer OUTCOME_OK, never CLARIFICATION
