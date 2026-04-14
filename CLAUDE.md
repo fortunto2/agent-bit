@@ -85,8 +85,7 @@ src/prompts.rs       -- system prompt (single explicit decision tree, hot-reload
 src/skills.rs        -- skill system: loads SKILL.md files, push-model selection via classifier
 src/scanner.rs       -- security scanning, inbox classification, domain matching
 src/pregrounding.rs  -- Codex-style context assembly + agent execution (713 lines)
-src/agent.rs         -- Pac1Agent (Router + Structured CoT reasoning, two-phase FC)
-src/pac1_sgr.rs      -- Pac1SgrAgent (pure SGR mode, single LLM call per step, experimental)
+src/agent.rs         -- Pac1Agent (two-phase + single-phase modes, parallel think+action FC)
 src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
 src/pcm.rs           -- PcmRuntime client (11 file-system RPCs + read cache + ProposedAnswer)
 src/tools.rs         -- 16 Tools (13 base + read_all, search_and_read, grep_count) + trust metadata
@@ -100,6 +99,65 @@ src/dashboard.rs     -- TUI dashboard (ratatui): heatmap + log viewer (cargo run
 ```
 
 Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep).
+
+### Agent Modes (src/agent.rs)
+
+Two execution modes, switchable via `SINGLE_PHASE` env var:
+
+**Two-phase (default):** 2 LLM calls per step
+```
+Step N:
+  Call 1: tools_call([reasoning_tool])         → {task_type, security, plan, done, confidence}
+  Call 2: tools_call([action_tools])            → search/read/write/delete/answer
+```
+
+**Single-phase (`SINGLE_PHASE=simple`):** 1 LLM call per step, 2.5-3x faster
+```
+Step N:
+  Call 1: tools_call([think, action_tools])    → think({type, security, plan}) + search/read/...
+          Model calls think() AND action tool(s) in parallel
+```
+
+#### Architecture comparison
+
+| Feature | Codex | SGR Python | SGR Rust | Pac1 Two-Phase | Pac1 Single-Phase |
+|---------|-------|------------|----------|----------------|-------------------|
+| Calls per step | 1 | 2 | 1 (SgrAgent) | 2 | **1** |
+| Reasoning | None (model CoT) | Structured (union) | Structured (flat) | FC reasoning tool | Parallel think FC |
+| Tool selection | Native FC | Union discriminant | Union / FC | FC → FC | FC (think + action) |
+| Structured output? | No | Yes | Yes (SgrAgent) | Yes (Phase 1) | No |
+| Native FC? | Yes (all) | No | Yes (ToolCalling) | Yes (Phase 2) | **Yes (all)** |
+| Multi-tool per step? | Yes | No (1 tool) | Yes | Yes | **Yes** |
+| Completion | Empty calls | boolean field | Empty / finish_task | Empty / answer() | Empty / answer() |
+
+#### Performance (Haiku 4.5)
+
+| Metric | Two-phase | Single-phase | Speedup |
+|--------|-----------|--------------|---------|
+| Avg time/task | ~116s | ~13s | **9x** |
+| Avg steps/task | 15 | 3-4 | 4x |
+| LLM calls/step | 2 | 1 | 2x |
+| Cost (tokens) | 2x | 1x | **-50%** |
+
+```bash
+# Two-phase (default):
+cargo run --release -- --provider or-haiku --task t001
+
+# Single-phase (2.5-3x faster):
+SINGLE_PHASE=simple cargo run --release -- --provider or-haiku --task t001
+
+# Leaderboard with single-phase:
+SINGLE_PHASE=simple make leaderboard NAME="haiku-sp" LB_PROVIDER=or-haiku
+```
+
+### Shared Crates
+
+| Crate | What | New in this session |
+|-------|------|---------------------|
+| `sgr-agent` | Agent framework, LlmClient, run_loop | `tools_call_with_text`, `ReasoningToolBuilder`, provider capabilities |
+| `sgr-agent-tools` | 17 file tools (Read, Write, Search, **CopyTool**, **PrependTool**...) | CopyTool, PrependTool (byte-perfect file ops) |
+| `sgr-agent-ml` | **NEW** — OnnxEncoder, CentroidClassifier, KnnStore | Extracted from agent-bit classifier |
+| `openai-oxide` | OpenAI-compatible API client | v0.13.0: session_id, anthropic module |
 
 ### Tool Completion Hooks (src/hooks.rs)
 
