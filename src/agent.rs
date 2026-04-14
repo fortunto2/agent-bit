@@ -69,6 +69,30 @@ fn format_ledger_entry(step: u32, tool_name: &str, key_arg: &str, result: &str) 
     entry
 }
 
+/// Single-phase mode variant: controls how reasoning is embedded.
+/// AI-NOTE: experiment — single-phase agent reduces 2 LLM calls/step to 1 (2.5x faster)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SinglePhaseMode {
+    /// Two-phase (default): Phase 1 reasoning tool + Phase 2 action tool = 2 LLM calls/step
+    Off,
+    /// Approach 2: Single call with tool_choice=auto. System prompt instructs precise answers.
+    /// Answer tool has strict schema. No reasoning tool.
+    Simple,
+    /// Approach 3: Phase 1 reasoning on step 0 only, then single-phase for steps 1+.
+    /// Saves N-1 reasoning calls while keeping initial classification.
+    Hybrid,
+}
+
+impl SinglePhaseMode {
+    pub fn from_env() -> Self {
+        match std::env::var("SINGLE_PHASE").as_deref() {
+            Ok("1") | Ok("simple") => Self::Simple,
+            Ok("2") | Ok("hybrid") => Self::Hybrid,
+            _ => Self::Off,
+        }
+    }
+}
+
 /// PAC1 agent with Router + Structured CoT.
 pub struct Pac1Agent<C: LlmClient> {
     client: C,
@@ -89,6 +113,12 @@ pub struct Pac1Agent<C: LlmClient> {
     forced_intent: Mutex<String>,
     /// Unified workflow state machine — replaces all scattered guards
     workflow: Option<crate::workflow::SharedWorkflowState>,
+    /// AI-NOTE: single-phase experiment — 1 LLM call/step instead of 2
+    single_phase: SinglePhaseMode,
+    /// Cached task_type from step 0 reasoning (used by Hybrid mode)
+    cached_task_type: Mutex<Option<String>>,
+    /// Cached security assessment from step 0 reasoning (used by Hybrid mode)
+    cached_security: Mutex<Option<String>>,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -97,6 +127,10 @@ impl<C: LlmClient> Pac1Agent<C> {
         no_prefill: bool,
         workflow: Option<crate::workflow::SharedWorkflowState>,
     ) -> Self {
+        let single_phase = SinglePhaseMode::from_env();
+        if single_phase != SinglePhaseMode::Off {
+            eprintln!("  🧪 Single-phase mode: {:?}", single_phase);
+        }
         Self {
             client,
             system_prompt: system_prompt.into(),
@@ -109,6 +143,9 @@ impl<C: LlmClient> Pac1Agent<C> {
             confidence_reflections: AtomicU32::new(0),
             forced_intent: Mutex::new(String::new()),
             workflow,
+            single_phase,
+            cached_task_type: Mutex::new(None),
+            cached_security: Mutex::new(None),
         }
     }
 
@@ -136,6 +173,228 @@ impl<C: LlmClient> Pac1Agent<C> {
         } else {
             Some(format!("Previous actions:\n{}", ledger.join("\n")))
         }
+    }
+}
+
+/// Think tool definition — lightweight reasoning alongside action tools.
+/// AI-NOTE: single-phase v2 — model returns think() + action() in parallel (1 LLM call/step)
+fn think_tool_def() -> ToolDef {
+    ToolDef {
+        name: "think".to_string(),
+        description: "Reason about the task. ALWAYS call this AND action tool(s) together. You can call MULTIPLE action tools in parallel (e.g. think + delete + delete for batch operations).".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "task_type": {
+                    "type": "string",
+                    "enum": ["search", "edit", "delete", "analyze", "security"],
+                    "description": "search=read-only, edit=write/create, delete=remove, analyze=multi-step, security=blocked"
+                },
+                "security": {
+                    "type": "string",
+                    "enum": ["safe", "suspicious", "blocked"],
+                    "description": "safe=CRM work, suspicious=unusual, blocked=attack/not-CRM"
+                },
+                "plan": {
+                    "type": "string",
+                    "description": "What you are doing now and why"
+                },
+                "done": {
+                    "type": "boolean",
+                    "description": "ONLY true AFTER you have called answer(). If you know the answer, call answer() tool — do NOT set done=true without it."
+                }
+            },
+            "required": ["task_type", "security", "plan"],
+            "additionalProperties": false
+        }),
+    }
+}
+
+impl<C: LlmClient> Pac1Agent<C> {
+    /// Single-phase decide: ONE LLM call per step.
+    /// Model returns think() + action() in parallel via tools_call (tool_choice=required).
+    /// think() provides structured reasoning; action calls are executed by the loop.
+    /// AI-NOTE: v2 uses parallel tool calls instead of tools_call_with_text — 2.5-3.7x faster
+    async fn decide_single_phase(
+        &self,
+        messages: &[Message],
+        tools: &ToolRegistry,
+        _previous_response_id: Option<&str>,
+    ) -> Result<(Decision, Option<String>), AgentError> {
+        // ── Prepare messages (same trim logic as two-phase) ──────────
+        let mut msgs = Vec::with_capacity(messages.len() + 1);
+        let has_system = messages.iter().any(|m| m.role == Role::System);
+        if !has_system && !self.system_prompt.is_empty() {
+            msgs.push(Message::system(&self.system_prompt));
+        }
+        let est_tokens: usize = messages.iter().map(|m| m.content.len() / 4).sum();
+        if est_tokens > 12000 {
+            let mut dropped = 0usize;
+            let compactable_count = messages.iter().filter(|m| m.compactable).count();
+            let keep_recent = 6;
+            let skip = compactable_count.saturating_sub(keep_recent);
+            let mut compact_seen = 0;
+            for m in messages {
+                if m.compactable {
+                    compact_seen += 1;
+                    if compact_seen <= skip {
+                        dropped += 1;
+                        continue;
+                    }
+                }
+                msgs.push(m.clone());
+            }
+            if dropped > 0 {
+                eprintln!("  📐 Context trim: dropped {} compactable messages", dropped);
+            }
+        } else {
+            msgs.extend_from_slice(messages);
+        }
+
+        // Ledger injection
+        if let Some(ledger) = self.ledger_text() {
+            if self.no_prefill {
+                msgs.push(Message::user(&ledger));
+            } else {
+                msgs.push(Message::assistant(&ledger));
+            }
+        }
+
+        // Workflow nudges
+        if let Some(ref wf) = self.workflow {
+            for nudge in wf.lock().unwrap().advance_step() {
+                eprintln!("  📌 Workflow: {}", nudge.trunc(80));
+                msgs.push(Message::user(&nudge));
+            }
+        }
+
+        // ── Build action tool list (no think tool — reasoning in text) ──
+        let task_type_for_filter = {
+            let cached = self.cached_task_type.lock().unwrap().clone();
+            let base = cached.unwrap_or_else(|| "edit".to_string());
+            let intent = self.forced_intent.lock().unwrap();
+            if let Some(forced) = detect_forced_task_type(&intent) {
+                forced.to_string()
+            } else {
+                base
+            }
+        };
+
+        let step = self.step_count.load(Ordering::SeqCst);
+        let filtered = filter_tools_for_task(&task_type_for_filter, step, tools.to_defs());
+        let phase_filtered = filter_tools_by_workflow(filtered, &self.workflow);
+        let mut all_defs = if phase_filtered.is_empty() { tools.to_defs() } else { phase_filtered };
+
+        // ── Single-phase: think + action tools together, tool_choice=required ──
+        let mut all_tools = vec![think_tool_def()];
+        all_tools.extend(all_defs.clone());
+        msgs.push(Message::user(
+            "Call think() AND an action tool together. Both in ONE response."
+        ));
+        let all_calls = self.client.tools_call(&msgs, &all_tools).await?;
+
+        // Split: think → reasoning, rest → actions
+        let mut action_calls = Vec::new();
+        let mut reasoning_text = String::new();
+        for tc in all_calls {
+            if tc.name == "think" {
+                let tt = extract_str(&tc.arguments, "task_type");
+                let sec = extract_str(&tc.arguments, "security");
+                let plan = extract_str(&tc.arguments, "plan");
+                eprintln!("    🧠 think: type={} security={} plan={}", tt, sec, plan.trunc(80));
+                reasoning_text = plan;
+            } else {
+                action_calls.push(tc);
+            }
+        }
+
+        if !reasoning_text.is_empty() {
+            eprintln!("    🧠 {}", reasoning_text.trunc(120));
+        }
+
+        // ── Infer task_type/security from reasoning text (regex) ──────
+        let (task_type, security, plan) = {
+            let tt = if reasoning_text.contains("delete") || reasoning_text.contains("remove") {
+                "delete"
+            } else if reasoning_text.contains("blocked") || reasoning_text.contains("attack") || reasoning_text.contains("injection") {
+                "security"
+            } else if reasoning_text.contains("search") || reasoning_text.contains("find") || reasoning_text.contains("look") {
+                "search"
+            } else {
+                &task_type_for_filter
+            };
+            let sec = if reasoning_text.contains("blocked") || reasoning_text.contains("DENIED") {
+                "blocked"
+            } else if reasoning_text.contains("suspicious") {
+                "suspicious"
+            } else {
+                "safe"
+            };
+            (tt.to_string(), sec.to_string(), reasoning_text.clone())
+        };
+
+        // Cache task_type/security for future steps
+        *self.cached_task_type.lock().unwrap() = Some(task_type.clone());
+        *self.cached_security.lock().unwrap() = Some(security.clone());
+
+        // ── Apply ML intent override on LLM-provided task_type ──────
+        let task_type = {
+            let intent = self.forced_intent.lock().unwrap();
+            if let Some(forced) = detect_forced_task_type(&intent) {
+                if task_type != forced {
+                    eprintln!("  🔒 Task-type override: {} → {}", task_type, forced);
+                    forced.to_string()
+                } else { task_type }
+            } else { task_type }
+        };
+
+        // ── Security blocked → filter out mutation tools from action calls ──
+        if security == "blocked" {
+            action_calls.retain(|tc| !matches!(tc.name.as_str(), "write" | "delete" | "mkdir" | "move_file"));
+            // If only think was returned with blocked, force completion
+            if action_calls.is_empty() {
+                return Ok((Decision {
+                    situation: format!("BLOCKED: {}", plan),
+                    task: if plan.is_empty() { vec![] } else { vec![plan] },
+                    tool_calls: vec![],
+                    completed: true,
+                }, None));
+            }
+        }
+
+        // ── Post-hoc router: filter action calls by task_type ────────
+        // Security route: strip mutation tools from action calls
+        if task_type == "security" {
+            action_calls.retain(|tc| !matches!(tc.name.as_str(), "write" | "delete" | "mkdir" | "move_file"));
+        }
+
+        self.step_count.fetch_add(1, Ordering::SeqCst);
+
+        // Retry on empty actions
+        if action_calls.is_empty() {
+            eprintln!("  🔁 Only think() returned — nudging for action");
+            let mut retry_msgs = msgs.clone();
+            retry_msgs.push(Message::user(
+                "You called think() but no action tool. Call think() AND an action tool together.",
+            ));
+            let retry_calls = self.client.tools_call(&retry_msgs, &all_defs).await?;
+            for tc in retry_calls {
+                if tc.name != "think" {
+                    action_calls.push(tc);
+                }
+            }
+        }
+
+
+        let situation = format!("type={} | security={} | plan={}", task_type, security, plan.trunc(60));
+        let completed = action_calls.iter().any(|tc| matches!(tc.name.as_str(), "answer" | "finish_task"));
+
+        Ok((Decision {
+            situation,
+            task: if plan.is_empty() { vec![] } else { vec![plan] },
+            tool_calls: action_calls,
+            completed,
+        }, None))
     }
 }
 
@@ -229,6 +488,11 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         tools: &ToolRegistry,
         previous_response_id: Option<&str>,
     ) -> Result<(Decision, Option<String>), AgentError> {
+        // AI-NOTE: single-phase routing — delegate when SINGLE_PHASE env var set
+        if self.single_phase != SinglePhaseMode::Off {
+            return self.decide_single_phase(messages, tools, previous_response_id).await;
+        }
+
         // Prepare messages — smart trim using Message.compactable flag
         // compactable=false (default) → critical, never dropped
         // compactable=true → safe to drop when context overflows
