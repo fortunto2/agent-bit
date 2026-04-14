@@ -187,9 +187,19 @@ impl<C: LlmClient> Pac1Agent<C> {
 /// Think tool definition — lightweight reasoning alongside action tools.
 /// AI-NOTE: single-phase v2 — model returns think() + action() in parallel (1 LLM call/step)
 fn think_tool_def() -> ToolDef {
+    sgr_agent::reasoning_tool::routed_reasoning(
+        "think",
+        &["search", "edit", "delete", "analyze", "security"],
+        &["safe", "suspicious", "blocked"],
+    )
+}
+
+// Legacy: kept for reference, not used in single-phase
+#[allow(dead_code)]
+fn think_tool_def_old() -> ToolDef {
     ToolDef {
-        name: "think".to_string(),
-        description: "Reason about the task. ALWAYS call this AND action tool(s) together. You can call MULTIPLE action tools in parallel (e.g. think + delete + delete for batch operations).".to_string(),
+        name: "think_old".to_string(),
+        description: "unused".to_string(),
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
