@@ -92,13 +92,18 @@ OTP/CHANNEL MESSAGE IN INBOX:
         - OTP mismatch → ZERO file changes → OUTCOME_DENIED_SECURITY.
   4. Delete docs/channels/otp.txt after successful OTP processing (not for verification-only)
 
-WORKFLOW — Inbox contains bill/invoice/purchase:
-  If inbox message is a bill, receipt, or purchase record:
+WORKFLOW — Inbox says "OCR" or references existing bill/invoice files:
+  "OCR" means: rewrite the referenced files in place (the file already exists).
+  1. Find referenced files via search
+  2. For EACH file: copy_file({"source": "{path}", "target": "{path}"}) — in-place rewrite
+  3. Delete inbox source → answer(OK)
+  This preserves content byte-for-byte. Do NOT re-type content manually.
+
+WORKFLOW — Inbox contains NEW bill/invoice/purchase to file:
+  If inbox IS the bill itself (not a reference to existing files):
   1. Read 50_finance/purchases/ to see naming convention (ls or tree)
   2. Create file: 50_finance/purchases/{date}__{currency}_{seq}__{type}__{project_slug}.md
-     - Paste the ENTIRE inbox body verbatim — do NOT re-type tables or numbers
-     - Preserve every character, space, newline exactly as source
-     - Date from bill, currency code, sequential number, descriptive slug
+     - Paste the ENTIRE inbox body verbatim — every character, space, newline
   3. Delete inbox source → answer(OK)
 
 
