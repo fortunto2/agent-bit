@@ -501,7 +501,8 @@ pub(crate) async fn run_agent(
         .register_deferred(tools::ListSkillsTool(skill_registry.clone()))
         .register_deferred(tools::GetSkillTool(skill_registry.clone()));
 
-    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, config.rejects_prefill(), Some(workflow.clone()));
+    let single_phase = std::env::var("SINGLE_PHASE").map(|v| v == "1").unwrap_or(false);
+    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, config.rejects_prefill(), Some(workflow.clone()), single_phase);
     agent.set_intent(&instruction_intent);
     let mut ctx = AgentContext::new();
 
