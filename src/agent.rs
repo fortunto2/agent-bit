@@ -311,45 +311,36 @@ impl<C: LlmClient> Pac1Agent<C> {
         ));
         let all_calls = self.client.tools_call(&msgs, &all_tools).await?;
 
-        // Split: think → reasoning, rest → actions
+        // Split: think → structured reasoning, rest → actions
         let mut action_calls = Vec::new();
-        let mut reasoning_text = String::new();
+        let mut task_type = task_type_for_filter.clone();
+        let mut security = "safe".to_string();
+        let mut plan = String::new();
+        let mut confidence = 0.5f32;
+
         for tc in all_calls {
             if tc.name == "think" {
                 let tt = extract_str(&tc.arguments, "task_type");
                 let sec = extract_str(&tc.arguments, "security");
-                let plan = extract_str(&tc.arguments, "plan");
-                eprintln!("    🧠 think: type={} security={} plan={}", tt, sec, plan.trunc(80));
-                reasoning_text = plan;
+                let p = extract_str(&tc.arguments, "plan");
+                let conf = tc.arguments.get("confidence")
+                    .and_then(|v| v.as_f64())
+                    .map(|v| v.clamp(0.0, 1.0) as f32)
+                    .unwrap_or(0.5);
+                if !tt.is_empty() { task_type = tt; }
+                if !sec.is_empty() { security = sec; }
+                plan = p;
+                confidence = conf;
+                let reflection = extract_str(&tc.arguments, "reflection");
+                eprintln!("    🧠 think: type={} security={} conf={:.2} plan={}",
+                    task_type, security, confidence, plan.trunc(80));
+                if !reflection.is_empty() {
+                    eprintln!("    🔍 {}", reflection.trunc(100));
+                }
             } else {
                 action_calls.push(tc);
             }
         }
-
-        if !reasoning_text.is_empty() {
-            eprintln!("    🧠 {}", reasoning_text.trunc(120));
-        }
-
-        // ── Infer task_type/security from reasoning text (regex) ──────
-        let (task_type, security, plan) = {
-            let tt = if reasoning_text.contains("delete") || reasoning_text.contains("remove") {
-                "delete"
-            } else if reasoning_text.contains("blocked") || reasoning_text.contains("attack") || reasoning_text.contains("injection") {
-                "security"
-            } else if reasoning_text.contains("search") || reasoning_text.contains("find") || reasoning_text.contains("look") {
-                "search"
-            } else {
-                &task_type_for_filter
-            };
-            let sec = if reasoning_text.contains("blocked") || reasoning_text.contains("DENIED") {
-                "blocked"
-            } else if reasoning_text.contains("suspicious") {
-                "suspicious"
-            } else {
-                "safe"
-            };
-            (tt.to_string(), sec.to_string(), reasoning_text.clone())
-        };
 
         // Cache task_type/security for future steps
         *self.cached_task_type.lock().unwrap() = Some(task_type.clone());
@@ -435,9 +426,7 @@ impl<C: LlmClient> Pac1Agent<C> {
             }
         }
 
-        let situation = format!("type={} | security={} | plan={}", task_type, security, plan.trunc(60));
-        // NEVER set completed=true here — let agent_loop execute answer() tool first,
-        // then it'll complete on next step when tool_calls is empty
+        let situation = format!("type={} | security={} conf={:.2} | plan={}", task_type, security, confidence, plan.trunc(50));
         let completed = false;
 
         Ok((Decision {
