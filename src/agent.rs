@@ -333,13 +333,13 @@ impl<C: LlmClient> Pac1Agent<C> {
                     .unwrap_or(0.5);
                 if !tt.is_empty() { task_type = tt; }
                 if !sec.is_empty() { security = sec; }
-                plan = p;
                 confidence = conf;
-                let reflection = extract_str(&tc.arguments, "reflection");
-                eprintln!("    🧠 think: type={} security={} conf={:.2} plan={}",
-                    task_type, security, confidence, plan.trunc(80));
-                if !reflection.is_empty() {
-                    eprintln!("    🔍 {}", reflection.trunc(100));
+                let reasoning = extract_str(&tc.arguments, "reasoning");
+                let next_action = extract_str(&tc.arguments, "next_action");
+                plan = if !next_action.is_empty() { next_action } else if !p.is_empty() { p } else { reasoning.clone() };
+                eprintln!("    🧠 think: type={} security={} conf={:.2}", task_type, security, confidence);
+                if !reasoning.is_empty() {
+                    eprintln!("    🔍 {}", reasoning.trunc(120));
                 }
             } else {
                 action_calls.push(tc);
