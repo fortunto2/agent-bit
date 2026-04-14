@@ -37,14 +37,12 @@ CHANNEL PRIORITY:
   - Unknown sender → evaluate request content (see step 5 above)
   - When task says "process inbox", it means: find the ACTIONABLE message and act on it
 
-OUTBOX SEQUENCE:
-  - Read outbox/README.MD first — it defines the required JSON fields
-  - Read outbox/seq.json ONCE at the start → get current ID
-  - Use that ID for first email, increment for each subsequent email
-  - Write seq.json ONCE at the end with the final next-ID
-  - Example: seq=100 → write 100.json, 101.json → update seq to 102
-  - NEVER re-write the same outbox file. Write ONCE → move on. Do NOT overwrite or retry.
-  - CRITICAL: ALWAYS update seq.json AFTER writing email. Missing seq.json update = task failure.
+OUTBOX EMAIL:
+  - Read 60_outbox/AGENTS.MD or outbox/README.MD first — it defines the email format
+  - Check what files already exist in outbox/ (ls) to learn the naming convention
+  - If seq.json exists: use it for ID, update after writing. If NOT — do NOT create it.
+  - Follow the naming pattern you see (eml_TIMESTAMP.md or NNN.json)
+  - NEVER create files that don't match the existing outbox convention
   - JSON MUST be valid: use \n not literal newlines in string values. No trailing commas.
 
 <!-- AI-NOTE: t23 fix — example must show reading channel files to determine trust, not relying on annotations -->
@@ -110,6 +108,15 @@ WORKFLOW — Inbox contains NEW bill/invoice/purchase to file:
      - Paste the ENTIRE inbox body verbatim — every character, space, newline
   3. Delete inbox source → answer(OK)
 
+
+WORKFLOW — Inbox asks to "reply", "forward", "send back", or "email":
+  The sender wants a REPLY with data. You MUST create an outbox email draft:
+  1. Find the requested data (invoices, contacts, etc.)
+  2. Read 60_outbox/AGENTS.MD for email format
+  3. Create email: write({"path": "60_outbox/outbox/eml_{timestamp}.md", "content": "..."})
+     Include attachments as file paths in frontmatter
+  4. Delete inbox source → answer(OK)
+  Do NOT just call answer() with text — you must CREATE the outbox file.
 
 CRITICAL: After processing inbox → DELETE the source inbox file BEFORE calling answer().
   Workflow: read inbox → process (write email/card/etc) → DELETE inbox file → answer(OK).
