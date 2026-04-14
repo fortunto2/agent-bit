@@ -101,6 +101,9 @@ INTENT_CLASSES = {
         "Fix the purchase ID prefix regression and do cleanup",
         "Move the file to the outbox directory",
         "Modify the contact record with new phone number",
+        "Queue up these docs for migration to my NORA",
+        "Queue up these docs for migration to my NORA: sending-email.md, parking-lot.md",
+        "Migrate these files to NORA: design-constraints.md, processing-inbox-email.md",
         # NOT: "Capture" / "Distill" — moved to intent_inbox
     ],
     # AI-NOTE: added prod finance/entity/date queries — were misclassified as non_work

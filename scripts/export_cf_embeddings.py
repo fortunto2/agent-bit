@@ -74,6 +74,9 @@ INTENT_CLASSES = {
         "Update the follow-up date to next month",
         "Fix the purchase ID prefix regression and do cleanup",
         "Modify the contact record with new phone number",
+        "Queue up these docs for migration to my NORA",
+        "Queue up these docs for migration to my NORA: sending-email.md, parking-lot.md",
+        "Migrate these files to NORA: design-constraints.md, processing-inbox-email.md",
     ],
     "intent_query": [
         "What is the email address of Heinrich Alina?",
@@ -94,7 +97,6 @@ INTENT_CLASSES = {
         "Review The Inbox!",
         "Handle the incoming queue",
         "WORK THROUGH INBOX",
-        "Queue up these docs for migration",
         "Work the oldest inbox message",
         "Review the next inbound note and act on it",
     ],
