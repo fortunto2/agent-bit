@@ -112,9 +112,9 @@ impl<C: LlmClient> Pac1Agent<C> {
         }
     }
 
-    /// Check if target model is Anthropic (rejects assistant prefill).
+    /// Anthropic models reject assistant prefill — same logic as LlmConfig::is_anthropic.
     fn is_anthropic(&self) -> bool {
-        self.model.contains("anthropic/") || self.model.contains("claude")
+        self.model.starts_with("anthropic/") || self.model.starts_with("claude")
     }
 
     /// Set the ML-classified instruction intent for task-type forcing.
