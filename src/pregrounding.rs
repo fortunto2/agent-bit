@@ -90,27 +90,24 @@ pub(crate) fn make_llm_config(
     extra_headers: &[(String, String)],
     temperature: f32,
 ) -> LlmConfig {
-    let mut cfg = if let Some(url) = base_url {
+    if let Some(url) = base_url {
         let mut cfg = LlmConfig::endpoint(api_key, url, model).temperature(temperature as f64).max_tokens(4096);
         cfg.use_chat_api = true;
+        cfg.extra_headers = extra_headers.to_vec();
         cfg.reasoning_effort = std::env::var("LLM_REASONING_EFFORT").ok();
         cfg.prompt_cache_key = std::env::var("LLM_PROMPT_CACHE_KEY").ok();
         cfg
     } else if !api_key.is_empty() {
         let mut cfg = LlmConfig::with_key(api_key, model).temperature(temperature as f64).max_tokens(4096);
+        cfg.extra_headers = extra_headers.to_vec();
         // Native API providers (Anthropic, Gemini) need genai backend
         cfg.use_genai = model.starts_with("claude") || model.starts_with("gemini");
         cfg
     } else {
-        LlmConfig::auto(model).temperature(temperature as f64).max_tokens(4096)
-    };
-    cfg.extra_headers = extra_headers.to_vec();
-    // AI-NOTE: session_id from telemetry — groups all LLM calls in same trial
-    #[cfg(feature = "telemetry")]
-    {
-        cfg.session_id = sgr_agent::telemetry::session_id();
+        let mut cfg = LlmConfig::auto(model).temperature(temperature as f64).max_tokens(4096);
+        cfg.extra_headers = extra_headers.to_vec();
+        cfg
     }
-    cfg
 }
 
 /// Dump trial debug data to disk.
@@ -161,6 +158,7 @@ pub(crate) async fn run_agent(
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
     sgr_mode: bool,
     dump_dir: Option<&str>,
+    session_id: Option<&str>,
 ) -> Result<(String, String, usize, usize)> {
     use crate::pipeline;
 
@@ -329,7 +327,8 @@ pub(crate) async fn run_agent(
     }
     eprintln!("  Prompt: {} bytes (skill: {})", system_prompt.len(), effective_label);
 
-    let config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
+    let mut config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
+    config.session_id = session_id.map(|s| s.to_string());
     let llm = Llm::new(&config);
 
     // AI-NOTE: FC probe moved to --probe CLI flag (not per-trial). Use `make probe` to test new models.

@@ -344,8 +344,9 @@ async fn main() -> Result<()> {
             };
             let log_url = format!("https://{}.eu.bitgn.com", trial.trial_id);
             eprintln!("  Trial: {}", trial.trial_id);
-            // AI-NOTE: Phoenix — session.id groups spans per trial, task_id labels each span
-            sgr_agent::set_session_id(format!("{}_{}", task_id, trial.trial_id));
+            // Session ID: trial identity — used for telemetry spans + LLM sticky routing
+            let session_id = format!("{}_{}", task_id, trial.trial_id);
+            sgr_agent::set_session_id(session_id.clone());
             sgr_agent::set_task_id(task_id.clone());
             eprintln!("  📋 Log: {}", log_url);
 
@@ -365,7 +366,7 @@ async fn main() -> Result<()> {
             let (last_msg, history, tool_calls, steps) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature,
-                &clf, &nli, ov.clone(), sgr_mode, Some(&dump_dir),
+                &clf, &nli, ov.clone(), sgr_mode, Some(&dump_dir), Some(&session_id),
             ).await;
             let agent_elapsed = t0.elapsed();
             verify_and_submit(
@@ -508,8 +509,9 @@ async fn run_leaderboard(
         eprintln!("\n━━━ Trial {}/{}: {} (task {}) ━━━",
             i + 1, total_trials, trial.trial_id, trial.task_id);
 
-        // AI-NOTE: Phoenix — session.id groups spans per trial, task_id labels each span
-        sgr_agent::set_session_id(format!("{}_{}", trial.task_id, trial.trial_id));
+        // Session ID: trial identity — used for telemetry spans + LLM sticky routing
+        let session_id = format!("{}_{}", trial.task_id, trial.trial_id);
+        sgr_agent::set_session_id(session_id.clone());
         sgr_agent::set_task_id(trial.task_id.clone());
 
         // Auto-dump trial data for dashboard
@@ -524,7 +526,7 @@ async fn run_leaderboard(
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
         let t0 = std::time::Instant::now();
-        let (last_msg, history, tool_calls, steps) = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir)).await;
+        let (last_msg, history, tool_calls, steps) = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir), Some(&session_id)).await;
         let agent_elapsed = t0.elapsed();
 
         // AI-NOTE: verifier + ensemble retry removed. Agent's answer is final.
@@ -547,7 +549,7 @@ async fn run_leaderboard(
                 let (last_msg2, history2, tool_calls2, _steps2) = run_trial(
                     &pcm2, &trial.instruction, fb_model, fb_base.as_deref(), fb_key, fb_headers,
                     max_steps, &prompt_mode, *fb_temp, *fb_plan_temp,
-                    &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir),
+                    &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir), Some(&session_id),
                 ).await;
                 verify_and_submit(
                     &pcm2, &trial.instruction, &last_msg2, &history2, tool_calls2,
@@ -556,7 +558,7 @@ async fn run_leaderboard(
             } else {
                 let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
                 let retry_temp = temperature + 0.1;
-                let (last_msg2, history2, tool_calls2, _steps2) = run_trial(&pcm2, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir)).await;
+                let (last_msg2, history2, tool_calls2, _steps2) = run_trial(&pcm2, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir), Some(&session_id)).await;
                 verify_and_submit(
                     &pcm2, &trial.instruction, &last_msg2, &history2, tool_calls2,
                     &model, base_url.as_deref(), &llm_api_key, &extra_headers, retry_temp,
@@ -657,8 +659,9 @@ async fn run_trial(
     outcome_validator: Option<Arc<classifier::OutcomeValidator>>,
     sgr_mode: bool,
     dump_dir: Option<&str>,
+    session_id: Option<&str>,
 ) -> (String, String, usize, usize) {
-    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator, sgr_mode, dump_dir).await {
+    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator, sgr_mode, dump_dir, session_id).await {
         Ok((last_msg, history, tool_calls, steps)) => (last_msg, history, tool_calls, steps),
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);
