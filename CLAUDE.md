@@ -104,14 +104,14 @@ Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep)
 
 Two execution modes, switchable via `SINGLE_PHASE` env var:
 
-**Two-phase (default):** 2 LLM calls per step
+**Two-phase (legacy, `TWO_PHASE=1`):** 2 LLM calls per step
 ```
 Step N:
   Call 1: tools_call([reasoning_tool])         → {task_type, security, plan, done, confidence}
   Call 2: tools_call([action_tools])            → search/read/write/delete/answer
 ```
 
-**Single-phase (`SINGLE_PHASE=simple`):** 1 LLM call per step, 2.5-3x faster
+**Single-phase (default):** 1 LLM call per step, 2.5-3x faster
 ```
 Step N:
   Call 1: tools_call([think, action_tools])    → think({type, security, plan}) + search/read/...
@@ -140,14 +140,14 @@ Step N:
 | Cost (tokens) | 2x | 1x | **-50%** |
 
 ```bash
-# Two-phase (default):
+# Single-phase (default, 2.5-3x faster):
 cargo run --release -- --provider or-haiku --task t001
 
-# Single-phase (2.5-3x faster):
-SINGLE_PHASE=simple cargo run --release -- --provider or-haiku --task t001
+# Legacy two-phase (for debugging or weak models):
+TWO_PHASE=1 cargo run --release -- --provider or-haiku --task t001
 
-# Leaderboard with single-phase:
-SINGLE_PHASE=simple make leaderboard NAME="haiku-sp" LB_PROVIDER=or-haiku
+# Leaderboard (P=3-5 for OpenRouter, 125 RPM limit):
+make leaderboard NAME="haiku-v1" LB_PROVIDER=or-haiku
 ```
 
 ### Shared Crates
