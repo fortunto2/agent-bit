@@ -386,8 +386,41 @@ impl<C: LlmClient> Pac1Agent<C> {
         }
 
 
+        // Fix: if answer() has empty message, strip it — let agent loop retry or auto-answer properly
+        // Check: answer with missing/empty/null message
+        let has_bad_answer = action_calls.iter().any(|tc| {
+            if tc.name != "answer" { return false; }
+            let msg = tc.arguments.get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("");
+            let is_bad = msg.is_empty() || msg.starts_with("type=") || msg.starts_with("{");
+            if is_bad {
+                eprintln!("    ⚠ answer message empty/meta: {:?}", tc.arguments);
+            }
+            is_bad
+        });
+        if has_bad_answer {
+            // Remove bad answer, add retry nudge
+            action_calls.retain(|tc| tc.name != "answer");
+            eprintln!("  🔁 answer() had empty message — retrying with nudge");
+            let mut retry_msgs = msgs.clone();
+            retry_msgs.push(Message::assistant(&format!("I've completed: {}", plan)));
+            retry_msgs.push(Message::user(
+                "Now call answer() with the EXACT answer text in message field. \
+                 For delete tasks: list deleted file paths. For lookups: the precise value requested."
+            ));
+            let retry_calls = self.client.tools_call(&retry_msgs, &all_defs).await?;
+            for tc in retry_calls {
+                if tc.name != "think" {
+                    action_calls.push(tc);
+                }
+            }
+        }
+
         let situation = format!("type={} | security={} | plan={}", task_type, security, plan.trunc(60));
-        let completed = action_calls.iter().any(|tc| matches!(tc.name.as_str(), "answer" | "finish_task"));
+        // NEVER set completed=true here — let agent_loop execute answer() tool first,
+        // then it'll complete on next step when tool_calls is empty
+        let completed = false;
 
         Ok((Decision {
             situation,
