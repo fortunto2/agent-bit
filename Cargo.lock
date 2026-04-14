@@ -2773,7 +2773,6 @@ dependencies = [
  "llm_json",
  "mailparse",
  "ndarray 0.16.1",
- "ort",
  "petgraph",
  "ratatui",
  "regex",
@@ -2784,9 +2783,9 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sgr-agent",
+ "sgr-agent-ml",
  "sgr-agent-tools",
  "strsim",
- "tokenizers",
  "tokio",
  "toml",
  "tracing",
@@ -3847,6 +3846,19 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "sgr-agent-ml"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ndarray 0.16.1",
+ "ort",
+ "serde",
+ "serde_json",
+ "tokenizers",
+ "tracing",
 ]
 
 [[package]]

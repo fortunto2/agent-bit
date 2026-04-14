@@ -22,6 +22,7 @@ path = "src/dashboard.rs"
 [dependencies]
 sgr-agent = { path = "../../shared/rust-code/crates/sgr-agent", default-features = false, features = ["agent", "oxide", "genai", "providers", "telemetry", "session"] }
 sgr-agent-tools = { path = "../../shared/rust-code/crates/sgr-agent-tools", features = ["eval", "patch"] }
+sgr-agent-ml = { path = "../../shared/rust-code/crates/sgr-agent-ml" }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }
@@ -33,7 +34,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
 toml = "0.8"
 futures = "0.3"
-ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
+# ort comes via sgr-agent-ml
 schemars = "0.8"
 ammonia = "4"
 mailparse = "0.15"
@@ -43,7 +44,7 @@ unicode-normalization = "0.1"
 bitgn-sdk = { path = "crates/bitgn-sdk" }
 connectrpc = { version = "0.3", features = ["client", "client-tls"] }
 webpki-roots = "0.26"
-tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+# tokenizers comes via sgr-agent-ml
 ndarray = "0.16"
 petgraph = "0.7"
 strsim = "0.11"

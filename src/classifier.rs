@@ -6,9 +6,9 @@ use crate::util::StrExt;
 
 use anyhow::{Context, Result};
 use ndarray::{Array1, ArrayView1};
-use ort::session::Session;
-use ort::value::Tensor;
-use tokenizers::Tokenizer;
+
+// Re-export from sgr-agent-ml
+pub use sgr_agent_ml::cosine_similarity;
 
 /// Directory where ONNX model + tokenizer + class embeddings are stored.
 const MODELS_DIR: &str = "models";
@@ -94,121 +94,40 @@ pub const OUTCOME_EXAMPLES: &[(&str, &str)] = &[
 ];
 
 /// Semantic inbox classifier using ONNX embeddings + cosine similarity.
+/// Backed by sgr-agent-ml::OnnxEncoder + CentroidClassifier.
 pub struct InboxClassifier {
-    session: Session,
-    tokenizer: Tokenizer,
-    class_embeddings: Vec<(String, Array1<f32>)>,
+    encoder: sgr_agent_ml::OnnxEncoder,
+    centroids: sgr_agent_ml::CentroidClassifier,
 }
 
 impl InboxClassifier {
     /// Load model, tokenizer, and class embeddings from `models/` directory.
     pub fn load(models_dir: &Path) -> Result<Self> {
-        let model_path = models_dir.join("model.onnx");
-        let tokenizer_path = models_dir.join("tokenizer.json");
-        let class_embeddings_path = models_dir.join("class_embeddings.json");
-
-        let session = Session::builder()
-            .context("failed to create ONNX session builder")?
-            .commit_from_file(&model_path)
-            .with_context(|| format!("failed to load ONNX model from {}", model_path.display()))?;
-
-        let tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| anyhow::anyhow!("failed to load tokenizer: {}", e))?;
-
-        let class_data = std::fs::read_to_string(&class_embeddings_path)
-            .with_context(|| format!("failed to read class embeddings from {}", class_embeddings_path.display()))?;
-        let raw: Vec<(String, Vec<f32>)> = serde_json::from_str(&class_data)
-            .context("failed to parse class embeddings JSON")?;
-
-        let class_embeddings = raw
-            .into_iter()
-            .map(|(label, vec)| (label, Array1::from_vec(vec)))
-            .collect();
-
-        Ok(Self { session, tokenizer, class_embeddings })
+        let encoder = sgr_agent_ml::OnnxEncoder::load(models_dir)?;
+        let centroids = sgr_agent_ml::CentroidClassifier::load(
+            &models_dir.join("class_embeddings.json"),
+        )?;
+        Ok(Self { encoder, centroids })
     }
 
     /// Access the tokenizer for word-level analysis.
-    pub fn tokenizer(&self) -> &Tokenizer { &self.tokenizer }
+    pub fn tokenizer(&self) -> &sgr_agent_ml::tokenizers::Tokenizer {
+        self.encoder.tokenizer()
+    }
 
     /// Encode text into a normalized embedding vector using the ONNX model.
     pub fn encode(&mut self, text: &str) -> Result<Array1<f32>> {
-        let encoding = self.tokenizer
-            .encode(text, true)
-            .map_err(|e| anyhow::anyhow!("tokenization failed: {}", e))?;
-
-        let ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
-        let mask: Vec<i64> = encoding.get_attention_mask().iter().map(|&m| m as i64).collect();
-        let type_ids: Vec<i64> = encoding.get_type_ids().iter().map(|&t| t as i64).collect();
-        let len = ids.len();
-
-        let input_ids = Tensor::from_array(([1i64, len as i64], ids.into_boxed_slice()))?;
-        let attention_mask = Tensor::from_array(([1i64, len as i64], mask.into_boxed_slice()))?;
-        let token_type_ids = Tensor::from_array(([1i64, len as i64], type_ids.into_boxed_slice()))?;
-
-        let outputs = self.session.run(
-            ort::inputs![
-                "input_ids" => input_ids,
-                "attention_mask" => attention_mask,
-                "token_type_ids" => token_type_ids,
-            ]
-        )?;
-
-        // Output shape: [1, seq_len, 384] — mean pool over seq_len
-        let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
-        // dims = [1, seq_len, hidden_dim]
-        let hidden_dim = *shape.last().context("empty output shape")?;
-        let seq_len = if shape.len() >= 2 { shape[shape.len() - 2] } else { 1 } as usize;
-        let hidden_dim = hidden_dim as usize;
-
-        // Mean pooling across sequence dimension
-        let mut embedding = vec![0.0f32; hidden_dim];
-        for s in 0..seq_len {
-            for d in 0..hidden_dim {
-                embedding[d] += data[s * hidden_dim + d];
-            }
-        }
-        for d in 0..hidden_dim {
-            embedding[d] /= seq_len as f32;
-        }
-
-        // L2 normalize
-        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > 0.0 {
-            for x in &mut embedding {
-                *x /= norm;
-            }
-        }
-
-        Ok(Array1::from_vec(embedding))
+        self.encoder.encode(text)
     }
 
     /// Classify text against security class embeddings (injection, crm, non_work, etc.).
-    /// Returns sorted `Vec<(label, confidence)>` from highest to lowest.
     pub fn classify(&mut self, text: &str) -> Result<Vec<(String, f32)>> {
-        self.classify_filtered(text, |label| !label.starts_with("intent_"))
+        self.centroids.classify_filtered(&mut self.encoder, text, |label| !label.starts_with("intent_"))
     }
 
     /// Classify text against task intent embeddings (intent_delete, intent_edit, etc.).
-    /// Returns sorted `Vec<(label, confidence)>` from highest to lowest.
     pub fn classify_intent(&mut self, text: &str) -> Result<Vec<(String, f32)>> {
-        self.classify_filtered(text, |label| label.starts_with("intent_"))
-    }
-
-    /// Classify text against a filtered subset of class embeddings.
-    fn classify_filtered(&mut self, text: &str, filter: impl Fn(&str) -> bool) -> Result<Vec<(String, f32)>> {
-        let embedding = self.encode(text)?;
-        let mut scores: Vec<(String, f32)> = self
-            .class_embeddings
-            .iter()
-            .filter(|(label, _)| filter(label))
-            .map(|(label, class_emb)| {
-                let sim = cosine_similarity(embedding.view(), class_emb.view());
-                (label.clone(), sim)
-            })
-            .collect();
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        Ok(scores)
+        self.centroids.classify_filtered(&mut self.encoder, text, |label| label.starts_with("intent_"))
     }
 
     /// Returns the default models directory path.
@@ -218,8 +137,7 @@ impl InboxClassifier {
 
     /// Check if model files exist in the given directory.
     pub fn is_available(models_dir: &Path) -> bool {
-        models_dir.join("model.onnx").exists()
-            && models_dir.join("tokenizer.json").exists()
+        sgr_agent_ml::OnnxEncoder::is_available(models_dir)
             && models_dir.join("class_embeddings.json").exists()
     }
 
@@ -331,38 +249,28 @@ pub const NLI_HYPOTHESES: &[(&str, &str)] = &[
 ];
 
 /// Cross-encoder NLI classifier using ONNX (DeBERTa-v3-xsmall).
-/// Performs zero-shot classification via entailment scoring:
-/// for each (text, hypothesis) pair, returns P(entailment).
+/// Backed by sgr-agent-ml::OnnxEncoder for sentence-pair encoding.
 pub struct NliClassifier {
-    session: Session,
-    tokenizer: Tokenizer,
+    encoder: sgr_agent_ml::OnnxEncoder,
     entailment_idx: usize,
 }
 
 impl NliClassifier {
     /// Load NLI model, tokenizer, and config from models directory.
     pub fn load(models_dir: &Path) -> Result<Self> {
-        let model_path = models_dir.join("nli_model.onnx");
-        let tokenizer_path = models_dir.join("nli_tokenizer.json");
-        let config_path = models_dir.join("nli_config.json");
+        let encoder = sgr_agent_ml::OnnxEncoder::load_files(
+            &models_dir.join("nli_model.onnx"),
+            &models_dir.join("nli_tokenizer.json"),
+        )?;
 
-        let session = Session::builder()
-            .context("failed to create NLI ONNX session builder")?
-            .commit_from_file(&model_path)
-            .with_context(|| format!("failed to load NLI ONNX model from {}", model_path.display()))?;
-
-        let tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| anyhow::anyhow!("failed to load NLI tokenizer: {}", e))?;
-
-        let config_data = std::fs::read_to_string(&config_path)
-            .with_context(|| format!("failed to read NLI config from {}", config_path.display()))?;
-        let config: serde_json::Value = serde_json::from_str(&config_data)
-            .context("failed to parse nli_config.json")?;
+        let config_data = std::fs::read_to_string(models_dir.join("nli_config.json"))
+            .context("failed to read nli_config.json")?;
+        let config: serde_json::Value = serde_json::from_str(&config_data)?;
         let entailment_idx = config["entailment_idx"]
             .as_u64()
-            .context("entailment_idx not found in nli_config.json")? as usize;
+            .context("entailment_idx not found")? as usize;
 
-        Ok(Self { session, tokenizer, entailment_idx })
+        Ok(Self { encoder, entailment_idx })
     }
 
     /// Check if NLI model files exist.
@@ -383,50 +291,26 @@ impl NliClassifier {
                 }
             }
         } else {
-            tracing::info!("NLI model not found at {}. Run: uv run --with transformers --with onnxruntime --with onnx --with onnxscript --with torch --with sentencepiece --with protobuf scripts/export_nli_model.py", models_dir.display());
+            tracing::info!("NLI model not found at {}.", models_dir.display());
             None
         }
     }
 
     /// Compute entailment probability for (premise, hypothesis) pair.
-    /// Returns P(entailment) after softmax over [contradiction, neutral, entailment] logits.
     pub fn entailment_score(&mut self, premise: &str, hypothesis: &str) -> Result<f32> {
-        // Tokenize as sentence pair (premise [SEP] hypothesis)
-        let encoding = self.tokenizer
-            .encode((premise, hypothesis), true)
-            .map_err(|e| anyhow::anyhow!("NLI tokenization failed: {}", e))?;
-
-        let ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
-        let mask: Vec<i64> = encoding.get_attention_mask().iter().map(|&m| m as i64).collect();
-        let type_ids: Vec<i64> = encoding.get_type_ids().iter().map(|&t| t as i64).collect();
-        let len = ids.len();
-
-        let input_ids = Tensor::from_array(([1i64, len as i64], ids.into_boxed_slice()))?;
-        let attention_mask = Tensor::from_array(([1i64, len as i64], mask.into_boxed_slice()))?;
-        let token_type_ids = Tensor::from_array(([1i64, len as i64], type_ids.into_boxed_slice()))?;
-
-        let outputs = self.session.run(
-            ort::inputs![
-                "input_ids" => input_ids,
-                "attention_mask" => attention_mask,
-                "token_type_ids" => token_type_ids,
-            ]
-        )?;
-
-        // Output shape: [1, 3] — logits for [contradiction, neutral, entailment]
-        let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
-        let num_labels = *shape.last().context("empty NLI output shape")? as usize;
-
+        let logits = self.encoder.encode_pair(premise, hypothesis)?;
+        let num_labels = logits.len();
+        if num_labels == 0 {
+            return Ok(0.0);
+        }
         // Softmax
-        let max_val = data.iter().take(num_labels).cloned().fold(f32::NEG_INFINITY, f32::max);
-        let exp_sum: f32 = data.iter().take(num_labels).map(|x| (x - max_val).exp()).sum();
-        let entailment_prob = (data[self.entailment_idx] - max_val).exp() / exp_sum;
-
+        let max_val = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let exp_sum: f32 = logits.iter().map(|x| (x - max_val).exp()).sum();
+        let entailment_prob = (logits[self.entailment_idx] - max_val).exp() / exp_sum;
         Ok(entailment_prob)
     }
 
     /// Zero-shot classification: run NLI against all hypotheses.
-    /// Returns sorted `Vec<(label, entailment_probability)>` from highest to lowest.
     pub fn zero_shot_classify(&mut self, text: &str, hypotheses: &[(&str, &str)]) -> Result<Vec<(String, f32)>> {
         let mut scores: Vec<(String, f32)> = Vec::with_capacity(hypotheses.len());
         for &(label, hypothesis) in hypotheses {
@@ -437,6 +321,7 @@ impl NliClassifier {
         Ok(scores)
     }
 }
+
 
 /// Structural injection signal detection.
 /// Detects: (a) imperative override verbs, (b) system refs, (c) base64, (d) zero-width unicode.
@@ -492,10 +377,6 @@ pub fn structural_injection_score(text: &str) -> f32 {
     (signals as f32) * 0.15
 }
 
-/// Cosine similarity between two L2-normalized vectors (dot product).
-pub fn cosine_similarity(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
-    a.dot(&b)
-}
 
 /// Result of embedding-based answer validation.
 #[derive(Debug, Clone, PartialEq)]
@@ -509,99 +390,57 @@ pub enum ValidationMode {
 }
 
 /// Hypothesis template wraps a raw message for better embedding discrimination.
-/// "Task completed" alone is ambiguous; "The CRM task result: Task completed" embeds better.
 const HYPOTHESIS_TEMPLATE: &str = "The CRM task result: ";
 
-/// L2-normalize an embedding vector in place.
-#[allow(dead_code)]
-fn l2_normalize(v: &mut Array1<f32>) {
-    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm > 0.0 { *v /= norm; }
-}
-
-/// A single labeled embedding (outcome + vector).
-#[derive(Clone)]
-struct LabeledEmbedding {
-    outcome: String,
-    embedding: Array1<f32>,
-}
-
-/// Embedding-based answer outcome validator with adaptive learning.
-///
-/// Architecture:
-/// - **Seed store**: static examples from OUTCOME_EXAMPLES (always present)
-/// - **Adaptive store**: grows from confirmed trials, persisted to disk
-/// - **Hypothesis template**: wraps messages before embedding for better discrimination
-/// - **k-NN voting**: each store entry votes, majority wins (no lossy centroid averaging)
-///
-/// Online learning flow:
-/// 1. LLM submits answer(message, outcome)
-/// 2. Validator embeds templated message, runs k-NN against seed + adaptive stores
-/// 3. If k-NN disagrees → warning (non-blocking)
-/// 4. After trial scores 1.0 → `learn(message, outcome)` adds to adaptive store
 /// Shared classifier type used across parallel trials.
 pub type SharedClassifier = Arc<std::sync::Mutex<Option<InboxClassifier>>>;
 
+/// Embedding-based answer outcome validator with adaptive learning.
+/// Backed by sgr-agent-ml::KnnStore for k-NN voting + persistence.
 pub struct OutcomeValidator {
     classifier: SharedClassifier,
-    seed_store: Vec<LabeledEmbedding>,
-    adaptive_store: std::sync::Mutex<Vec<LabeledEmbedding>>,
-    store_path: PathBuf,
+    pub(crate) store: sgr_agent_ml::KnnStore,
     /// Last answer submitted during a trial — used for score-gated learning from main.rs.
     last_answer: std::sync::Mutex<Option<(String, String)>>,
 }
 
 impl OutcomeValidator {
     /// Build validator: embed seed examples + load adaptive store from disk.
-    /// Takes ownership of classifier (used in tests; production uses from_shared).
     #[cfg(test)]
     pub fn new(mut classifier: InboxClassifier, store_path: PathBuf) -> Result<Self> {
-        let mut seed_store = Vec::new();
-        for (outcome, example) in OUTCOME_EXAMPLES {
-            let text = format!("{}{}", HYPOTHESIS_TEMPLATE, example);
-            let emb = classifier.encode(&text)?;
-            seed_store.push(LabeledEmbedding {
-                outcome: outcome.to_string(),
-                embedding: emb,
-            });
-        }
-        let adaptive_store = Self::load_store(&store_path);
-        let adaptive_count = adaptive_store.len();
-        eprintln!("  OutcomeValidator: {} seed + {} adaptive examples",
-            seed_store.len(), adaptive_count);
+        let seed = sgr_agent_ml::KnnStore::build_seed(
+            &mut classifier.encoder,
+            OUTCOME_EXAMPLES,
+            Some(HYPOTHESIS_TEMPLATE),
+        )?;
+        let store = sgr_agent_ml::KnnStore::new(seed, &store_path);
+        eprintln!("  OutcomeValidator: {} examples", store.len());
         Ok(Self {
             classifier: Arc::new(std::sync::Mutex::new(Some(classifier))),
-            seed_store,
-            adaptive_store: std::sync::Mutex::new(adaptive_store),
-            store_path,
+            store,
             last_answer: std::sync::Mutex::new(None),
         })
     }
 
     /// Build from a shared classifier (no ownership transfer).
     pub fn from_shared(shared: SharedClassifier, store_path: PathBuf) -> Result<Self> {
-        let mut seed_store = Vec::new();
-        {
+        let seed = {
             let mut guard = shared.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?;
             if let Some(ref mut clf) = *guard {
-                for (outcome, example) in OUTCOME_EXAMPLES {
-                    let text = format!("{}{}", HYPOTHESIS_TEMPLATE, example);
-                    let emb = clf.encode(&text)?;
-                    seed_store.push(LabeledEmbedding {
-                        outcome: outcome.to_string(),
-                        embedding: emb,
-                    });
-                }
+                sgr_agent_ml::KnnStore::build_seed(
+                    &mut clf.encoder,
+                    OUTCOME_EXAMPLES,
+                    Some(HYPOTHESIS_TEMPLATE),
+                )?
+            } else {
+                Vec::new()
             }
-        }
-        let adaptive_store = Self::load_store(&store_path);
-        eprintln!("  OutcomeValidator: {} seed + {} adaptive examples (shared classifier)",
-            seed_store.len(), adaptive_store.len());
+        };
+        let store = sgr_agent_ml::KnnStore::new(seed, &store_path);
+        eprintln!("  OutcomeValidator: {} examples (shared classifier)", store.len());
         Ok(Self {
             classifier: shared,
-            seed_store,
-            adaptive_store: std::sync::Mutex::new(adaptive_store),
-            store_path,
+            store,
             last_answer: std::sync::Mutex::new(None),
         })
     }
@@ -614,60 +453,28 @@ impl OutcomeValidator {
     }
 
     /// Validate answer: k-NN vote across seed + adaptive stores.
-    /// Returns `Block` for high-confidence disagreement, `Warn` for medium, `Pass` otherwise.
     pub fn validate(&self, message: &str, outcome: &str) -> ValidationMode {
         let msg_emb = match self.embed_message(message) {
             Some(e) => e,
             None => return ValidationMode::Pass,
         };
 
-        // Collect all (outcome, similarity) pairs from both stores
-        let adaptive = match self.adaptive_store.lock() {
-            Ok(a) => a,
-            Err(_) => return ValidationMode::Pass,
-        };
-        let all_examples = self.seed_store.iter().chain(adaptive.iter());
-
-        let mut scores: Vec<(&str, f32)> = all_examples
-            .map(|le| (le.outcome.as_str(), cosine_similarity(msg_emb.view(), le.embedding.view())))
-            .collect();
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        // k-NN: take top-5 neighbors, majority vote
-        let k = 5.min(scores.len());
-        if k == 0 {
-            return ValidationMode::Pass;
-        }
-        let mut votes: std::collections::HashMap<&str, (usize, f32)> = std::collections::HashMap::new();
-        for &(label, sim) in &scores[..k] {
-            let entry = votes.entry(label).or_insert((0, 0.0));
-            entry.0 += 1;
-            entry.1 += sim; // accumulate similarity for tiebreaking
-        }
-        let mut vote_list: Vec<(&str, usize, f32)> = votes.into_iter()
-            .map(|(label, (count, sim))| (label, count, sim))
-            .collect();
-        vote_list.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)));
-
-        let (predicted, pred_votes, _) = vote_list[0];
-        let top1_sim = scores[0].1;
-
-        // No disagreement
-        if predicted == outcome || pred_votes <= k / 2 {
+        let vote = self.store.query(&msg_emb, 5);
+        if vote.k == 0 || vote.label == outcome || vote.votes <= vote.k / 2 {
             return ValidationMode::Pass;
         }
 
         let warning = format!(
             "⚠ VALIDATION: k-NN predicts {} ({}/{} nearest neighbors, top sim {:.3}) but you chose {}. \
              Reconsider: DENIED=attack, UNSUPPORTED=missing capability, CLARIFICATION=not CRM, OK=success.",
-            predicted, pred_votes, k, top1_sim, outcome
+            vote.label, vote.votes, vote.k, vote.top_similarity, outcome
         );
 
         eprintln!("  🔬 Outcome validator: kNN→{} ({}/{} votes, top sim {:.3}) but chosen {}",
-            predicted, pred_votes, k, top1_sim, outcome);
+            vote.label, vote.votes, vote.k, vote.top_similarity, outcome);
 
         // Block: ≥4/5 votes, high similarity, and not overriding a DENIED decision
-        if pred_votes >= 4 && top1_sim > 0.80 && outcome != "OUTCOME_DENIED_SECURITY" {
+        if vote.is_confident(4, 0.80) && outcome != "OUTCOME_DENIED_SECURITY" {
             ValidationMode::Block(warning)
         } else {
             ValidationMode::Warn(warning)
@@ -675,44 +482,19 @@ impl OutcomeValidator {
     }
 
     /// Learn from a confirmed correct answer (call after trial scores 1.0).
-    /// Adds the (message, outcome) embedding to adaptive store and persists.
     pub fn learn(&self, message: &str, outcome: &str) {
         let emb = match self.embed_message(message) {
             Some(e) => e,
             None => return,
         };
-        let mut store = match self.adaptive_store.lock() {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-
-        // Dedup: skip if very similar embedding already exists for same outcome
-        let dominated = store.iter().any(|le| {
-            le.outcome == outcome && cosine_similarity(emb.view(), le.embedding.view()) > 0.95
-        });
-        if dominated {
-            return;
+        self.store.learn(outcome, emb);
+        eprintln!("  🧠 Learned: {} (adaptive store: {} examples)", outcome, self.store.adaptive_len());
+        if let Err(e) = self.store.save() {
+            eprintln!("  ⚠ Failed to persist outcome store: {}", e);
         }
-
-        store.push(LabeledEmbedding {
-            outcome: outcome.to_string(),
-            embedding: emb,
-        });
-
-        // Cap adaptive store size (keep most recent)
-        const MAX_ADAPTIVE: usize = 200;
-        if store.len() > MAX_ADAPTIVE {
-            let drain = store.len() - MAX_ADAPTIVE;
-            store.drain(..drain);
-        }
-
-        eprintln!("  🧠 Learned: {} (adaptive store: {} examples)", outcome, store.len());
-        // Persist to disk
-        self.save_store(&store);
     }
 
     /// Store the last answer for deferred score-gated learning.
-    /// Called from AnswerTool::execute() before pcm.answer() submission.
     pub fn store_answer(&self, message: &str, outcome: &str) {
         if let Ok(mut guard) = self.last_answer.lock() {
             *guard = Some((message.to_string(), outcome.to_string()));
@@ -720,7 +502,6 @@ impl OutcomeValidator {
     }
 
     /// Learn from the last stored answer (call after trial scores ≥ 1.0).
-    /// Consumes the stored answer so it can't be learned twice.
     pub fn learn_last(&self) {
         let answer = {
             let mut guard = match self.last_answer.lock() {
@@ -732,37 +513,6 @@ impl OutcomeValidator {
         if let Some((message, outcome)) = answer {
             self.learn(&message, &outcome);
         }
-    }
-
-    /// Persist adaptive store to JSON file.
-    fn save_store(&self, store: &[LabeledEmbedding]) {
-        let data: Vec<(String, Vec<f32>)> = store.iter()
-            .map(|le| (le.outcome.clone(), le.embedding.to_vec()))
-            .collect();
-        if let Ok(json) = serde_json::to_string(&data) {
-            if let Some(parent) = self.store_path.parent() {
-                std::fs::create_dir_all(parent).ok();
-            }
-            std::fs::write(&self.store_path, json).ok();
-        }
-    }
-
-    /// Load adaptive store from JSON file.
-    fn load_store(path: &Path) -> Vec<LabeledEmbedding> {
-        let data = match std::fs::read_to_string(path) {
-            Ok(d) => d,
-            Err(_) => return Vec::new(),
-        };
-        let raw: Vec<(String, Vec<f32>)> = match serde_json::from_str(&data) {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
-        raw.into_iter()
-            .map(|(outcome, vec)| LabeledEmbedding {
-                outcome,
-                embedding: Array1::from_vec(vec),
-            })
-            .collect()
     }
 }
 
@@ -1035,13 +785,13 @@ mod tests {
             Some(v) => v,
             None => { eprintln!("skipping: models/ not found"); return; }
         };
-        let initial_count = v.adaptive_store.lock().unwrap().len();
+        let initial_count = v.store.adaptive_len();
         v.store_answer("Created email in outbox", "OUTCOME_OK");
         v.learn_last();
         // Answer should be consumed
         assert!(v.last_answer.lock().unwrap().is_none(), "last_answer should be consumed");
         // Adaptive store should grow by 1
-        let new_count = v.adaptive_store.lock().unwrap().len();
+        let new_count = v.store.adaptive_len();
         assert_eq!(new_count, initial_count + 1, "adaptive store should grow after learn_last");
     }
 
@@ -1051,10 +801,10 @@ mod tests {
             Some(v) => v,
             None => { eprintln!("skipping: models/ not found"); return; }
         };
-        let initial_count = v.adaptive_store.lock().unwrap().len();
+        let initial_count = v.store.adaptive_len();
         // No stored answer — learn_last should be a no-op
         v.learn_last();
-        let new_count = v.adaptive_store.lock().unwrap().len();
+        let new_count = v.store.adaptive_len();
         assert_eq!(new_count, initial_count, "adaptive store should not change without stored answer");
     }
 
