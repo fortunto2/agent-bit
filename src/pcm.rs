@@ -159,20 +159,8 @@ impl PcmClient {
         if let Some(reason) = crate::policy::check_write(path) {
             anyhow::bail!("BLOCKED: '{}' is protected ({}) — cannot overwrite", path, reason);
         }
-        // Dedup: skip if content identical to cached version (avoids duplicate RPC + harness penalty)
+        // AI-NOTE: write dedup removed — copy_file needs write RPC even when content unchanged
         let norm = path.trim_start_matches('/');
-        if start_line == 0 && end_line == 0 {
-            if let Ok(cache) = self.read_cache.lock() {
-                if let Some(cached) = cache.get(norm) {
-                    // Compare body (skip shell header "$ cat path\n")
-                    let cached_body = cached.lines().skip(1).collect::<Vec<_>>().join("\n");
-                    if cached_body.trim() == content.trim() {
-                        eprintln!("    📦 write dedup: {} (content unchanged)", norm);
-                        return Ok(());
-                    }
-                }
-            }
-        }
         self.count_rpc();
         self.inner.write(proto::WriteRequest {
             path: path.into(), content: content.into(), start_line, end_line, ..Default::default()
