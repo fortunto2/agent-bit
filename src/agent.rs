@@ -258,9 +258,9 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             msgs.extend_from_slice(messages);
         }
 
-        // Inject action ledger + observation log for context
+        // AI-NOTE: ledger as user msg — Opus/Sonnet reject trailing assistant prefill
         if let Some(ledger) = self.ledger_text() {
-            msgs.push(Message::assistant(&ledger));
+            msgs.push(Message::user(&ledger));
         }
 
         // Workflow nudges — unified state machine (budget, write, capture-delete)
