@@ -159,6 +159,14 @@ impl<C: LlmClient> Pac1Agent<C> {
     pub fn record_action(&self, step: u32, tool_name: &str, key_arg: &str, result: &str) {
         let mut ledger = self.action_ledger.lock().unwrap();
         let entry = format_ledger_entry(step, tool_name, key_arg, result);
+        // Semantic dedup: skip if same tool+arg as last entry (read same file twice)
+        if let Some(last) = ledger.last() {
+            let last_prefix = last.split(" → ").next().unwrap_or("");
+            let new_prefix = entry.split(" → ").next().unwrap_or("");
+            if last_prefix == new_prefix {
+                return;
+            }
+        }
         if ledger.len() >= LEDGER_MAX {
             ledger.remove(0);
         }
