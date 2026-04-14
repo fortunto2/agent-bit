@@ -90,24 +90,27 @@ pub(crate) fn make_llm_config(
     extra_headers: &[(String, String)],
     temperature: f32,
 ) -> LlmConfig {
-    if let Some(url) = base_url {
+    let mut cfg = if let Some(url) = base_url {
         let mut cfg = LlmConfig::endpoint(api_key, url, model).temperature(temperature as f64).max_tokens(4096);
         cfg.use_chat_api = true;
-        cfg.extra_headers = extra_headers.to_vec();
         cfg.reasoning_effort = std::env::var("LLM_REASONING_EFFORT").ok();
         cfg.prompt_cache_key = std::env::var("LLM_PROMPT_CACHE_KEY").ok();
         cfg
     } else if !api_key.is_empty() {
         let mut cfg = LlmConfig::with_key(api_key, model).temperature(temperature as f64).max_tokens(4096);
-        cfg.extra_headers = extra_headers.to_vec();
         // Native API providers (Anthropic, Gemini) need genai backend
         cfg.use_genai = model.starts_with("claude") || model.starts_with("gemini");
         cfg
     } else {
-        let mut cfg = LlmConfig::auto(model).temperature(temperature as f64).max_tokens(4096);
-        cfg.extra_headers = extra_headers.to_vec();
-        cfg
+        LlmConfig::auto(model).temperature(temperature as f64).max_tokens(4096)
+    };
+    cfg.extra_headers = extra_headers.to_vec();
+    // AI-NOTE: session_id from telemetry — groups all LLM calls in same trial
+    #[cfg(feature = "telemetry")]
+    {
+        cfg.session_id = sgr_agent::telemetry::session_id();
     }
+    cfg
 }
 
 /// Dump trial debug data to disk.
@@ -497,7 +500,7 @@ pub(crate) async fn run_agent(
         .register_deferred(tools::ListSkillsTool(skill_registry.clone()))
         .register_deferred(tools::GetSkillTool(skill_registry.clone()));
 
-    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, Some(workflow.clone()));
+    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, model, Some(workflow.clone()));
     agent.set_intent(&instruction_intent);
     let mut ctx = AgentContext::new();
 
