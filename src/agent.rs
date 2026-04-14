@@ -89,10 +89,6 @@ pub struct Pac1Agent<C: LlmClient> {
     forced_intent: Mutex<String>,
     /// Unified workflow state machine — replaces all scattered guards
     workflow: Option<crate::workflow::SharedWorkflowState>,
-    // AI-NOTE: single_phase — merge Phase 1 (reasoning) + Phase 2 (action) into ONE LLM call.
-    // Opt-in via SINGLE_PHASE=1 env var. Skips reflexion, confidence gating, router filtering.
-    /// Single-phase mode: reasoning + action in one LLM call per step.
-    single_phase: bool,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -100,11 +96,7 @@ impl<C: LlmClient> Pac1Agent<C> {
         client: C, system_prompt: impl Into<String>, max_steps: u32, prompt_mode: &str,
         no_prefill: bool,
         workflow: Option<crate::workflow::SharedWorkflowState>,
-        single_phase: bool,
     ) -> Self {
-        if single_phase {
-            eprintln!("  🔬 Single-phase mode: reasoning + action in ONE LLM call per step");
-        }
         Self {
             client,
             system_prompt: system_prompt.into(),
@@ -117,7 +109,6 @@ impl<C: LlmClient> Pac1Agent<C> {
             confidence_reflections: AtomicU32::new(0),
             forced_intent: Mutex::new(String::new()),
             workflow,
-            single_phase,
         }
     }
 
@@ -145,116 +136,6 @@ impl<C: LlmClient> Pac1Agent<C> {
         } else {
             Some(format!("Previous actions:\n{}", ledger.join("\n")))
         }
-    }
-}
-
-impl<C: LlmClient> Pac1Agent<C> {
-    /// Single-phase decision: ONE LLM call per step = reasoning (text) + action (tool calls).
-    /// Skips reflexion, confidence gating, router filtering for maximum speed.
-    async fn decide_single_phase(
-        &self,
-        messages: &[Message],
-        tools: &ToolRegistry,
-    ) -> Result<(Decision, Option<String>), AgentError> {
-        // Build messages with system prompt
-        let mut msgs = Vec::with_capacity(messages.len() + 2);
-        let has_system = messages.iter().any(|m| m.role == Role::System);
-        if !has_system && !self.system_prompt.is_empty() {
-            msgs.push(Message::system(&self.system_prompt));
-        }
-
-        // Smart trim (same as two-phase)
-        let est_tokens: usize = messages.iter().map(|m| m.content.len() / 4).sum();
-        if est_tokens > 12000 {
-            let mut dropped = 0usize;
-            let compactable_count = messages.iter().filter(|m| m.compactable).count();
-            let keep_recent = 6;
-            let skip = compactable_count.saturating_sub(keep_recent);
-            let mut compact_seen = 0;
-            for m in messages {
-                if m.compactable {
-                    compact_seen += 1;
-                    if compact_seen <= skip {
-                        dropped += 1;
-                        continue;
-                    }
-                }
-                msgs.push(m.clone());
-            }
-            if dropped > 0 {
-                eprintln!("  📐 Context trim: dropped {} compactable messages", dropped);
-            }
-        } else {
-            msgs.extend_from_slice(messages);
-        }
-
-        // Inject ledger
-        if let Some(ledger) = self.ledger_text() {
-            if self.no_prefill {
-                msgs.push(Message::user(&ledger));
-            } else {
-                msgs.push(Message::assistant(&ledger));
-            }
-        }
-
-        // Workflow nudges
-        if let Some(ref wf) = self.workflow {
-            for nudge in wf.lock().unwrap().advance_step() {
-                eprintln!("  📌 Workflow: {}", nudge.trunc(80));
-                msgs.push(Message::user(&nudge));
-            }
-        }
-
-        // Single-phase prompt: ask model to think in text, then call tool
-        msgs.push(Message::user(
-            "Think about: task_type (search/edit/delete/security), security (safe/suspicious/blocked), \
-             and your plan. If blocked, call answer() with OUTCOME_DENIED_SECURITY. \
-             If task is done, call answer() with the result. \
-             Otherwise, call the next tool to make progress."
-        ));
-
-        // All tools available (only filter security if ML forced intent says so)
-        let step = self.step_count.fetch_add(1, Ordering::SeqCst);
-        let intent = self.forced_intent.lock().unwrap().clone();
-        let forced_type = detect_forced_task_type(&intent).unwrap_or("");
-        let defs = if forced_type == "security" {
-            filter_tools_for_task("security", step, tools.to_defs())
-        } else {
-            tools.to_defs()
-        };
-
-        // ONE call: tool_choice=auto, get text reasoning + tool calls
-        let (tool_calls, text) = self.client.tools_call_with_text(&msgs, &defs).await?;
-
-        // Log reasoning text (truncated)
-        if !text.is_empty() {
-            eprintln!("  💭 Reasoning: {}", text.trunc(120));
-        }
-
-        // Parse task_type/security from text for logging (best-effort regex)
-        let situation = if !text.is_empty() {
-            text.trunc(200).to_string()
-        } else {
-            format!("step {}, {} tool calls", step, tool_calls.len())
-        };
-
-        // Completion: no tool calls OR answer() called
-        let completed = tool_calls.is_empty()
-            || tool_calls.iter().any(|tc| tc.name == "answer" || tc.name == "finish_task");
-
-        if tool_calls.is_empty() && !completed {
-            eprintln!("  ⚠ Single-phase: no tool calls and not completed");
-        }
-
-        Ok((
-            Decision {
-                situation,
-                task: vec![],
-                tool_calls,
-                completed,
-            },
-            None,
-        ))
     }
 }
 
@@ -348,11 +229,6 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         tools: &ToolRegistry,
         previous_response_id: Option<&str>,
     ) -> Result<(Decision, Option<String>), AgentError> {
-        // ── Single-phase mode: ONE LLM call = reasoning + action ──────
-        if self.single_phase {
-            return self.decide_single_phase(messages, tools).await;
-        }
-
         // Prepare messages — smart trim using Message.compactable flag
         // compactable=false (default) → critical, never dropped
         // compactable=true → safe to drop when context overflows
@@ -733,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_tool_has_required_fields() {
+    fn reasoning_tool_has_cascade_fields() {
         let def = reasoning_tool_def();
         assert_eq!(def.name, "reasoning");
         let required = def.parameters["required"].as_array().unwrap();
@@ -742,11 +618,14 @@ mod tests {
         assert!(required_names.contains(&"security_assessment"));
         assert!(required_names.contains(&"task_type"));
         assert!(required_names.contains(&"plan"));
+        assert!(required_names.contains(&"verification"));
         assert!(required_names.contains(&"done"));
-        // Optional fields exist but aren't required
+        // Cascade cues in descriptions
         let props = def.parameters["properties"].as_object().unwrap();
-        assert!(props.contains_key("verification"));
-        assert!(props.contains_key("confidence"));
+        let sec = props["security_assessment"]["description"].as_str().unwrap();
+        assert!(sec.contains("FIRST"), "security should say FIRST");
+        let tt = props["task_type"]["description"].as_str().unwrap();
+        assert!(tt.contains("THEN"), "task_type should say THEN");
     }
 
     #[test]
