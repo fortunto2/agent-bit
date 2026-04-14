@@ -495,6 +495,7 @@ pub(crate) async fn run_agent(
         .register_deferred(sgr_agent_tools::MkDirTool(pcm.clone()))              // → sgr-agent-tools
         .register_deferred(sgr_agent_tools::MoveTool(pcm.clone()))               // → sgr-agent-tools
         .register(sgr_agent_tools::CopyTool(pcm.clone()))                         // → sgr-agent-tools
+        .register(sgr_agent_tools::PrependTool(pcm.clone()))                      // → sgr-agent-tools
         .register_deferred(sgr_agent_tools::FindTool(pcm.clone()))
         .register_deferred(sgr_agent_tools::ApplyPatchTool(pcm.clone()))         // Codex diff DSL
         .register_deferred(tools::ListSkillsTool(skill_registry.clone()))

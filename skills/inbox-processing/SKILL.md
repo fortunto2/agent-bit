@@ -93,11 +93,15 @@ OTP/CHANNEL MESSAGE IN INBOX:
   4. Delete docs/channels/otp.txt after successful OTP processing (not for verification-only)
 
 WORKFLOW — Inbox says "OCR" or references existing bill/invoice files:
-  "OCR" means: rewrite the referenced files in place (the file already exists).
-  1. Find referenced files via search
-  2. For EACH file: copy_file({"source": "{path}", "target": "{path}"}) — in-place rewrite
-  3. Delete inbox source → answer(OK)
-  This preserves content byte-for-byte. Do NOT re-type content manually.
+  "OCR" means: add structured YAML frontmatter to existing finance files.
+  1. Read 99_system/schemas/finance-record-frontmatter.md → learn the YAML fields
+  2. Read 99_system/workflows/ocr-records.md → learn the workflow
+  3. Find referenced files via search
+  4. Read EACH file to extract metadata (amounts, dates, counterparty, etc.)
+  5. MUST use prepend_to_file for EACH file — do NOT use write():
+     prepend_to_file({"path": "50_finance/purchases/some_bill.md", "header": "---\nrecord_type: bill\nbill_id: bill.slug\nalias: slug\npurchased_on: 2026-01-15\ntotal_eur: 44\ncounterparty: Vendor Name\nproject: Project\nlines:\n  - item: Widget\n    qty: 2\n    unit_price_eur: 22\n---"})
+     This preserves the original body byte-for-byte. NEVER re-type the body content.
+  6. Delete inbox source → answer(OK)
 
 WORKFLOW — Inbox contains NEW bill/invoice/purchase to file:
   If inbox IS the bill itself (not a reference to existing files):
