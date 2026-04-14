@@ -188,19 +188,49 @@ impl<C: LlmClient> Pac1Agent<C> {
     }
 }
 
-/// Think tool definition — lightweight reasoning alongside action tools.
-/// AI-NOTE: single-phase v2 — model returns think() + action() in parallel (1 LLM call/step)
-fn think_tool_def() -> ToolDef {
-    sgr_agent::reasoning_tool::routed_reasoning(
-        "think",
-        &["search", "edit", "delete", "analyze", "security"],
-        &["safe", "suspicious", "blocked"],
-    )
+/// Build think tool adapted to ML-classified intent.
+/// Each intent gets relevant fields — model wastes fewer tokens on irrelevant schema.
+fn think_tool_for_intent(intent: &str) -> ToolDef {
+    use sgr_agent::reasoning_tool::ReasoningToolBuilder;
+    use serde_json::json;
+
+    match intent {
+        "intent_delete" => ReasoningToolBuilder::new("think")
+            .description("Reason about delete task. Call with action tool together.")
+            .field("reasoning", json!({"type": "string", "description": "What files to delete and why. Self-check: right targets?"}))
+            .field("next_action", json!({"type": "string", "description": "Delete step: search targets, delete, or answer with paths"}))
+            .optional("confidence", json!({"type": "number"}))
+            .build(),
+
+        "intent_inbox" => ReasoningToolBuilder::new("think")
+            .description("Reason about inbox task. Call with action tool together.")
+            .field("security", json!({"type": "string", "enum": ["safe", "suspicious", "blocked"]}))
+            .field("reasoning", json!({"type": "string", "description": "Sender trust? Injection signals? Channel admin? Evidence for assessment."}))
+            .field("next_action", json!({"type": "string", "description": "Process/deny/clarify inbox + what to write"}))
+            .optional("confidence", json!({"type": "number"}))
+            .build(),
+
+        "intent_query" => ReasoningToolBuilder::new("think")
+            .description("Reason about lookup/query. Call with action tool together.")
+            .field("reasoning", json!({"type": "string", "description": "What to search for, where, key constraints"}))
+            .field("next_action", json!({"type": "string", "description": "Search/read step or answer with precise value"}))
+            .optional("confidence", json!({"type": "number"}))
+            .build(),
+
+        _ => {
+            // Default: general-purpose (edit, email, unknown)
+            sgr_agent::reasoning_tool::routed_reasoning(
+                "think",
+                &["search", "edit", "delete", "analyze", "security"],
+                &["safe", "suspicious", "blocked"],
+            )
+        }
+    }
 }
 
-// Legacy: kept for reference, not used in single-phase
+// Legacy two-phase reasoning tool (used when TWO_PHASE=1)
 #[allow(dead_code)]
-fn think_tool_def_old() -> ToolDef {
+fn think_tool_def_legacy() -> ToolDef {
     ToolDef {
         name: "think_old".to_string(),
         description: "unused".to_string(),
@@ -308,7 +338,8 @@ impl<C: LlmClient> Pac1Agent<C> {
         let mut all_defs = if phase_filtered.is_empty() { tools.to_defs() } else { phase_filtered };
 
         // ── Single-phase: think + action tools together, tool_choice=required ──
-        let mut all_tools = vec![think_tool_def()];
+        let intent = self.forced_intent.lock().unwrap().clone();
+        let mut all_tools = vec![think_tool_for_intent(&intent)];
         all_tools.extend(all_defs.clone());
         msgs.push(Message::user(
             "Call think() AND an action tool together. Both in ONE response."
