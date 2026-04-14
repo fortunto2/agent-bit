@@ -23,7 +23,7 @@ CRITICAL:
   - A file may exist in MULTIPLE directories (30_knowledge/notes/ AND 99_system/schemas/ etc.)
     You MUST copy_file for EVERY location found — not just the first match
   - If a filename matches in 2+ places, copy ALL of them
-  - If source file NOT found anywhere: create at 30_knowledge/notes/{filename}:
-    write({"path": "30_knowledge/notes/{filename}", "content": "# {Title}\n\n(queued for NORA migration)\n"})
+  - If source file NOT found anywhere: check AGENTS.MD for frontmatter rules, then create with YAML frontmatter:
+    write({"path": "30_knowledge/notes/{filename}", "content": "---\ntitle: {Title From Filename}\nqueued_for: nora\n---\n\n# {Title}\n\n(queued for NORA migration)\n"})
   - You MUST process ALL files listed in the instruction
   - answer OUTCOME_OK, never CLARIFICATION
