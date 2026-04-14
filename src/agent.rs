@@ -85,10 +85,14 @@ pub enum SinglePhaseMode {
 
 impl SinglePhaseMode {
     pub fn from_env() -> Self {
+        // Single-phase is default. TWO_PHASE=1 enables legacy two-phase mode.
+        if std::env::var("TWO_PHASE").is_ok() {
+            return Self::Off;
+        }
         match std::env::var("SINGLE_PHASE").as_deref() {
-            Ok("1") | Ok("simple") => Self::Simple,
-            Ok("2") | Ok("hybrid") => Self::Hybrid,
-            _ => Self::Off,
+            Ok("off") | Ok("0") => Self::Off,
+            Ok("hybrid") => Self::Hybrid,
+            _ => Self::Simple, // default
         }
     }
 }
