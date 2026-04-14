@@ -75,8 +75,8 @@ pub struct Pac1Agent<C: LlmClient> {
     system_prompt: String,
     max_steps: u32,
     prompt_mode: String,
-    /// Model name — used for provider-specific behavior (e.g. Anthropic prefill).
-    model: String,
+    /// Computed from LlmConfig::is_anthropic() — Anthropic rejects assistant prefill.
+    is_anthropic: bool,
     /// Step counter for tool pruning (analyze route: read-only first, then full)
     step_count: AtomicU32,
     /// Compact history of previous tool calls for LLM context
@@ -94,7 +94,7 @@ pub struct Pac1Agent<C: LlmClient> {
 impl<C: LlmClient> Pac1Agent<C> {
     pub fn with_config(
         client: C, system_prompt: impl Into<String>, max_steps: u32, prompt_mode: &str,
-        model: &str,
+        is_anthropic: bool,
         workflow: Option<crate::workflow::SharedWorkflowState>,
     ) -> Self {
         Self {
@@ -102,7 +102,7 @@ impl<C: LlmClient> Pac1Agent<C> {
             system_prompt: system_prompt.into(),
             max_steps,
             prompt_mode: prompt_mode.to_string(),
-            model: model.to_string(),
+            is_anthropic,
             step_count: AtomicU32::new(0),
             action_ledger: Mutex::new(Vec::new()),
             reflexion_count: AtomicU32::new(0),
@@ -110,11 +110,6 @@ impl<C: LlmClient> Pac1Agent<C> {
             forced_intent: Mutex::new(String::new()),
             workflow,
         }
-    }
-
-    /// Anthropic models reject assistant prefill — same logic as LlmConfig::is_anthropic.
-    fn is_anthropic(&self) -> bool {
-        self.model.starts_with("anthropic/") || self.model.starts_with("claude")
     }
 
     /// Set the ML-classified instruction intent for task-type forcing.
@@ -269,7 +264,7 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
 
         // AI-NOTE: Anthropic rejects trailing assistant prefill — use user role for ledger
         if let Some(ledger) = self.ledger_text() {
-            if self.is_anthropic() {
+            if self.is_anthropic {
                 msgs.push(Message::user(&ledger));
             } else {
                 msgs.push(Message::assistant(&ledger));
