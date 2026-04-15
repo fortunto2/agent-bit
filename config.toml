@@ -204,3 +204,25 @@ api_key_env = "OPENROUTER_API_KEY"
 model = "anthropic/claude-opus-4.6:beta"
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-m27]
+model = "minimax/minimax-m2.7"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-katcoder]
+model = "kwaipilot/kat-coder-pro-v2"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.or-seed-lite]
+model = "bytedance-seed/seed-2.0-lite"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+# Tested 2026-04-15, rejected:
+# mimo-v2-pro: slow (288s), weak FC (0/3)
+# elephant-alpha: fast (5s) but 0/3 — broken FC
+# qwen3.6-plus: 0/2 — weak FC
+# trinity-large-thinking: 0/2 — weak FC
+# mistral-small-2603: 1/2 (t006 ok, t007 fail)
