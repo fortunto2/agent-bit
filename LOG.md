@@ -2,26 +2,36 @@
 
 ## Summary
 
-PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF Workers AI).
+PAC1 agent для BitGN challenge. Rust + sgr-agent + multi-model (Haiku/Gemma/Nemotron).
 
-**Текущий best:** **95.3% (41/43)** Nemotron | **Backup:** Seed-2.0-pro 90.7% | **Цель:** 98%+
-**Стабильные:** 35/43 | **Fixed:** 11 | **Non-det:** 2 (t03, t07) | **Persistent fail:** 0
-**Провайдеры:** 30+ моделей протестировано, 5 рабочих (Nemotron, Seed, Qwen-Next, Kimi-K2, GPT-5.4)
+**Текущий best:** **80% (68/85)** Haiku single-phase | **Backup:** Gemma4 62% (FREE) | **Цель:** 85%+
+**Benchmark:** 104 tasks (prod), non-deterministic PCM layout per trial
+**Провайдеры:** Haiku (OpenRouter $1/M), Gemma4 (CF FREE), Nemotron (CF FREE)
+**Always-fail:** 11 tasks (8 inbox + 3 NORA) — main gap vs competitor (103/104)
 
-### Архитектура (что есть)
+### Архитектура (2026-04-15)
 
+- **Single-phase agent (DEFAULT):** 1 LLM call/step (parallel think+action FC), 2.5-3x faster
+- **SGR adaptive planning:** remaining_steps field forces multi-step coherence (Abdullin pattern)
+- **Intent-adaptive think tool:** schema changes per ML-classified intent (delete/inbox/query/default)
 - **Pipeline SM** (pipeline.rs): New→Classified→InboxScanned→SecurityChecked→Ready
-- **Workflow SM** (workflow.rs): Reading→Acting→Cleanup→Done — guards, nudges, outbox limit
-- **Skills** (skills/): 13 SKILL.md files — hot-reloadable domain prompts via sgr_agent::skills
-- **Feature Matrix** (feature_matrix.rs): 11 features × N messages — batch scoring, correlation
-- **ML classifier** (classifier.rs): ONNX MiniLM-L6-v2 — security + intent + account embeddings
-- **NLI classifier** (classifier.rs): DeBERTa-v3-xsmall — zero-shot entailment
-- **CRM graph** (crm_graph.rs): petgraph + ONNX embeddings — contacts, accounts, semantic cross-account
-- **Policy** (policy.rs): file protection, channel trust, ephemeral files
-- **Hooks** (hooks.rs): data-driven tool completion hooks from AGENTS.MD
-- **Verifier** (pregrounding.rs): 3-vote self-consistency + step-count override policy
-- **OutcomeValidator** (classifier.rs): adaptive kNN store
-- **Parallel IO**: tokio::join! + futures::join_all across pipeline stages
+- **Workflow SM** (workflow.rs): Reading→Acting→Cleanup→Done — phase hints to think tool
+- **Skills** (skills/): 15 SKILL.md files — hot-reloadable domain prompts
+- **ML classifier** (classifier.rs): via sgr-agent-ml (OnnxEncoder, CentroidClassifier, KnnStore)
+- **CRM graph** (crm_graph.rs): petgraph + ONNX embeddings — search annotation, cross-account
+- **Tools** (14 core + 8 deferred): CopyTool, PrependTool (byte-perfect), batch tools
+- **Fibonacci retry**: 1s, 2s, 3s, 5s, 8s for 429 rate limits (5 attempts)
+- **OutcomeValidator** (classifier.rs): adaptive kNN via sgr-agent-ml::KnnStore
+- **Provider capabilities**: LlmConfig.rejects_prefill(), cache_ttl, pin_provider
+- **ReasoningToolBuilder** (sgr-agent): extensible think tool schema
+- **AgentRuntime trait** (sgr-agent): unified context interface
+
+### Persistent failures (11 tasks, all 4 runs)
+
+| Type | Tasks | Count | Root cause |
+|------|-------|-------|------------|
+| Inbox processing | t015, t040, t047, t065, t066, t090, t093, t097 | 8 | Complex multi-step inbox (OCR/outbox/email creation) |
+| NORA migration | t042, t067, t092 | 3 | 3-5 files, search coverage + copy |
 
 ### Проблемные зоны
 
@@ -76,6 +86,15 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + Nemotron-120B (free via CF
 | 04-13 | `6466cbc` | gpt-5.4-mini | 54.8% (57/104) | **PROD** P=104, 3:28 — step optimization baseline |
 | 04-13 | `71bb220` | gpt-5.4 | **74.0%** (74/100) | **PROD** P=104, 3:19 — 19 inbox + 4 NORA + 3 finance |
 | 04-13 | `71bb220` | nemotron | ⏳ running | **PROD** P=5 — v22 stepfix |
+| 04-14 | — | haiku 2-phase | **70.2%** (73/104) | **PROD** P=1 — baseline two-phase |
+| 04-14 | — | sonnet 2-phase | **72.1%** (75/104) | **PROD** P=1 — Sonnet baseline |
+| 04-14 | — | haiku single-ph | **80.0%** (68/85) | **PROD** P=3 — single-phase + inbox fixes |
+| 04-14 | — | haiku sp P=20 | 63.5% (66/104) | **PROD** rate limited (719x 429) |
+| 04-14 | — | gemma4 single-ph | 61.5% (64/104) | **PROD** P=1 — single-phase v1 |
+| 04-14 | — | gemma4 sp v3 | 59.6% (62/104) | **PROD** P=1 — ThinkContext (no improvement) |
+| 04-15 | `1dc8a8c` | gemma4 sp v3 | 59.6% (62/104) | **PROD** P=1 — outcome rules |
+| 04-15 | `ae4ffd9` | — | — | SGR adaptive planning + remaining_steps |
+| 04-15 | `1dc8a8c` | — | — | run_prefix = "rustman.org" |
 
 ---
 
