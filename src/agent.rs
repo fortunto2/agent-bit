@@ -224,6 +224,14 @@ fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
     // AI-NOTE: models reason through free-text "reasoning" field, not enum fields.
     // Tested: both Gemma and Haiku fill security/task_type with defaults, actual reasoning in text.
     // Keeping schema minimal: reasoning + next_action. Context in description.
+    // Skill hint in description — model sees it on EVERY step (not just initial message)
+    let skill_hint = match ctx.skill_name.as_str() {
+        "inbox-processing" => " Use prepend_to_file for OCR (add YAML frontmatter). Use copy_file for verbatim copy. Delete inbox after processing.",
+        "nora-migration" => " Use copy_file for each file (byte-perfect). Search ALL locations.",
+        "capture-distill" => " Write capture + card + thread, then delete source.",
+        _ => "",
+    };
+
     let ctx_desc = if ctx.inbox_count > 0 {
         format!(" [{} inbox message{}{}{}]",
             ctx.inbox_count,
@@ -236,10 +244,10 @@ fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
     };
 
     let desc = match intent {
-        "intent_delete" => format!("Reason about delete task{ctx_desc}. Call with action tool.{outcome_hint}"),
-        "intent_inbox" => format!("Reason about inbox task{ctx_desc}. Call with action tool.{outcome_hint}"),
+        "intent_delete" => format!("Reason about delete task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}"),
+        "intent_inbox" => format!("Reason about inbox task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}"),
         "intent_query" => format!("Reason about lookup{ctx_desc}. Call with action tool.{outcome_hint}"),
-        _ => format!("Reason about the task{ctx_desc}. Call with action tool.{outcome_hint}"),
+        _ => format!("Reason about the task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}"),
     };
 
     match intent {
