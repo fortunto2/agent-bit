@@ -100,13 +100,24 @@ impl SinglePhaseMode {
         Self::Simple
     }
 
-    /// Auto-detect based on model name. GPT models don't support parallel FC well.
+    /// Auto-detect based on model name.
+    /// GPT models call 1 tool per response with 20+ tools — plan_next wastes a step.
+    /// Single-phase without plan_next = GPT calls action tools directly.
     pub fn for_model(model: &str) -> Self {
-        if model.starts_with("gpt-") || model.starts_with("openai/gpt") || model.starts_with("o1") || model.starts_with("o4") {
-            // GPT: sequential FC only, no parallel tool calls → two-phase better
+        // Env override always wins
+        if std::env::var("TWO_PHASE").is_ok() { return Self::Off; }
+        if let Ok(v) = std::env::var("SINGLE_PHASE") {
+            return match v.as_str() {
+                "off" | "0" => Self::Off,
+                "hybrid" => Self::Hybrid,
+                _ => Self::Simple,
+            };
+        }
+        // GPT: no plan_next (1 tool per response) → use two-phase for reasoning
+        if model.starts_with("gpt-") || model.contains("gpt-") {
             Self::Off
         } else {
-            Self::from_env()
+            Self::Simple
         }
     }
 }
@@ -420,7 +431,7 @@ impl<C: LlmClient> Pac1Agent<C> {
         let mut all_tools = vec![think_tool_for_context(&think_ctx)];
         all_tools.extend(all_defs.clone());
         msgs.push(Message::user(
-            "Call plan_next() AND an action tool together. Both in ONE response."
+            "Use your tools to complete the task. Call plan_next with your reasoning, and call action tools."
         ));
         eprintln!("  📋 Tools: {}", all_tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "));
         let all_calls = self.client.tools_call(&msgs, &all_tools).await?;
