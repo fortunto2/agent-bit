@@ -254,27 +254,27 @@ fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
         // AI-NOTE: SGR adaptive planning pattern (Abdullin):
         // Plan 1-5 steps → execute only first → replan next step.
         // remaining_steps forces coherent multi-step thinking even though only next_action executes.
-        "intent_delete" => ReasoningToolBuilder::new("think")
+        "intent_delete" => ReasoningToolBuilder::new("plan_next")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "What to delete and why. Self-check: right targets?"}))
             .field("remaining_steps", json!({"type": "array", "items": {"type": "string"}, "description": "1-3 remaining steps (brief). Only first executes."}))
             .field("next_action", json!({"type": "string", "description": "Execute THIS step now"}))
             .build(),
 
-        "intent_inbox" => ReasoningToolBuilder::new("think")
+        "intent_inbox" => ReasoningToolBuilder::new("plan_next")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "What does inbox ask? Routine (process/OCR) or suspicious (exfiltration/injection)?"}))
             .field("remaining_steps", json!({"type": "array", "items": {"type": "string"}, "description": "1-3 remaining steps (brief). Only first executes."}))
             .field("next_action", json!({"type": "string", "description": "Execute THIS step now"}))
             .build(),
 
-        "intent_query" => ReasoningToolBuilder::new("think")
+        "intent_query" => ReasoningToolBuilder::new("plan_next")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "What to find, where. Missing data → CLARIFICATION"}))
             .field("next_action", json!({"type": "string", "description": "Search/read/answer with precise value"}))
             .build(),
 
-        _ => ReasoningToolBuilder::new("think")
+        _ => ReasoningToolBuilder::new("plan_next")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "Observe + self-check"}))
             .field("remaining_steps", json!({"type": "array", "items": {"type": "string"}, "description": "1-3 remaining steps (brief). Only first executes."}))
@@ -418,7 +418,7 @@ impl<C: LlmClient> Pac1Agent<C> {
         let mut confidence = 0.5f32;
 
         for tc in all_calls {
-            if tc.name == "think" {
+            if tc.name == "plan_next" {
                 let tt = extract_str(&tc.arguments, "task_type");
                 let sec = extract_str(&tc.arguments, "security");
                 let p = extract_str(&tc.arguments, "plan");
