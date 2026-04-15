@@ -503,6 +503,13 @@ pub(crate) async fn run_agent(
 
     let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, config.rejects_prefill(), Some(workflow.clone()));
     agent.set_intent(&instruction_intent);
+    agent.set_think_context(agent::ThinkContext {
+        intent: instruction_intent.clone(),
+        inbox_count: ready.inbox_files.len(),
+        has_threat: ready.inbox_files.iter().any(|f| f.security.ml_label == "injection" || f.security.ml_label == "social_engineering"),
+        has_otp: ready.inbox_files.iter().any(|f| f.security.ml_label == "credential"),
+        skill_name: effective_label.to_string(),
+    });
     let mut ctx = AgentContext::new();
 
     // AI-NOTE: planning phase removed — agent plans in Phase 1 reasoning (plan field in CoT).

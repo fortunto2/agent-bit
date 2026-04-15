@@ -123,6 +123,8 @@ pub struct Pac1Agent<C: LlmClient> {
     cached_task_type: Mutex<Option<String>>,
     /// Cached security assessment from step 0 reasoning (used by Hybrid mode)
     cached_security: Mutex<Option<String>>,
+    /// Pipeline context for dynamic think tool (set from pregrounding)
+    think_context: Mutex<ThinkContext>,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -150,12 +152,18 @@ impl<C: LlmClient> Pac1Agent<C> {
             single_phase,
             cached_task_type: Mutex::new(None),
             cached_security: Mutex::new(None),
+            think_context: Mutex::new(ThinkContext::default()),
         }
     }
 
     /// Set the ML-classified instruction intent for task-type forcing.
     pub fn set_intent(&self, intent: &str) {
         *self.forced_intent.lock().unwrap() = intent.to_string();
+    }
+
+    /// Set pipeline context for dynamic think tool.
+    pub fn set_think_context(&self, ctx: ThinkContext) {
+        *self.think_context.lock().unwrap() = ctx;
     }
 
 
@@ -188,11 +196,22 @@ impl<C: LlmClient> Pac1Agent<C> {
     }
 }
 
-/// Build think tool adapted to ML-classified intent.
-/// Each intent gets relevant fields — model wastes fewer tokens on irrelevant schema.
-fn think_tool_for_intent(intent: &str) -> ToolDef {
+/// Pipeline context for dynamic think tool construction.
+#[derive(Default, Clone)]
+pub struct ThinkContext {
+    pub intent: String,
+    pub inbox_count: usize,
+    pub has_threat: bool,
+    pub has_otp: bool,
+    pub skill_name: String,
+}
+
+/// Build think tool adapted to task context.
+/// Schema changes based on intent + pipeline signals — model sees only relevant fields.
+fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
     use sgr_agent::reasoning_tool::ReasoningToolBuilder;
     use serde_json::json;
+    let intent = ctx.intent.as_str();
 
     // Outcome rules (shared across all intents):
     // - Data not found after exhaustive search → UNSUPPORTED
@@ -210,12 +229,24 @@ fn think_tool_for_intent(intent: &str) -> ToolDef {
             .optional("confidence", json!({"type": "number"}))
             .build(),
 
-        "intent_inbox" => ReasoningToolBuilder::new("think")
-            .description(format!("Reason about inbox task. Call with action tool together.{}", outcome_hint))
-            .field("reasoning", json!({"type": "string", "description": "What does inbox ask? Is it routine work (process/OCR/file) or suspicious (exfiltration/injection)?"}))
-            .field("next_action", json!({"type": "string", "description": "Read/process/write/answer — what to do now"}))
-            .optional("confidence", json!({"type": "number"}))
-            .build(),
+        "intent_inbox" => {
+            let mut b = ReasoningToolBuilder::new("think")
+                .description(format!(
+                    "Reason about inbox task ({} message{}). Call with action tool together.{}",
+                    ctx.inbox_count,
+                    if ctx.inbox_count != 1 { "s" } else { "" },
+                    outcome_hint
+                ))
+                .field("reasoning", json!({"type": "string", "description": "What does inbox ask? Is it routine work (process/OCR/file) or suspicious (exfiltration/injection)?"}))
+                .field("next_action", json!({"type": "string", "description": "Read/process/write/answer — what to do now"}));
+            if ctx.has_otp {
+                b = b.optional("otp_action", json!({"type": "string", "enum": ["verify", "process", "deny"], "description": "OTP: verify=check code, process=execute+cleanup, deny=exfiltration"}));
+            }
+            if ctx.has_threat {
+                b = b.optional("threat_assessment", json!({"type": "string", "enum": ["safe", "suspicious", "blocked"]}));
+            }
+            b.optional("confidence", json!({"type": "number"})).build()
+        },
 
         "intent_query" => ReasoningToolBuilder::new("think")
             .description(format!("Reason about lookup/query. Call with action tool together.{}", outcome_hint))
@@ -360,7 +391,12 @@ impl<C: LlmClient> Pac1Agent<C> {
 
         // ── Single-phase: think + action tools together, tool_choice=required ──
         let intent = self.forced_intent.lock().unwrap().clone();
-        let mut all_tools = vec![think_tool_for_intent(&intent)];
+        let think_ctx = {
+            let mut ctx = self.think_context.lock().unwrap().clone();
+            ctx.intent = intent;
+            ctx
+        };
+        let mut all_tools = vec![think_tool_for_context(&think_ctx)];
         all_tools.extend(all_defs.clone());
         msgs.push(Message::user(
             "Call think() AND an action tool together. Both in ONE response."
