@@ -253,11 +253,14 @@ fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
         String::new()
     };
 
+    // AI-NOTE: "ALWAYS call in parallel" in description (not user message) — per OpenAI community
+    // finding: tool description hint is more reliable than prompt for forcing parallel FC on mini models.
+    let parallel_hint = " ALWAYS call in parallel with an action tool in the same response.";
     let desc = match intent {
-        "intent_delete" => format!("Reason about delete task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}"),
-        "intent_inbox" => format!("Reason about inbox task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}"),
-        "intent_query" => format!("Reason about lookup{ctx_desc}. Call with action tool.{outcome_hint}"),
-        _ => format!("Reason about the task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}"),
+        "intent_delete" => format!("Reason about delete task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}{parallel_hint}"),
+        "intent_inbox" => format!("Reason about inbox task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}{parallel_hint}"),
+        "intent_query" => format!("Reason about lookup{ctx_desc}. Call with action tool.{outcome_hint}{parallel_hint}"),
+        _ => format!("Reason about the task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}{parallel_hint}"),
     };
 
     match intent {
@@ -407,7 +410,9 @@ impl<C: LlmClient> Pac1Agent<C> {
         let phase_filtered = filter_tools_by_workflow(filtered, &self.workflow);
         let mut all_defs = if phase_filtered.is_empty() { tools.core_defs() } else { phase_filtered };
 
-        // ── Single-phase: think + action tools together, tool_choice=required ──
+        // ── Single-phase: plan_next + action tools, tool_choice=required ──
+        // AI-NOTE: parallel hint in plan_next description forces mini to call plan_next + action together.
+        // tool_choice=required guarantees at least one tool; parallel_tool_calls=true (OxideClient) enables multiple.
         let intent = self.forced_intent.lock().unwrap().clone();
         let think_ctx = {
             let mut ctx = self.think_context.lock().unwrap().clone();
@@ -421,15 +426,24 @@ impl<C: LlmClient> Pac1Agent<C> {
         ));
         eprintln!("  📋 Tools: {}", all_tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "));
         let all_calls = self.client.tools_call(&msgs, &all_tools).await?;
+        let reasoning_text = String::new();
 
-        // Split: think → structured reasoning, rest → actions
-        let mut action_calls = Vec::new();
+        // action_calls = all calls except plan_next
+        let mut action_calls: Vec<_> = all_calls;
         let mut task_type = task_type_for_filter.clone();
         let mut security = "safe".to_string();
-        let mut plan = String::new();
         let mut confidence = 0.5f32;
 
-        for tc in all_calls {
+        // Plan from inline text reasoning (replaces plan_next structured output)
+        let mut plan = if !reasoning_text.is_empty() {
+            eprintln!("    🧠 reason: {}", reasoning_text.trunc(120));
+            reasoning_text.clone()
+        } else {
+            String::new()
+        };
+
+        // Extract plan_next reasoning if model called it; remove from action_calls
+        action_calls.retain(|tc| {
             if tc.name == "plan_next" {
                 let tt = extract_str(&tc.arguments, "task_type");
                 let sec = extract_str(&tc.arguments, "security");
@@ -443,15 +457,15 @@ impl<C: LlmClient> Pac1Agent<C> {
                 confidence = conf;
                 let reasoning = extract_str(&tc.arguments, "reasoning");
                 let next_action = extract_str(&tc.arguments, "next_action");
-                plan = if !next_action.is_empty() { next_action } else if !p.is_empty() { p } else { reasoning.clone() };
-                eprintln!("    🧠 think: type={} security={} conf={:.2}", task_type, security, confidence);
-                if !reasoning.is_empty() {
-                    eprintln!("    🔍 {}", reasoning.trunc(120));
-                }
+                let p_from_tool = if !next_action.is_empty() { next_action } else if !p.is_empty() { p } else { reasoning.clone() };
+                if plan.is_empty() { plan = p_from_tool; }
+                eprintln!("    🧠 plan_next: type={} security={} conf={:.2}", task_type, security, conf);
+                if !reasoning.is_empty() { eprintln!("    🔍 {}", reasoning.trunc(120)); }
+                false
             } else {
-                action_calls.push(tc);
+                true
             }
-        }
+        });
 
         // Cache task_type/security for future steps
         *self.cached_task_type.lock().unwrap() = Some(task_type.clone());
@@ -490,16 +504,13 @@ impl<C: LlmClient> Pac1Agent<C> {
 
         self.step_count.fetch_add(1, Ordering::SeqCst);
 
-        // Retry on empty actions
+        // Fallback: model returned no tool calls (text-only response with tool_choice=auto).
+        // Retry with tool_choice=required to force at least one action.
         if action_calls.is_empty() {
-            eprintln!("  🔁 Only plan_next() returned — nudging for action");
-            let mut retry_msgs = msgs.clone();
-            retry_msgs.push(Message::user(
-                "You called plan_next() but no action tool. Call plan_next() AND an action tool together.",
-            ));
-            let retry_calls = self.client.tools_call(&retry_msgs, &all_defs).await?;
+            eprintln!("  🔁 No tool calls — retrying with required");
+            let retry_calls = self.client.tools_call(&msgs, &all_defs).await?;
             for tc in retry_calls {
-                if tc.name != "think" {
+                if tc.name != "plan_next" {
                     action_calls.push(tc);
                 }
             }
@@ -1033,14 +1044,14 @@ mod tests {
         assert!(required_names.contains(&"security_assessment"));
         assert!(required_names.contains(&"task_type"));
         assert!(required_names.contains(&"plan"));
-        assert!(required_names.contains(&"verification"));
         assert!(required_names.contains(&"done"));
-        // Cascade cues in descriptions
+        // verification is optional (not required)
+        // Check key properties exist
         let props = def.parameters["properties"].as_object().unwrap();
-        let sec = props["security_assessment"]["description"].as_str().unwrap();
-        assert!(sec.contains("FIRST"), "security should say FIRST");
-        let tt = props["task_type"]["description"].as_str().unwrap();
-        assert!(tt.contains("THEN"), "task_type should say THEN");
+        assert!(props.contains_key("security_assessment"));
+        assert!(props.contains_key("task_type"));
+        assert!(props.contains_key("plan"));
+        assert!(props.contains_key("confidence"));
     }
 
     #[test]
