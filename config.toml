@@ -227,6 +227,16 @@ output = 25.00
 cache_read = 0.50
 cache_write = 6.25
 
+[providers.or-gpt54mini]
+model = "openai/gpt-5.4-mini"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+use_chat_api = true
+# Responses API stateless on OpenRouter — no benefit over chat completions
+[providers.or-gpt54mini.pricing]
+input = 0.30
+output = 1.25
+
 [providers.or-m27]
 model = "minimax/minimax-m2.7"
 base_url = "https://openrouter.ai/api/v1"
