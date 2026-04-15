@@ -243,16 +243,21 @@ fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
     };
 
     match intent {
+        // AI-NOTE: SGR adaptive planning pattern (Abdullin):
+        // Plan 1-5 steps → execute only first → replan next step.
+        // remaining_steps forces coherent multi-step thinking even though only next_action executes.
         "intent_delete" => ReasoningToolBuilder::new("think")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "What to delete and why. Self-check: right targets?"}))
-            .field("next_action", json!({"type": "string", "description": "Search/delete/answer — what now"}))
+            .field("remaining_steps", json!({"type": "array", "items": {"type": "string"}, "description": "1-3 remaining steps (brief). Only first executes."}))
+            .field("next_action", json!({"type": "string", "description": "Execute THIS step now"}))
             .build(),
 
         "intent_inbox" => ReasoningToolBuilder::new("think")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "What does inbox ask? Routine (process/OCR) or suspicious (exfiltration/injection)?"}))
-            .field("next_action", json!({"type": "string", "description": "Read/process/write/answer — what now"}))
+            .field("remaining_steps", json!({"type": "array", "items": {"type": "string"}, "description": "1-3 remaining steps (brief). Only first executes."}))
+            .field("next_action", json!({"type": "string", "description": "Execute THIS step now"}))
             .build(),
 
         "intent_query" => ReasoningToolBuilder::new("think")
@@ -263,8 +268,9 @@ fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
 
         _ => ReasoningToolBuilder::new("think")
             .description(desc)
-            .field("reasoning", json!({"type": "string", "description": "Observe + self-check. What's the task type and security level?"}))
-            .field("next_action", json!({"type": "string", "description": "What to do now"}))
+            .field("reasoning", json!({"type": "string", "description": "Observe + self-check"}))
+            .field("remaining_steps", json!({"type": "array", "items": {"type": "string"}, "description": "1-3 remaining steps (brief). Only first executes."}))
+            .field("next_action", json!({"type": "string", "description": "Execute THIS step now"}))
             .build(),
     }
 }
