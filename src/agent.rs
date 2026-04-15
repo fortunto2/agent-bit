@@ -330,7 +330,18 @@ impl<C: LlmClient> Pac1Agent<C> {
             }
         }
 
-        // ── Build action tool list (no think tool — reasoning in text) ──
+        // ── Workflow phase hint in user message ──
+        if let Some(ref wf) = self.workflow {
+            let phase = {
+                let guard = wf.lock().unwrap();
+                guard.phase_name().to_string()
+            };
+            if !phase.is_empty() {
+                msgs.push(Message::user(&format!("Workflow phase: {}", phase)));
+            }
+        }
+
+        // ── Build action tool list ──
         let task_type_for_filter = {
             let cached = self.cached_task_type.lock().unwrap().clone();
             let base = cached.unwrap_or_else(|| "edit".to_string());

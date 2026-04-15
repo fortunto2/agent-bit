@@ -105,6 +105,16 @@ impl WorkflowState {
         }
     }
 
+    /// Current phase as human-readable string for think tool context.
+    pub fn phase_name(&self) -> &str {
+        match self.phase {
+            Phase::Reading => "Reading — gather info before writing",
+            Phase::Acting => "Acting — execute task (read/write/delete)",
+            Phase::Cleanup => "Cleanup — delete processed inbox, finalize",
+            Phase::Done => "",
+        }
+    }
+
     /// Whether agent has written any files.
     pub fn has_writes(&self) -> bool {
         !self.write_paths.is_empty()
