@@ -53,6 +53,9 @@ pub struct AgentSection {
     pub max_steps: usize,
     #[serde(default = "default_benchmark")]
     pub benchmark: String,
+    /// Prefix for leaderboard run names (e.g. "rustman.org").
+    #[serde(default)]
+    pub run_prefix: String,
     /// Fallback providers for ensemble retry, in priority order.
     /// Primary provider is auto-excluded from this list at runtime.
     #[serde(default)]

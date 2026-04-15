@@ -31,6 +31,7 @@
 [agent]
 max_steps = 16
 benchmark = "bitgn/pac1-prod"
+run_prefix = "rustman.org"
 fallback_providers = ["seed2", "openai-full"]  # ensemble: primary → fallbacks in order, skip self
 
 [defaults]

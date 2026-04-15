@@ -136,7 +136,7 @@ release-build:
 # Results: https://bitgn.com/l/pac1-dev
 # Override PROVIDER for leaderboard — always GPT-5.4 v2 unless explicit
 leaderboard:
-	cargo run --release -- --provider $(or $(LB_PROVIDER),openai-v2) --run "$(or $(NAME),rust-sgr-agent-v$(shell date +%Y%m%d))"
+	cargo run --release -- --provider $(or $(LB_PROVIDER),openai-v2) --run "rustman.org-$(or $(NAME),sgr-agent-v$(shell date +%Y%m%d))"
 
 # Competition day: preflight + warmup + scored leaderboard run
 competition:
@@ -144,4 +144,4 @@ competition:
 	@echo "\n=== Warmup (Nemotron, free) ==="
 	cargo run --release -- --provider nemotron --parallel 3
 	@echo "\n=== Scored Leaderboard Run (GPT-5.4 v2) ==="
-	cargo run --release -- --provider openai-v2 --run "rust-sgr-agent-competition"
+	cargo run --release -- --provider openai-v2 --run "rustman.org-sgr-agent-competition"

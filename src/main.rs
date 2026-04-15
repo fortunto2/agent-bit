@@ -157,7 +157,13 @@ async fn main() -> Result<()> {
         .collect();
 
     if let Some(ref run_name) = cli.run {
-        let result = run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, run_name, &prompt_mode, temperature, planning_temperature, &fallbacks).await;
+        // Prefix run name with config run_prefix (e.g. "rustman.org-my-run")
+        let prefixed_name = if cfg.agent.run_prefix.is_empty() {
+            run_name.clone()
+        } else {
+            format!("{}-{}", cfg.agent.run_prefix, run_name)
+        };
+        let result = run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prefixed_name, &prompt_mode, temperature, planning_temperature, &fallbacks).await;
         drop(telemetry_guard); // flush OTLP spans
         return result;
     }
