@@ -101,6 +101,26 @@ pub struct ProviderSection {
     /// Use Chat Completions API instead of Responses API.
     #[serde(default)]
     pub use_chat_api: Option<bool>,
+    /// Pricing per million tokens (for budget estimation).
+    #[serde(default)]
+    pub pricing: Option<PricingSection>,
+}
+
+/// Per-provider pricing in $/M tokens.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct PricingSection {
+    /// Input tokens price per million.
+    #[serde(default)]
+    pub input: f64,
+    /// Output tokens price per million.
+    #[serde(default)]
+    pub output: f64,
+    /// Cache read tokens price per million.
+    #[serde(default)]
+    pub cache_read: f64,
+    /// Cache write tokens price per million.
+    #[serde(default)]
+    pub cache_write: f64,
 }
 
 fn default_max_steps() -> usize { 20 }

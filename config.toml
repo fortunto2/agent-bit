@@ -52,6 +52,9 @@ provider = "openai"
 
 [providers.nemotron]
 model = "workers-ai/@cf/nvidia/nemotron-3-120b-a12b"
+[providers.nemotron.pricing]
+input = 0.0
+output = 0.0
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key_env = "CF_AI_API_KEY"
 [providers.nemotron.headers]
@@ -187,11 +190,20 @@ api_key_env = "OPENROUTER_API_KEY"
 #   ❌ grok4 (Grok-4.20) — OpenRouter no FC endpoint
 #   ✅ qwen-next-v2 (Qwen-Next-80B) — t01=1.00, 46s, $0.12/M — but 5/7 sample
 
+# --- OpenRouter models (pricing: $/M tokens) ---
+
+# --- OpenRouter models (pricing: $/M tokens) ---
+
 [providers.or-haiku]
 model = "anthropic/claude-haiku-4.5"
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 use_chat_api = true
+[providers.or-haiku.pricing]
+input = 1.00
+output = 5.00
+cache_read = 0.10
+cache_write = 1.25
 [providers.or-haiku.headers]
 x-stainless-helper-method = "chat.completions"
 
@@ -199,26 +211,37 @@ x-stainless-helper-method = "chat.completions"
 model = "anthropic/claude-sonnet-4.6:beta"
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
+[providers.or-sonnet.pricing]
+input = 3.00
+output = 15.00
+cache_read = 0.30
+cache_write = 3.75
 
 [providers.or-opus]
 model = "anthropic/claude-opus-4.6:beta"
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
+[providers.or-opus.pricing]
+input = 5.00
+output = 25.00
+cache_read = 0.50
+cache_write = 6.25
 
 [providers.or-m27]
 model = "minimax/minimax-m2.7"
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
+[providers.or-m27.pricing]
+input = 0.30
+output = 1.20
 
 [providers.or-katcoder]
 model = "kwaipilot/kat-coder-pro-v2"
 base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
-
-[providers.or-seed-lite]
-model = "bytedance-seed/seed-2.0-lite"
-base_url = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"
+[providers.or-katcoder.pricing]
+input = 0.30
+output = 1.20
 
 # Tested 2026-04-15, rejected:
 # mimo-v2-pro: slow (288s), weak FC (0/3)
@@ -226,3 +249,4 @@ api_key_env = "OPENROUTER_API_KEY"
 # qwen3.6-plus: 0/2 — weak FC
 # trinity-large-thinking: 0/2 — weak FC
 # mistral-small-2603: 1/2 (t006 ok, t007 fail)
+# seed-2.0-lite: 0/3 — weak FC on complex tasks
