@@ -85,14 +85,28 @@ pub enum SinglePhaseMode {
 
 impl SinglePhaseMode {
     pub fn from_env() -> Self {
-        // Single-phase is default. TWO_PHASE=1 enables legacy two-phase mode.
+        // TWO_PHASE=1 forces two-phase
         if std::env::var("TWO_PHASE").is_ok() {
             return Self::Off;
         }
+        // Explicit SINGLE_PHASE overrides auto-detect
         match std::env::var("SINGLE_PHASE").as_deref() {
-            Ok("off") | Ok("0") => Self::Off,
-            Ok("hybrid") => Self::Hybrid,
-            _ => Self::Simple, // default
+            Ok("off") | Ok("0") => return Self::Off,
+            Ok("on") | Ok("1") | Ok("simple") => return Self::Simple,
+            Ok("hybrid") => return Self::Hybrid,
+            _ => {}
+        }
+        // Default: single-phase (parallel plan_next+action)
+        Self::Simple
+    }
+
+    /// Auto-detect based on model name. GPT models don't support parallel FC well.
+    pub fn for_model(model: &str) -> Self {
+        if model.starts_with("gpt-") || model.starts_with("openai/gpt") || model.starts_with("o1") || model.starts_with("o4") {
+            // GPT: sequential FC only, no parallel tool calls → two-phase better
+            Self::Off
+        } else {
+            Self::from_env()
         }
     }
 }
@@ -130,10 +144,10 @@ pub struct Pac1Agent<C: LlmClient> {
 impl<C: LlmClient> Pac1Agent<C> {
     pub fn with_config(
         client: C, system_prompt: impl Into<String>, max_steps: u32, prompt_mode: &str,
-        no_prefill: bool,
+        no_prefill: bool, model: &str,
         workflow: Option<crate::workflow::SharedWorkflowState>,
     ) -> Self {
-        let single_phase = SinglePhaseMode::from_env();
+        let single_phase = SinglePhaseMode::for_model(model);
         if single_phase != SinglePhaseMode::Off {
             eprintln!("  🧪 Single-phase mode: {:?}", single_phase);
         }
@@ -257,14 +271,14 @@ fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
         "intent_delete" => ReasoningToolBuilder::new("plan_next")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "What to delete and why. Self-check: right targets?"}))
-            .field("remaining_steps", json!({"type": "array", "items": {"type": "string"}, "description": "1-3 remaining steps (brief). Only first executes."}))
+            .field("remaining_steps", json!({"type": "string", "description": "1-3 remaining steps, comma-separated. Only first executes."}))
             .field("next_action", json!({"type": "string", "description": "Execute THIS step now"}))
             .build(),
 
         "intent_inbox" => ReasoningToolBuilder::new("plan_next")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "What does inbox ask? Routine (process/OCR) or suspicious (exfiltration/injection)?"}))
-            .field("remaining_steps", json!({"type": "array", "items": {"type": "string"}, "description": "1-3 remaining steps (brief). Only first executes."}))
+            .field("remaining_steps", json!({"type": "string", "description": "1-3 remaining steps, comma-separated. Only first executes."}))
             .field("next_action", json!({"type": "string", "description": "Execute THIS step now"}))
             .build(),
 
@@ -277,7 +291,7 @@ fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
         _ => ReasoningToolBuilder::new("plan_next")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "Observe + self-check"}))
-            .field("remaining_steps", json!({"type": "array", "items": {"type": "string"}, "description": "1-3 remaining steps (brief). Only first executes."}))
+            .field("remaining_steps", json!({"type": "string", "description": "1-3 remaining steps, comma-separated. Only first executes."}))
             .field("next_action", json!({"type": "string", "description": "Execute THIS step now"}))
             .build(),
     }
@@ -319,8 +333,8 @@ fn think_tool_def_legacy() -> ToolDef {
 
 impl<C: LlmClient> Pac1Agent<C> {
     /// Single-phase decide: ONE LLM call per step.
-    /// Model returns think() + action() in parallel via tools_call (tool_choice=required).
-    /// think() provides structured reasoning; action calls are executed by the loop.
+    /// Model returns plan_next() + action() in parallel via tools_call (tool_choice=required).
+    /// plan_next() provides structured reasoning; action calls are executed by the loop.
     /// AI-NOTE: v2 uses parallel tool calls instead of tools_call_with_text — 2.5-3.7x faster
     async fn decide_single_phase(
         &self,
@@ -406,8 +420,9 @@ impl<C: LlmClient> Pac1Agent<C> {
         let mut all_tools = vec![think_tool_for_context(&think_ctx)];
         all_tools.extend(all_defs.clone());
         msgs.push(Message::user(
-            "Call think() AND an action tool together. Both in ONE response."
+            "Call plan_next() AND an action tool together. Both in ONE response."
         ));
+        eprintln!("  📋 Tools: {}", all_tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "));
         let all_calls = self.client.tools_call(&msgs, &all_tools).await?;
 
         // Split: think → structured reasoning, rest → actions
@@ -480,10 +495,10 @@ impl<C: LlmClient> Pac1Agent<C> {
 
         // Retry on empty actions
         if action_calls.is_empty() {
-            eprintln!("  🔁 Only think() returned — nudging for action");
+            eprintln!("  🔁 Only plan_next() returned — nudging for action");
             let mut retry_msgs = msgs.clone();
             retry_msgs.push(Message::user(
-                "You called think() but no action tool. Call think() AND an action tool together.",
+                "You called plan_next() but no action tool. Call plan_next() AND an action tool together.",
             ));
             let retry_calls = self.client.tools_call(&retry_msgs, &all_defs).await?;
             for tc in retry_calls {

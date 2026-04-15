@@ -99,6 +99,9 @@ api_key_env = "OPENAI_API_KEY"
 [providers.openai]
 model = "gpt-5.4-mini"
 api_key_env = "OPENAI_API_KEY"
+use_chat_api = true
+# Chat Completions enables parallel tool calls (plan_next + action in one response)
+# Responses API = 1 tool per response, no parallel
 
 [providers.openai-full]
 model = "gpt-5.4"
