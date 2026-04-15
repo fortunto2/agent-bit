@@ -330,6 +330,10 @@ pub(crate) async fn run_agent(
     let mut config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
     config.session_id = session_id.map(|s| s.to_string());
     let llm = Llm::new(&config);
+    // WebSocket upgrade for Responses API (OpenAI direct) — lower latency, persistent connection
+    if let Err(e) = llm.connect_ws().await {
+        eprintln!("  ⚠ WS upgrade skipped: {}", e);
+    }
 
     // AI-NOTE: FC probe moved to --probe CLI flag (not per-trial). Use `make probe` to test new models.
 

@@ -20,7 +20,7 @@ name = "pac1-dash"
 path = "src/dashboard.rs"
 
 [dependencies]
-sgr-agent = { path = "../../shared/rust-code/crates/sgr-agent", default-features = false, features = ["agent", "oxide", "genai", "providers", "telemetry", "session"] }
+sgr-agent = { path = "../../shared/rust-code/crates/sgr-agent", default-features = false, features = ["agent", "oxide", "oxide-ws", "genai", "providers", "telemetry", "session"] }
 sgr-agent-tools = { path = "../../shared/rust-code/crates/sgr-agent-tools", features = ["eval", "patch"] }
 sgr-agent-ml = { path = "../../shared/rust-code/crates/sgr-agent-ml" }
 tokio = { version = "1", features = ["full"] }

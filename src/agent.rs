@@ -367,16 +367,9 @@ impl<C: LlmClient> Pac1Agent<C> {
             }
         }
 
-        // ── Workflow phase hint in user message ──
-        if let Some(ref wf) = self.workflow {
-            let phase = {
-                let guard = wf.lock().unwrap();
-                guard.phase_name().to_string()
-            };
-            if !phase.is_empty() {
-                msgs.push(Message::user(&format!("Workflow phase: {}", phase)));
-            }
-        }
+        // AI-NOTE: Workflow phase hint REMOVED — it prevented models from transitioning
+        // to write phase. Models read "Reading — gather info" and never start writing.
+        // Let the model decide when to read vs write based on task context.
 
         // ── Build action tool list ──
         let task_type_for_filter = {
