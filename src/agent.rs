@@ -101,24 +101,9 @@ impl SinglePhaseMode {
     }
 
     /// Auto-detect based on model name.
-    /// GPT models call 1 tool per response with 20+ tools — plan_next wastes a step.
-    /// Single-phase without plan_next = GPT calls action tools directly.
-    pub fn for_model(model: &str) -> Self {
-        // Env override always wins
-        if std::env::var("TWO_PHASE").is_ok() { return Self::Off; }
-        if let Ok(v) = std::env::var("SINGLE_PHASE") {
-            return match v.as_str() {
-                "off" | "0" => Self::Off,
-                "hybrid" => Self::Hybrid,
-                _ => Self::Simple,
-            };
-        }
-        // GPT: no plan_next (1 tool per response) → use two-phase for reasoning
-        if model.starts_with("gpt-") || model.contains("gpt-") {
-            Self::Off
-        } else {
-            Self::Simple
-        }
+    pub fn for_model(_model: &str) -> Self {
+        // Single-phase for ALL models — core_defs() limits to ~8 tools, parallel works
+        Self::from_env()
     }
 }
 
@@ -417,9 +402,10 @@ impl<C: LlmClient> Pac1Agent<C> {
         };
 
         let step = self.step_count.load(Ordering::SeqCst);
-        let filtered = filter_tools_for_task(&task_type_for_filter, step, tools.to_defs());
+        // Single-phase: core tools only (no deferred stubs) — fewer tools = better parallel FC
+        let filtered = filter_tools_for_task(&task_type_for_filter, step, tools.core_defs());
         let phase_filtered = filter_tools_by_workflow(filtered, &self.workflow);
-        let mut all_defs = if phase_filtered.is_empty() { tools.to_defs() } else { phase_filtered };
+        let mut all_defs = if phase_filtered.is_empty() { tools.core_defs() } else { phase_filtered };
 
         // ── Single-phase: think + action tools together, tool_choice=required ──
         let intent = self.forced_intent.lock().unwrap().clone();
