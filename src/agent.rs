@@ -135,6 +135,9 @@ pub struct Pac1Agent<C: LlmClient> {
     cached_security: Mutex<Option<String>>,
     /// Pipeline context for dynamic think tool (set from pregrounding)
     think_context: Mutex<ThinkContext>,
+    /// AI-NOTE: Anthropic models can't do parallel FC — plan_next always called alone, wastes a retry.
+    /// Skip plan_next entirely for these models: action tools only, 1 LLM call/step.
+    skip_plan_next: bool,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -146,6 +149,12 @@ impl<C: LlmClient> Pac1Agent<C> {
         let single_phase = SinglePhaseMode::for_model(model);
         if single_phase != SinglePhaseMode::Off {
             eprintln!("  🧪 Single-phase mode: {:?}", single_phase);
+        }
+        // AI-NOTE: Anthropic models don't support parallel_tool_calls — plan_next always called alone.
+        // Skip plan_next to avoid 2x LLM calls per step (nudge+retry pattern).
+        let skip_plan_next = model.contains("anthropic/") || model.contains("claude");
+        if skip_plan_next {
+            eprintln!("  ⚡ Skipping plan_next (Anthropic model, no parallel FC)");
         }
         Self {
             client,
@@ -160,6 +169,7 @@ impl<C: LlmClient> Pac1Agent<C> {
             forced_intent: Mutex::new(String::new()),
             workflow,
             single_phase,
+            skip_plan_next,
             cached_task_type: Mutex::new(None),
             cached_security: Mutex::new(None),
             think_context: Mutex::new(ThinkContext::default()),
@@ -411,19 +421,21 @@ impl<C: LlmClient> Pac1Agent<C> {
         let mut all_defs = if phase_filtered.is_empty() { tools.core_defs() } else { phase_filtered };
 
         // ── Single-phase: plan_next + action tools, tool_choice=required ──
-        // AI-NOTE: parallel hint in plan_next description forces mini to call plan_next + action together.
-        // tool_choice=required guarantees at least one tool; parallel_tool_calls=true (OxideClient) enables multiple.
         let intent = self.forced_intent.lock().unwrap().clone();
         let think_ctx = {
             let mut ctx = self.think_context.lock().unwrap().clone();
-            ctx.intent = intent;
+            ctx.intent = intent.clone();
             ctx
         };
         let mut all_tools = vec![think_tool_for_context(&think_ctx)];
         all_tools.extend(all_defs.clone());
-        msgs.push(Message::user(
+        msgs.push(Message::user(if self.skip_plan_next {
+            // AI-NOTE: Anthropic models call plan_next alone (no parallel FC), so don't ask for parallel.
+            // They'll naturally alternate: plan_next → action → plan_next → action (2 calls/step).
+            "Use your tools to complete the task."
+        } else {
             "Use your tools to complete the task. Call plan_next with your reasoning, and call action tools."
-        ));
+        }));
         eprintln!("  📋 Tools: {}", all_tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "));
         let all_calls = self.client.tools_call(&msgs, &all_tools).await?;
         let reasoning_text = String::new();
@@ -504,11 +516,20 @@ impl<C: LlmClient> Pac1Agent<C> {
 
         self.step_count.fetch_add(1, Ordering::SeqCst);
 
-        // Fallback: model returned no tool calls (text-only response with tool_choice=auto).
-        // Retry with tool_choice=required to force at least one action.
+        // Fallback when no action tools returned (only plan_next or empty).
+        // AI-NOTE: sgr-agent loop treats empty tool_calls as completion signal,
+        // so we MUST retry to get at least one action tool.
         if action_calls.is_empty() {
-            eprintln!("  🔁 No tool calls — retrying with required");
-            let retry_calls = self.client.tools_call(&msgs, &all_defs).await?;
+            eprintln!("  🔁 No action tools — retrying without plan_next ({} tools)", all_defs.len());
+            let mut retry_msgs = msgs.clone();
+            if !plan.is_empty() {
+                // Feed plan_next reasoning back so model knows what to do
+                retry_msgs.push(Message::assistant(&format!("plan_next: {}", plan)));
+            }
+            retry_msgs.push(Message::user("Now call an action tool to execute your plan."));
+            let retry_calls = self.client.tools_call(&retry_msgs, &all_defs).await?;
+            eprintln!("  🔁 Retry returned {} calls: {}", retry_calls.len(),
+                retry_calls.iter().map(|tc| tc.name.as_str()).collect::<Vec<_>>().join(", "));
             for tc in retry_calls {
                 if tc.name != "plan_next" {
                     action_calls.push(tc);
