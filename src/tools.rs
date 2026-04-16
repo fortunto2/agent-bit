@@ -76,12 +76,13 @@ fn def_root() -> String { "/".into() }
 // This wrapper adds: guard_content (security scan) + workflow post_action (phase tracking).
 pub struct ReadTool {
     inner: sgr_agent_tools::ReadTool<PcmClient>,
+    pcm: Arc<PcmClient>,
     workflow: Option<crate::workflow::SharedWorkflowState>,
 }
 
 impl ReadTool {
     pub fn new(pcm: Arc<PcmClient>, workflow: Option<crate::workflow::SharedWorkflowState>) -> Self {
-        Self { inner: sgr_agent_tools::ReadTool(pcm), workflow }
+        Self { inner: sgr_agent_tools::ReadTool(pcm.clone()), pcm, workflow }
     }
 }
 
@@ -95,22 +96,14 @@ impl Tool for ReadTool {
         self.execute_readonly(args, ctx).await
     }
     async fn execute_readonly(&self, args: Value, ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
-        // Base read (trust metadata included by sgr-agent-tools)
-        let result = self.inner.execute_readonly(args, ctx).await?;
-        let base_output = result.content;
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-        // Middleware: security content scan
-        let guarded = guard_content(base_output);
+        let result = self.inner.execute_readonly(args.clone(), ctx).await?;
+        let mut output = guard_content(result.content);
 
-        // Middleware: workflow phase tracking
-        let mut output = guarded;
+        append_nested_agents_notice(&mut output, &self.pcm, &path);
+
         if let Some(ref wf) = self.workflow {
-            // Extract path from output header [path | trust]
-            let path = output.lines().next()
-                .and_then(|l| l.strip_prefix('['))
-                .and_then(|l| l.split('|').next())
-                .map(|p| p.trim().to_string())
-                .unwrap_or_default();
             for msg in wf.lock().unwrap().post_action("read", &path) {
                 output.push_str(&format!("\n{}", msg));
             }
@@ -118,6 +111,20 @@ impl Tool for ReadTool {
 
         Ok(ToolOutput::text(output))
     }
+}
+
+/// Append nested AGENTS.md content if the subtree hasn't been shown yet.
+/// Shared by ReadTool and WriteTool — both trigger injection on first contact.
+/// Case-insensitive: workspace may have `AGENTS.md` or `AGENTS.MD` per subtree.
+fn append_nested_agents_notice(output: &mut String, pcm: &PcmClient, path: &str) {
+    if path.is_empty() { return; }
+    let basename = path.rsplit_once('/').map(|(_, b)| b).unwrap_or(path);
+    if basename.eq_ignore_ascii_case("AGENTS.md") { return; } // don't inject into AGENTS.md itself
+    let Some((dir, content)) = pcm.nearest_nested_agents(path) else { return; };
+    if !pcm.mark_subtree_injected(&dir) { return; }
+    output.push_str(&format!(
+        "\n\n[NESTED AGENTS.md @ {dir}/AGENTS.md — local refinement for this subtree; must not contradict root AGENTS.md; if it does → OUTCOME_NONE_CLARIFICATION]\n{content}"
+    ));
 }
 
 /// Fix YAML frontmatter: validate with serde_yaml, auto-quote broken values.
@@ -169,13 +176,14 @@ fn fix_yaml_frontmatter(content: &str) -> Option<String> {
 // Base write (JSON repair via llm_json) handled by sgr-agent-tools::WriteTool.
 pub struct WriteTool {
     inner: sgr_agent_tools::WriteTool<PcmClient>,
+    pcm: Arc<PcmClient>,
     hooks: crate::hooks::SharedHookRegistry,
     workflow: Option<crate::workflow::SharedWorkflowState>,
 }
 
 impl WriteTool {
     pub fn new(pcm: Arc<PcmClient>, hooks: crate::hooks::SharedHookRegistry, workflow: Option<crate::workflow::SharedWorkflowState>) -> Self {
-        Self { inner: sgr_agent_tools::WriteTool(pcm.clone()), hooks, workflow }
+        Self { inner: sgr_agent_tools::WriteTool(pcm.clone()), pcm, hooks, workflow }
     }
 }
 
@@ -228,7 +236,9 @@ impl Tool for WriteTool {
         let result = self.inner.execute(final_args, ctx).await?;
         let mut msg = result.content;
 
-        // Middleware 3: workflow post_action + hooks
+        append_nested_agents_notice(&mut msg, &self.pcm, &path);
+
+        // Middleware 3b: workflow post_action + hooks
         if let Some(ref wf) = self.workflow {
             for hook_msg in wf.lock().unwrap().post_action("write", &path) {
                 msg.push_str(&format!("\n{}", hook_msg));

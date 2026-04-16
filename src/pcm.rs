@@ -23,6 +23,13 @@ pub struct PcmClient {
     /// Read cache — keyed by path. Invalidated by write/delete to same path.
     /// Single owner: PcmClient. All tools share via Arc<PcmClient>.
     read_cache: Mutex<std::collections::HashMap<String, String>>,
+    /// Nested AGENTS.md index — dir → content. Loaded once per trial via
+    /// `preload_nested_agents()`. Empty map = no nested overrides or not loaded yet.
+    /// Keys are normalized dir paths WITHOUT leading/trailing slashes (e.g. "40_projects/foo").
+    nested_agents: Mutex<std::collections::HashMap<String, String>>,
+    /// Subtrees where nested AGENTS.md was already injected to LLM context — dedup by dir.
+    /// Avoids repeated injection on every read within same subtree.
+    injected_subtrees: Mutex<std::collections::HashSet<String>>,
     /// Total RPC calls to harness (= BitGN "steps" metric). Cache hits NOT counted.
     rpc_count: AtomicU32,
 }
@@ -37,6 +44,8 @@ impl PcmClient {
             proposed_answer: Mutex::new(None),
             recent_reads: Mutex::new(Vec::new()),
             read_cache: Mutex::new(std::collections::HashMap::new()),
+            nested_agents: Mutex::new(std::collections::HashMap::new()),
+            injected_subtrees: Mutex::new(std::collections::HashSet::new()),
             rpc_count: AtomicU32::new(0),
         }
     }
@@ -99,6 +108,28 @@ impl PcmClient {
             }
             Ok(out)
         }).await
+    }
+
+    /// Silent read — like `read()` but does NOT track the path in `recent_reads`.
+    /// Used by internal preloaders (nested AGENTS.md) so their paths don't pollute
+    /// `AnswerTool` auto-refs. Still caches content normally.
+    pub async fn read_silent(&self, path: &str) -> Result<String> {
+        let norm = path.trim_start_matches('/');
+        if let Ok(cache) = self.read_cache.lock()
+            && let Some(cached) = cache.get(norm)
+        {
+            return Ok(cached.clone());
+        }
+        self.count_rpc();
+        let resp = self.inner.read(proto::ReadRequest {
+            path: path.into(), number: false, start_line: 0, end_line: 0, ..Default::default()
+        }).await.map_err(|e| Self::err("Read", e))?;
+        let v = resp.view();
+        let result = format!("$ cat {}\n{}", path, v.content);
+        if let Ok(mut c) = self.read_cache.lock() {
+            c.insert(norm.to_string(), result.clone());
+        }
+        Ok(result)
     }
 
     pub async fn read(&self, path: &str, number: bool, start_line: i32, end_line: i32) -> Result<String> {
@@ -245,6 +276,93 @@ impl PcmClient {
             }
         }
         Ok(out)
+    }
+
+    /// Preload nested AGENTS.md files across workspace.
+    /// Two parallel finds (lowercase + uppercase) — harness `find` is case-sensitive
+    /// and prod workspaces mix cases per subtree (`accounts/AGENTS.md` vs `inbox/AGENTS.MD`).
+    /// Then batch silent reads of the found files (no `recent_reads` pollution).
+    /// Cheap: 2 find RPC + N≤10 silent reads. Returns number of nested subtrees indexed.
+    pub async fn preload_nested_agents(&self) -> Result<usize> {
+        let (lower, upper) = tokio::join!(
+            self.find("/", "AGENTS.md", "files", 50),
+            self.find("/", "AGENTS.MD", "files", 50),
+        );
+        let merged = format!("{}\n{}", lower.unwrap_or_default(), upper.unwrap_or_default());
+        let paths: Vec<String> = merged.lines()
+            .filter(|l| !l.is_empty() && !l.starts_with("$ find"))
+            .map(|s| s.trim_start_matches('/').to_string())
+            .filter(|p| !p.is_empty() && !p.eq_ignore_ascii_case("AGENTS.md"))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        if paths.is_empty() { return Ok(0); }
+
+        // read_silent: preload paths MUST NOT pollute recent_reads → AnswerTool auto-refs
+        let reads = futures::future::join_all(paths.iter().map(|p| async move {
+            let content = self.read_silent(p).await.ok();
+            (p.clone(), content)
+        })).await;
+
+        let mut map = self.nested_agents.lock().unwrap();
+        for (path, content) in reads {
+            if let Some(c) = content {
+                let dir = path.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
+                if !dir.is_empty() {
+                    map.insert(dir, c);
+                }
+            }
+        }
+        Ok(map.len())
+    }
+
+    /// Return all preloaded nested AGENTS.md entries as (dir, content) pairs, sorted by dir.
+    /// Used by pregrounding to inject all of them eagerly into the LLM context.
+    pub fn all_nested_agents(&self) -> Vec<(String, String)> {
+        let map = match self.nested_agents.lock() { Ok(m) => m, Err(_) => return Vec::new() };
+        let mut entries: Vec<(String, String)> = map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries
+    }
+
+    /// Mark every preloaded subtree as injected — used after eager pregrounding injection
+    /// so ReadTool/WriteTool don't re-inject the same content on subsequent tool calls.
+    pub fn mark_all_subtrees_injected(&self) {
+        if let Ok(map) = self.nested_agents.lock()
+            && let Ok(mut set) = self.injected_subtrees.lock()
+        {
+            for dir in map.keys() {
+                set.insert(dir.clone());
+            }
+        }
+    }
+
+    /// Return nested AGENTS.md content for the subtree containing `target_path`, if any.
+    /// Walks up the path from most specific to least. Returns (dir, content) of nearest match.
+    pub fn nearest_nested_agents(&self, target_path: &str) -> Option<(String, String)> {
+        let map = self.nested_agents.lock().ok()?;
+        if map.is_empty() { return None; }
+        let normalized = target_path.trim_start_matches('/').trim_end_matches('/');
+        let mut current: &str = normalized;
+        loop {
+            if let Some(content) = map.get(current) {
+                return Some((current.to_string(), content.clone()));
+            }
+            match current.rsplit_once('/') {
+                Some((parent, _)) => current = parent,
+                None => return None,
+            }
+        }
+    }
+
+    /// Mark a subtree's nested AGENTS.md as already injected into the LLM context.
+    /// Returns true if this is the first mark (caller should inject), false if already seen.
+    /// Separate from `nearest_nested_agents()` to keep the read API pure.
+    pub fn mark_subtree_injected(&self, dir: &str) -> bool {
+        match self.injected_subtrees.lock() {
+            Ok(mut set) => set.insert(dir.to_string()),
+            Err(_) => false,
+        }
     }
 
     pub async fn context(&self) -> Result<String> {

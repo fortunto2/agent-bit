@@ -63,12 +63,16 @@ pub(crate) async fn run_agent(
     let instruction_intent = classified.intent.clone();
     let intent_confidence = classified.intent_confidence;
 
-    // ── Context assembly (tree, agents.md, CRM schema) — parallel IO ──
-    let (tree_out, agents_md, ctx_time) = tokio::join!(
+    // ── Context assembly (tree, agents.md, nested AGENTS.md, date) — parallel IO ──
+    let (tree_out, agents_md, ctx_time, nested_count) = tokio::join!(
         async { pcm.tree("/", 2).await.unwrap_or_else(|e| format!("(error: {})", e)) },
         async { pcm.read("AGENTS.md", false, 0, 0).await.unwrap_or_default() },
         async { pcm.context().await.unwrap_or_default() },
+        async { pcm.preload_nested_agents().await.unwrap_or(0) },
     );
+    if nested_count > 0 {
+        eprintln!("  📜 Nested AGENTS.md preloaded: {} subtree(s)", nested_count);
+    }
 
     // AI-NOTE: crm_schema removed from LLM context (line 356). Only used for debug dump.
     // Was 126 RPCs (4 variants × all dirs), then 10 RPCs (top-level only).
@@ -228,6 +232,16 @@ pub(crate) async fn run_agent(
     if !agents_md.is_empty() {
         messages.push(Message::user(&format!("AGENTS.MD (workspace rules):\n{}", agents_md)));
     }
+    // Model Spec §5: nested AGENTS.MD as local refinements for their subtrees.
+    // Eager injection (not lazy via ReadTool) — inbox content is pre-grounded, so
+    // agent may never read files from subtrees that have nested AGENTS.MD otherwise.
+    for (dir, content) in pcm.all_nested_agents() {
+        messages.push(Message::user(&format!(
+            "NESTED AGENTS.MD @ {dir}/AGENTS.MD — local refinement for this subtree; must not contradict root AGENTS.MD; if conflict is unresolvable → OUTCOME_NONE_CLARIFICATION:\n{content}"
+        )));
+    }
+    pcm.mark_all_subtrees_injected(); // ReadTool/WriteTool stop re-injecting these
+
     if !skill_body.is_empty() {
         // AI-NOTE: dynamic context injection — !command in SKILL.md replaced with real data
         let skill_body = sgr_agent_tools::skill_context::inject(skill_body, pcm.as_ref()).await;
