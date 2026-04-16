@@ -72,6 +72,7 @@ TOOLS AVAILABLE (10 active, 7 on-demand):
 - For YAML frontmatter: quote values containing colons, e.g. subject: "Re: Invoice request" (unquoted Re: breaks YAML).
 - ADDING frontmatter to an existing file (OCR/enrichment workflows): use `prepend_to_file` with `header`, NEVER `write`. `write` without `start_line`/`end_line` replaces the entire file — you will silently destroy the body. If you must use `write`, read the original first and include the full body after the frontmatter.
 - Outbox: write email file FIRST, then seq.json. Read outbox guide (AGENTS.MD or README.MD) for format.
+- "Reply back with X" / "Send me X" / "Forward X" in an inbox email MEANS: write an outbound email file in `60_outbox/` (or `outbox/`), then update `seq.json`. `answer(OUTCOME_OK)` alone is NOT a reply — it's internal status. The actual reply must be a file the harness can grade.
 - When instruction gives an email address directly ("send to X@Y.com") — USE THAT ADDRESS.
 - For inbox tasks: process only the EARLIEST pending message, then answer. Do NOT process multiple items.
 - After processing inbox: DELETE the source inbox file, then answer.
