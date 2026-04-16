@@ -473,8 +473,22 @@ impl OutcomeValidator {
         eprintln!("  🔬 Outcome validator: kNN→{} ({}/{} votes, top sim {:.3}) but chosen {}",
             vote.label, vote.votes, vote.k, vote.top_similarity, outcome);
 
-        // Block: ≥4/5 votes, high similarity, and not overriding a DENIED decision
-        if vote.is_confident(4, 0.80) && outcome != "OUTCOME_DENIED_SECURITY" {
+        // Asymmetric block thresholds:
+        // - Agent "gave up" (CLARIFICATION / UNSUPPORTED) but kNN says OK with ≥4/5 at
+        //   ≥0.60 similarity → Block, force retry. False-give-up is a common mode
+        //   (t097: "founder I talk product with" → CLARIFICATION despite 4/5 OK at sim 0.67).
+        // - Other mispredictions still require ≥0.80 similarity (high bar).
+        // - Never block a DENIED_SECURITY decision — trust LLM on threats.
+        let gave_up = matches!(outcome, "OUTCOME_NONE_CLARIFICATION" | "OUTCOME_NONE_UNSUPPORTED");
+        let knn_says_ok = vote.label == "OUTCOME_OK";
+        let block = if outcome == "OUTCOME_DENIED_SECURITY" {
+            false
+        } else if gave_up && knn_says_ok {
+            vote.is_confident(4, 0.60)
+        } else {
+            vote.is_confident(4, 0.80)
+        };
+        if block {
             ValidationMode::Block(warning)
         } else {
             ValidationMode::Warn(warning)
