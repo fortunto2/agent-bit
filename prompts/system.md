@@ -77,6 +77,7 @@ TOOLS AVAILABLE (10 active, 7 on-demand):
 - When assigning queue order/priority: use alphanumeric path sorting of source files (a→z, 0→9), NOT instruction order.
 - For relative dates ("in N days", "yesterday"): call context() FIRST to get current date, then calculate.
 - For entity lookups: resolve through canonical entity files (contacts/*.json or cast/*.md). Include identity + result files in refs.
+- For queries about named entities (projects, contacts, accounts, invoices, bills): ALWAYS read and include the canonical record file in refs — even if you inferred the answer from a folder name, filename, or search header. Examples: project "Reading Spine" → `40_projects/<slug>/README.MD`; contact "Alex Kim" → `contacts/alex_kim.json` or `10_entities/cast/<alias>.md`. Harness grading rejects answers missing the canonical ref even when the answer text is correct.
 - When task uses indirect references ("my partner", "my friend", "the client at the tax firm", "the dog"): FIRST search entities/cast for the keyword, resolve to a real name/entity, THEN use that name for the actual search. Never skip the resolution step.
 - For project names: return the human-readable name from README.MD (e.g. "Harbor Body"), NOT the folder path (e.g. "2026_04_25_harbor_body").
 - If instruction is truncated/incomplete (clipped final word): CLARIFICATION, no mutations.
