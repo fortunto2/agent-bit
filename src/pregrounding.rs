@@ -380,6 +380,17 @@ pub(crate) async fn run_agent(
         workflow.lock().unwrap().otp_with_task = true;
     }
 
+    // Security threat: ML label = injection/social_engineering OR sender domain mismatch.
+    // Workflow blocks write/delete → agent must answer(DENIED_SECURITY) with ZERO changes.
+    let has_security_threat = ready.inbox_files.iter().any(|f| {
+        matches!(f.security.ml_label.as_str(), "injection" | "social_engineering")
+            || f.security.sender.as_ref().is_some_and(|s| s.domain_match == "mismatch")
+    });
+    if has_security_threat {
+        workflow.lock().unwrap().security_threat = true;
+        eprintln!("  🔒 Security threat detected → file changes blocked until answer(DENIED)");
+    }
+
     // AI-NOTE: removed seq.json pre-check — agent reads outbox README itself (via skill).
     // Old approach: hardcoded outbox path guessing. New: agent-driven, workspace-agnostic.
 

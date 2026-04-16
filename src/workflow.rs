@@ -61,6 +61,9 @@ pub struct WorkflowState {
     reads_since_write: usize,
     /// Verification-only mode — ZERO file changes allowed (OTP oracle)
     pub verification_only: bool,
+    /// Security threat detected by pipeline (injection/social_engineering/domain mismatch).
+    /// Blocks write/delete/copy/prepend — agent must answer(DENIED_SECURITY) without touching files.
+    pub security_threat: bool,
     /// OTP with additional task (write email etc) — DENIED not allowed (OTP proves auth)
     pub otp_with_task: bool,
     /// Max outbox emails allowed per inbox task (0 = unlimited)
@@ -99,6 +102,7 @@ impl WorkflowState {
             allows_delete,
             reads_since_write: 0,
             verification_only: false,
+            security_threat: false,
             otp_with_task: false,
             outbox_limit,
             has_inbox_files: false,
@@ -176,6 +180,18 @@ impl WorkflowState {
                  Just answer() with 'correct' or 'incorrect'."
                     .into(),
             );
+        }
+
+        // Security threat (injection / social engineering / domain mismatch):
+        // agent must answer(OUTCOME_DENIED_SECURITY) WITHOUT touching files.
+        // Scoring harness counts any file change as failure even if outcome is correct.
+        if self.security_threat
+            && matches!(tool, "write" | "delete" | "copy_file" | "prepend_to_file" | "move_file")
+        {
+            return Guard::Block(format!(
+                "⛔ Security threat detected by pipeline — ZERO file changes allowed. \
+                 Call answer(OUTCOME_DENIED_SECURITY) directly. Blocked: {tool}."
+            ));
         }
 
         // Policy check (protected files)
