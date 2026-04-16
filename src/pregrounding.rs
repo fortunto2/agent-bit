@@ -6,149 +6,26 @@ use sgr_agent::agent_loop::{LoopConfig, LoopEvent, run_loop};
 use sgr_agent::context::AgentContext;
 use sgr_agent::evolution::{self, EvolutionEntry, RunStats};
 use sgr_agent::registry::ToolRegistry;
-use sgr_agent::types::{LlmConfig, Message, Role};
+use sgr_agent::types::{Message, Role};
 use sgr_agent::Llm;
-use sgr_agent::client::LlmClient;
 
 use crate::agent;
 use crate::classifier;
 use crate::crm_graph;
+use crate::intent_classify::{classify_intent_via_llm, save_teacher_label};
+use crate::llm_config::make_llm_config;
+use crate::trial_dump::dump_trial_data;
 use crate::util::StrExt;
 use crate::pcm;
 use crate::prompts;
 use crate::scanner::{self, SharedClassifier, SharedNliClassifier};
 use crate::tools;
 
+
+
 // AI-NOTE: extract_mentioned_names + resolve_contact_hints moved to src/legacy.rs
 // They were part of CRM-specific pre-grounding (contact disambiguation).
 // Now agent resolves contacts via search — no pre-computed hints needed.
-
-/// Quick LLM intent classification — 1 function call when ML confidence is low.
-/// Returns None on error (structural fallback handles it).
-async fn classify_intent_via_llm(
-    instruction: &str,
-    model: &str,
-    base_url: Option<&str>,
-    api_key: &str,
-    extra_headers: &[(String, String)],
-    temperature: f32,
-) -> Option<String> {
-    use sgr_agent::tool::ToolDef;
-
-    let cfg = make_llm_config(model, base_url, api_key, extra_headers, temperature);
-    let llm = Llm::new(&cfg);
-
-    let td = ToolDef {
-        name: "classify".to_string(),
-        description: "Classify the task intent".to_string(),
-        parameters: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "intent": {
-                    "type": "string",
-                    "enum": ["intent_inbox", "intent_email", "intent_delete", "intent_query", "intent_edit", "intent_capture"],
-                    "description": "inbox=process/review/handle inbox messages or queue, email=send/write/compose email, delete=remove/discard/clean up files, query=lookup/find/count/list data, edit=update/create/modify files, capture=capture/distill from inbox into cards"
-                }
-            },
-            "required": ["intent"]
-        }),
-    };
-
-    let messages = vec![
-        Message::system("Classify this CRM task instruction into one intent. Just call classify()."),
-        Message::user(instruction),
-    ];
-
-    match llm.tools_call_stateful(&messages, &[td], None).await {
-        Ok((calls, _)) if !calls.is_empty() => {
-            calls[0].arguments.get("intent").and_then(|v| v.as_str()).map(|s| s.to_string())
-        }
-        Ok(_) => None,
-        Err(e) => {
-            eprintln!("  ⚠ LLM intent classify failed: {}", e);
-            None
-        }
-    }
-}
-
-/// Teacher-student: save high-confidence embedding classification for ONNX retraining.
-/// Appends to .agent/teacher_labels.jsonl — used by export_model.py as extra training data.
-fn save_teacher_label(instruction: &str, label: &str, confidence: f32, kind: &str) {
-    use std::io::Write;
-    let path = ".agent/teacher_labels.jsonl";
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(f, "{{\"text\":{},\"label\":{},\"confidence\":{:.3},\"kind\":{}}}",
-            serde_json::json!(instruction), serde_json::json!(label), confidence, serde_json::json!(kind));
-    }
-}
-
-/// Run a planning phase: read-only exploration → structured Plan.
-pub(crate) fn make_llm_config(
-    model: &str,
-    base_url: Option<&str>,
-    api_key: &str,
-    extra_headers: &[(String, String)],
-    temperature: f32,
-) -> LlmConfig {
-    // AI-NOTE: use_chat_api/websocket from config.toml passed via env vars
-    // (avoids changing all call sites). Set by main.rs before any trial runs.
-    let force_chat_api = std::env::var("USE_CHAT_API").is_ok();
-    let websocket = std::env::var("NO_WS").is_err(); // default: on
-    if let Some(url) = base_url {
-        let mut cfg = LlmConfig::endpoint(api_key, url, model).temperature(temperature as f64).max_tokens(4096);
-        cfg.use_chat_api = true;
-        cfg.websocket = false; // WS not supported on OpenRouter/3rd party
-        cfg.extra_headers = extra_headers.to_vec();
-        cfg.reasoning_effort = std::env::var("LLM_REASONING_EFFORT").ok();
-        cfg.prompt_cache_key = std::env::var("LLM_PROMPT_CACHE_KEY").ok();
-        cfg
-    } else if !api_key.is_empty() {
-        let mut cfg = LlmConfig::with_key(api_key, model).temperature(temperature as f64).max_tokens(4096);
-        cfg.extra_headers = extra_headers.to_vec();
-        // Native API providers (Anthropic, Gemini) need genai backend
-        cfg.use_genai = model.starts_with("claude") || model.starts_with("gemini");
-        cfg.use_chat_api = force_chat_api;
-        cfg.websocket = websocket && !force_chat_api; // WS only for Responses API
-        cfg.reasoning_effort = std::env::var("LLM_REASONING_EFFORT").ok();
-        cfg.prompt_cache_key = std::env::var("LLM_PROMPT_CACHE_KEY").ok();
-        cfg
-    } else {
-        let mut cfg = LlmConfig::auto(model).temperature(temperature as f64).max_tokens(4096);
-        cfg.extra_headers = extra_headers.to_vec();
-        cfg
-    }
-}
-
-/// Dump trial debug data to disk.
-fn dump_trial_data(
-    dump_dir: &str, tree_out: &str, agents_md: &str, crm_schema: &str,
-    ready: &crate::pipeline::Ready, model: &str, intent_confidence: f32,
-) {
-    let _ = std::fs::create_dir_all(dump_dir);
-    let _ = std::fs::write(format!("{dump_dir}/tree.txt"), tree_out);
-    if !agents_md.is_empty() { let _ = std::fs::write(format!("{dump_dir}/agents.md"), agents_md); }
-    if !crm_schema.is_empty() { let _ = std::fs::write(format!("{dump_dir}/crm_schema.txt"), crm_schema); }
-    let contacts = ready.crm_graph.contacts_summary();
-    if !contacts.is_empty() { let _ = std::fs::write(format!("{dump_dir}/contacts.txt"), &contacts); }
-    let accounts = ready.crm_graph.accounts_summary();
-    if !accounts.is_empty() { let _ = std::fs::write(format!("{dump_dir}/accounts.txt"), &accounts); }
-    for (i, f) in ready.inbox_files.iter().enumerate() {
-        let sender = f.security.sender.as_ref().map(|s| format!("{}", s.trust)).unwrap_or_default();
-        let _ = std::fs::write(
-            format!("{dump_dir}/inbox_{i:02}_{}.txt", f.path.replace('/', "_")),
-            format!("[{} ({:.2}) | sender: {sender} | {}]\n\n{}", f.security.ml_label, f.security.ml_conf, f.security.recommendation, f.content),
-        );
-    }
-    let per_inbox: Vec<String> = ready.inbox_files.iter().enumerate().map(|(i, f)| {
-        let sender = f.security.sender.as_ref().map(|s| format!("{}", s.trust)).unwrap_or_else(|| "?".into());
-        format!("  [{i}] {} ({:.2}) sender={sender} {}", f.security.ml_label, f.security.ml_conf, f.path)
-    }).collect();
-    let _ = std::fs::write(format!("{dump_dir}/pipeline.txt"), format!(
-        "model: {model}\ninstruction: {}\nintent: {} ({intent_confidence:.2})\nlabel: {}\ninbox_files: {}\ncrm_nodes: {}\n\nper_inbox:\n{}\n",
-        ready.instruction, ready.intent, ready.instruction_label, ready.inbox_files.len(), ready.crm_graph.node_count(), per_inbox.join("\n"),
-    ));
-    eprintln!("  📁 Trial data dumped to {dump_dir}");
-}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_agent(
@@ -168,6 +45,7 @@ pub(crate) async fn run_agent(
     sgr_mode: bool,
     dump_dir: Option<&str>,
     session_id: Option<&str>,
+    overrides: &crate::config::LlmOverrides,
 ) -> Result<(String, String, usize, usize)> {
     use crate::pipeline;
 
@@ -278,7 +156,7 @@ pub(crate) async fn run_agent(
         if !resolved {
             // Layer 3: quick LLM classify (1 function call) — fallback
             let llm_intent = classify_intent_via_llm(
-                instruction, model, base_url, api_key, extra_headers, temperature,
+                instruction, model, base_url, api_key, extra_headers, temperature, overrides,
             ).await;
 
             if let Some(ref llm_label) = llm_intent {
@@ -336,7 +214,7 @@ pub(crate) async fn run_agent(
     }
     eprintln!("  Prompt: {} bytes (skill: {})", system_prompt.len(), effective_label);
 
-    let mut config = make_llm_config(model, base_url, api_key, extra_headers, temperature);
+    let mut config = make_llm_config(model, base_url, api_key, extra_headers, temperature, overrides);
     config.session_id = session_id.map(|s| s.to_string());
     // WebSocket auto-connect handled by Llm::new_async() based on config.websocket
     let llm = Llm::new_async(&config).await;
@@ -511,7 +389,8 @@ pub(crate) async fn run_agent(
         .register_deferred(tools::ListSkillsTool(skill_registry.clone()))
         .register_deferred(tools::GetSkillTool(skill_registry.clone()));
 
-    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, config.rejects_prefill(), model, Some(workflow.clone()));
+    let single_phase = agent::SinglePhaseMode::resolve(overrides.single_phase.as_deref(), model);
+    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, config.rejects_prefill(), model, Some(workflow.clone()), single_phase);
     agent.set_intent(&instruction_intent);
     agent.set_think_context(agent::ThinkContext {
         intent: instruction_intent.clone(),

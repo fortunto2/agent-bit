@@ -31,10 +31,13 @@ mod config;
 mod crm_graph;
 mod pcm;
 mod hooks;
+mod intent_classify;
+mod llm_config;
 mod pipeline;
 mod policy;
 mod pregrounding;
 mod prompts;
+mod trial_dump;
 mod scanner;
 #[allow(dead_code)]
 mod pac1_sgr;
@@ -119,28 +122,38 @@ async fn main() -> Result<()> {
 
     let cfg = config::Config::load(&cli.config)?;
     let provider_name = cli.provider.as_deref().unwrap_or(&cfg.llm.provider);
-    let (model, base_url, llm_api_key, extra_headers, prompt_mode, temperature, planning_temperature, sgr_mode, reasoning_effort, use_chat_api) = cfg.resolve_provider(provider_name)?;
-    // Set reasoning_effort as env var for pregrounding::make_llm_config
-    if let Some(ref effort) = reasoning_effort {
-        unsafe { std::env::set_var("LLM_REASONING_EFFORT", effort); }
-    }
+    let config::ResolvedProvider {
+        model,
+        base_url,
+        api_key: llm_api_key,
+        extra_headers,
+        prompt_mode,
+        temperature,
+        planning_temperature,
+        sgr_mode,
+        reasoning_effort,
+        use_chat_api,
+        single_phase,
+    } = cfg.resolve_provider(provider_name)?;
     // Forward prompt_cache_key: provider override > defaults > none
     let cache_key = cfg.providers.get(provider_name)
         .and_then(|p| p.prompt_cache_key.clone())
         .or_else(|| cfg.defaults.prompt_cache_key.clone());
-    if let Some(ref key) = cache_key {
-        unsafe { std::env::set_var("LLM_PROMPT_CACHE_KEY", key); }
-    }
-    if use_chat_api {
-        unsafe { std::env::set_var("USE_CHAT_API", "1"); }
-        eprintln!("[pac1] API: Chat Completions (use_chat_api=true)");
-    }
-    // websocket: default true for Responses API, false for Chat Completions
+    // websocket: explicit override > default (on for Responses, off for Chat)
     let ws_enabled = cfg.providers.get(provider_name)
         .and_then(|p| p.websocket)
-        .unwrap_or(!use_chat_api); // default: on for Responses API
+        .unwrap_or(!use_chat_api);
+    let overrides = config::LlmOverrides {
+        use_chat_api,
+        websocket: ws_enabled,
+        reasoning_effort: reasoning_effort.clone(),
+        prompt_cache_key: cache_key,
+        single_phase: single_phase.clone(),
+    };
+    if use_chat_api {
+        eprintln!("[pac1] API: Chat Completions (use_chat_api=true)");
+    }
     if !ws_enabled {
-        unsafe { std::env::set_var("NO_WS", "1"); }
         eprintln!("[pac1] WebSocket: disabled");
     }
     if sgr_mode {
@@ -161,9 +174,9 @@ async fn main() -> Result<()> {
     let fallbacks: Vec<FallbackProvider> = cfg.agent.fallback_providers.iter()
         .filter(|name| name.as_str() != provider_name)
         .filter_map(|name| {
-            cfg.resolve_provider(name).ok().map(|(m, bu, ak, eh, _pm, t, pt, _sgr, _re, _chat)| {
-                eprintln!("[pac1] Fallback: {} | Model: {}", name, m);
-                (m, bu, ak, eh, t, pt)
+            cfg.resolve_provider(name).ok().map(|r| {
+                eprintln!("[pac1] Fallback: {} | Model: {}", name, r.model);
+                (r.model, r.base_url, r.api_key, r.extra_headers, r.temperature, r.planning_temperature)
             })
         })
         .collect();
@@ -175,7 +188,7 @@ async fn main() -> Result<()> {
         } else {
             format!("{}-{}", cfg.agent.run_prefix, run_name)
         };
-        let result = run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prefixed_name, &prompt_mode, temperature, planning_temperature, &fallbacks).await;
+        let result = run_leaderboard(&harness, &cli, benchmark, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prefixed_name, &prompt_mode, temperature, planning_temperature, &fallbacks, &overrides).await;
         drop(telemetry_guard); // flush OTLP spans
         return result;
     }
@@ -222,9 +235,9 @@ async fn main() -> Result<()> {
     // AI-NOTE: FC probe — run once per new model via `make probe` or `--probe`
     if cli.probe {
         eprintln!("[pac1] FC probe: testing model {} for function calling support...", model);
-        let config = pregrounding::make_llm_config(
+        let config = llm_config::make_llm_config(
             &model, base_url.as_deref(), &llm_api_key,
-            &extra_headers, temperature,
+            &extra_headers, temperature, &overrides,
         );
         let llm = sgr_agent::llm::Llm::new(&config);
         let probe_tool = sgr_agent::tool::ToolDef {
@@ -342,6 +355,7 @@ async fn main() -> Result<()> {
         let clf = shared_clf.clone();
         let nli = shared_nli.clone();
         let ov = outcome_validator.clone();
+        let overrides = overrides.clone();
 
         let handle = tokio::spawn(sgr_agent::with_telemetry_scope(async move {
             let _permit = sem.acquire().await.unwrap();
@@ -384,7 +398,7 @@ async fn main() -> Result<()> {
             let (last_msg, history, tool_calls, steps) = run_trial(
                 &pcm, &trial.instruction, &model,
                 base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature,
-                &clf, &nli, ov.clone(), sgr_mode, Some(&dump_dir), Some(&session_id),
+                &clf, &nli, ov.clone(), sgr_mode, Some(&dump_dir), Some(&session_id), &overrides,
             ).await;
             let agent_elapsed = t0.elapsed();
             verify_and_submit(
@@ -466,6 +480,7 @@ async fn run_leaderboard(
     temperature: f32,
     planning_temperature: f32,
     fallbacks: &[FallbackProvider],
+    overrides: &config::LlmOverrides,
 ) -> Result<()> {
     if cli.api_key.is_none() {
         anyhow::bail!("--api-key or BITGN_API_KEY required for leaderboard mode");
@@ -517,6 +532,7 @@ async fn run_leaderboard(
         let fallbacks: Vec<FallbackProvider> = fallbacks.to_vec();
         let lb_results = lb_results.clone();
         let total_trials = run.trial_ids.len();
+        let overrides = overrides.clone();
 
         let handle = tokio::spawn(sgr_agent::with_telemetry_scope(async move {
         let _permit = sem.acquire().await.unwrap();
@@ -544,7 +560,7 @@ async fn run_leaderboard(
 
         let pcm = Arc::new(pcm::PcmClient::new(&trial.harness_url));
         let t0 = std::time::Instant::now();
-        let (last_msg, history, tool_calls, steps) = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir), Some(&session_id)).await;
+        let (last_msg, history, tool_calls, steps) = run_trial(&pcm, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, temperature, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir), Some(&session_id), &overrides).await;
         let agent_elapsed = t0.elapsed();
 
         // AI-NOTE: verifier + ensemble retry removed. Agent's answer is final.
@@ -567,7 +583,7 @@ async fn run_leaderboard(
                 let (last_msg2, history2, tool_calls2, _steps2) = run_trial(
                     &pcm2, &trial.instruction, fb_model, fb_base.as_deref(), fb_key, fb_headers,
                     max_steps, &prompt_mode, *fb_temp, *fb_plan_temp,
-                    &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir), Some(&session_id),
+                    &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir), Some(&session_id), &overrides,
                 ).await;
                 verify_and_submit(
                     &pcm2, &trial.instruction, &last_msg2, &history2, tool_calls2,
@@ -576,7 +592,7 @@ async fn run_leaderboard(
             } else {
                 let pcm2 = Arc::new(pcm::PcmClient::new(&trial.harness_url));
                 let retry_temp = temperature + 0.1;
-                let (last_msg2, history2, tool_calls2, _steps2) = run_trial(&pcm2, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir), Some(&session_id)).await;
+                let (last_msg2, history2, tool_calls2, _steps2) = run_trial(&pcm2, &trial.instruction, &model, base_url.as_deref(), &llm_api_key, &extra_headers, max_steps, &prompt_mode, retry_temp, planning_temperature, &shared_clf, &shared_nli, outcome_validator.clone(), false, Some(&dump_dir), Some(&session_id), &overrides).await;
                 verify_and_submit(
                     &pcm2, &trial.instruction, &last_msg2, &history2, tool_calls2,
                     &model, base_url.as_deref(), &llm_api_key, &extra_headers, retry_temp,
@@ -678,8 +694,9 @@ async fn run_trial(
     sgr_mode: bool,
     dump_dir: Option<&str>,
     session_id: Option<&str>,
+    overrides: &config::LlmOverrides,
 ) -> (String, String, usize, usize) {
-    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator, sgr_mode, dump_dir, session_id).await {
+    match pregrounding::run_agent(pcm, instruction, model, base_url, api_key, extra_headers, max_steps, prompt_mode, temperature, planning_temperature, shared_clf, shared_nli, outcome_validator, sgr_mode, dump_dir, session_id, overrides).await {
         Ok((last_msg, history, tool_calls, steps)) => (last_msg, history, tool_calls, steps),
         Err(e) => {
             eprintln!("  ⚠ Agent error: {:#}", e);

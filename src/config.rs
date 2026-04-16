@@ -105,9 +105,41 @@ pub struct ProviderSection {
     /// Default: true for Responses API, ignored for Chat Completions.
     #[serde(default)]
     pub websocket: Option<bool>,
+    /// Agent phase mode: "off" (two-phase), "simple" (single-phase), "hybrid", "auto" (model-detect).
+    /// Default: auto — single-phase for most, two-phase for gpt-5.4-mini.
+    #[serde(default)]
+    pub single_phase: Option<String>,
     /// Pricing per million tokens (for budget estimation).
     #[serde(default)]
     pub pricing: Option<PricingSection>,
+}
+
+/// Per-trial overrides for LLM config — explicit parameters instead of env vars.
+#[derive(Debug, Clone, Default)]
+pub struct LlmOverrides {
+    pub use_chat_api: bool,
+    pub websocket: bool,
+    pub reasoning_effort: Option<String>,
+    pub prompt_cache_key: Option<String>,
+    /// Raw single_phase config string (off/simple/hybrid/auto). None = auto.
+    pub single_phase: Option<String>,
+}
+
+/// Resolved provider — all values needed for LLM setup.
+#[derive(Debug, Clone)]
+pub struct ResolvedProvider {
+    pub model: String,
+    pub base_url: Option<String>,
+    pub api_key: String,
+    pub extra_headers: Vec<(String, String)>,
+    pub prompt_mode: String,
+    pub temperature: f32,
+    pub planning_temperature: f32,
+    pub sgr_mode: bool,
+    pub reasoning_effort: Option<String>,
+    pub use_chat_api: bool,
+    /// Raw `single_phase` config value — resolved to `SinglePhaseMode` at agent construction.
+    pub single_phase: Option<String>,
 }
 
 /// Per-provider pricing in $/M tokens.
@@ -137,12 +169,8 @@ impl Config {
         toml::from_str(&text).context("parsing config.toml")
     }
 
-    /// Resolve provider by name, return (model, base_url, api_key, extra_headers, prompt_mode, temperature, planning_temperature, sgr_mode).
-    #[allow(clippy::type_complexity)]
-    pub fn resolve_provider(
-        &self,
-        name: &str,
-    ) -> Result<(String, Option<String>, String, Vec<(String, String)>, String, f32, f32, bool, Option<String>, bool)> {
+    /// Resolve provider by name into a typed struct.
+    pub fn resolve_provider(&self, name: &str) -> Result<ResolvedProvider> {
         let p = self
             .providers
             .get(name)
@@ -162,7 +190,7 @@ impl Config {
             std::env::var("OPENAI_API_KEY").unwrap_or_default()
         };
 
-        let headers: Vec<(String, String)> = p.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let extra_headers: Vec<(String, String)> = p.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         // AI-NOTE: V2 default — was "explicit" before 2026-04-10. All non-Nemotron models got wrong
         //   prompt causing 30pp gap (81% vs 95%). V2 is annotation-driven, explicit was numbered tree.
         let prompt_mode = p.prompt_mode.clone().unwrap_or_else(|| "v2".into());
@@ -170,10 +198,19 @@ impl Config {
         let temperature = p.temperature.or(self.defaults.temperature).unwrap_or(0.05);
         let planning_temperature = p.planning_temperature.or(self.defaults.planning_temperature).unwrap_or(0.15);
 
-        let sgr_mode = p.sgr_mode.unwrap_or(false);
-        let use_chat_api = p.use_chat_api.unwrap_or(false);
-
-        Ok((p.model.clone(), p.base_url.clone(), api_key, headers, prompt_mode, temperature, planning_temperature, sgr_mode, p.reasoning_effort.clone(), use_chat_api))
+        Ok(ResolvedProvider {
+            model: p.model.clone(),
+            base_url: p.base_url.clone(),
+            api_key,
+            extra_headers,
+            prompt_mode,
+            temperature,
+            planning_temperature,
+            sgr_mode: p.sgr_mode.unwrap_or(false),
+            reasoning_effort: p.reasoning_effort.clone(),
+            use_chat_api: p.use_chat_api.unwrap_or(false),
+            single_phase: p.single_phase.clone(),
+        })
     }
 }
 
@@ -200,7 +237,8 @@ planning_temperature = 0.4
         let cfg: Config = toml::from_str(toml_str).unwrap();
         let p = cfg.providers.get("test").unwrap();
         assert_eq!(p.planning_temperature, Some(0.4));
-        let (_, _, _, _, _, temp, plan_temp, _, _, _) = cfg.resolve_provider("test").unwrap();
+        let resolved = cfg.resolve_provider("test").unwrap();
+        let (temp, plan_temp) = (resolved.temperature, resolved.planning_temperature);
         assert!((temp - 0.1).abs() < 0.001);
         assert!((plan_temp - 0.4).abs() < 0.001);
     }
@@ -222,7 +260,8 @@ api_key = "sk-test"
         let cfg: Config = toml::from_str(toml_str).unwrap();
         let p = cfg.providers.get("test").unwrap();
         assert_eq!(p.planning_temperature, None);
-        let (_, _, _, _, _, temp, plan_temp, _, _, _) = cfg.resolve_provider("test").unwrap();
+        let resolved = cfg.resolve_provider("test").unwrap();
+        let (temp, plan_temp) = (resolved.temperature, resolved.planning_temperature);
         assert!((temp - 0.05).abs() < 0.001); // default temperature
         assert!((plan_temp - 0.15).abs() < 0.001); // default planning_temperature
     }

@@ -84,28 +84,22 @@ pub enum SinglePhaseMode {
 }
 
 impl SinglePhaseMode {
-    pub fn from_env() -> Self {
-        // TWO_PHASE=1 forces two-phase
-        if std::env::var("TWO_PHASE").is_ok() {
-            return Self::Off;
+    /// Parse from config string. Returns None for "auto" — caller applies model-based default.
+    pub fn from_config(value: Option<&str>) -> Option<Self> {
+        match value? {
+            "off" | "0" => Some(Self::Off),
+            "on" | "1" | "simple" => Some(Self::Simple),
+            "hybrid" => Some(Self::Hybrid),
+            "auto" | "" => None,
+            other => {
+                eprintln!("  ⚠ Unknown single_phase value: {}", other);
+                None
+            }
         }
-        // Explicit SINGLE_PHASE overrides auto-detect
-        match std::env::var("SINGLE_PHASE").as_deref() {
-            Ok("off") | Ok("0") => return Self::Off,
-            Ok("on") | Ok("1") | Ok("simple") => return Self::Simple,
-            Ok("hybrid") => return Self::Hybrid,
-            _ => {}
-        }
-        // Default: single-phase (parallel plan_next+action)
-        Self::Simple
     }
 
-    /// Auto-detect based on model name.
+    /// Auto-detect based on model name. Used when config is "auto" or absent.
     pub fn for_model(model: &str) -> Self {
-        // Env vars override auto-detect
-        if std::env::var("TWO_PHASE").is_ok() || std::env::var("SINGLE_PHASE").is_ok() {
-            return Self::from_env();
-        }
         // AI-NOTE: GPT-5.4-mini reasoning degrades in single-phase — plan_next called alone
         // (no parallel FC), retry gives worse results than structured two-phase reasoning.
         // Two-phase: 3/4 tasks vs single-phase 2/4 in comparative test.
@@ -114,6 +108,11 @@ impl SinglePhaseMode {
         }
         // Default: single-phase (parallel plan_next+action)
         Self::Simple
+    }
+
+    /// Resolve mode from config override + model-based fallback.
+    pub fn resolve(config_value: Option<&str>, model: &str) -> Self {
+        Self::from_config(config_value).unwrap_or_else(|| Self::for_model(model))
     }
 }
 
@@ -155,8 +154,8 @@ impl<C: LlmClient> Pac1Agent<C> {
         client: C, system_prompt: impl Into<String>, max_steps: u32, prompt_mode: &str,
         no_prefill: bool, model: &str,
         workflow: Option<crate::workflow::SharedWorkflowState>,
+        single_phase: SinglePhaseMode,
     ) -> Self {
-        let single_phase = SinglePhaseMode::for_model(model);
         if single_phase != SinglePhaseMode::Off {
             eprintln!("  🧪 Single-phase mode: {:?}", single_phase);
         }
