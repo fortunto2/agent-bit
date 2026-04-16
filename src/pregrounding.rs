@@ -346,6 +346,7 @@ pub(crate) async fn run_agent(
         messages.push(Message::user(&inbox_content));
 
         // OTP detection (for workflow state machine flags)
+
         has_otp = ready.inbox_files.iter().any(|f| {
             let l = f.content.to_lowercase();
             f.security.ml_label == "credential" && f.security.ml_conf > 0.50
@@ -354,6 +355,31 @@ pub(crate) async fn run_agent(
         is_verification = ready.inbox_files.iter().any(|f| {
             f.content.to_lowercase().contains("reply with exactly")
         });
+    }
+
+    // Preload files mentioned by name in the instruction — "queue up X.md", "OCR Y.json".
+    // Saves 2-N search/read steps on t017/t042/t067/t092-style tasks (NORA migration etc.).
+    let mentioned = extract_mentioned_filenames(instruction);
+    if !mentioned.is_empty() {
+        let resolved = futures::future::join_all(mentioned.iter().map(|name| async {
+            let listing = pcm.find("/", name, "files", 5).await.unwrap_or_default();
+            let path = listing.lines()
+                .skip(1)
+                .find(|l| !l.is_empty() && !l.starts_with("$ find"))
+                .map(|s| s.trim_start_matches('/').to_string());
+            (name.clone(), path)
+        })).await;
+        let found: Vec<(String, String)> = resolved.into_iter()
+            .filter_map(|(n, p)| p.map(|path| (n, path)))
+            .collect();
+        if !found.is_empty() {
+            let mut note = String::from("FILES REFERENCED IN INSTRUCTION (resolved to absolute paths — use these directly, no need to search):\n");
+            for (name, path) in &found {
+                note.push_str(&format!("  {name} → {path}\n"));
+            }
+            messages.push(Message::user(&note));
+            eprintln!("  📎 Preloaded {} filename reference(s) from instruction", found.len());
+        }
     }
 
     let crm_graph = Arc::new(ready.crm_graph);
@@ -683,6 +709,30 @@ pub(crate) fn build_execution_summary(history: &str, max_lines: usize) -> String
         .collect();
     let start = relevant.len().saturating_sub(max_lines);
     relevant[start..].join("\n")
+}
+
+/// Extract filenames mentioned in the instruction (e.g. "queue up X.md, Y.json").
+/// Looks for word.ext sequences where ext ∈ {md, MD, json, txt, csv, yaml, yml}.
+/// Deduplicates and skips trivial common names.
+pub(crate) fn extract_mentioned_filenames(instruction: &str) -> Vec<String> {
+    static RX: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let rx = RX.get_or_init(|| regex::Regex::new(
+        r"\b([a-zA-Z0-9][a-zA-Z0-9_\-]{2,}\.(?:md|MD|json|txt|csv|yaml|yml))\b"
+    ).unwrap());
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for cap in rx.captures_iter(instruction) {
+        if let Some(m) = cap.get(1) {
+            let name = m.as_str().to_string();
+            let lower = name.to_lowercase();
+            // skip common scaffolding names agent shouldn't blindly fetch
+            if matches!(lower.as_str(), "readme.md" | "agents.md" | "todo.md" | "index.md") {
+                continue;
+            }
+            if seen.insert(lower) { out.push(name); }
+        }
+    }
+    out
 }
 
 /// Extract channel handle from inbox message content.
