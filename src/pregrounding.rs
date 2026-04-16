@@ -415,11 +415,13 @@ pub(crate) async fn run_agent(
         workflow.lock().unwrap().otp_with_task = true;
     }
 
-    // Security threat: ML label = injection/social_engineering OR sender domain mismatch.
+    // Security threat: ML label = injection/social_engineering, sender domain mismatch,
+    // OR exfiltration content (requests to forward/share personal files).
     // Workflow blocks write/delete → agent must answer(DENIED_SECURITY) with ZERO changes.
     let has_security_threat = ready.inbox_files.iter().any(|f| {
         matches!(f.security.ml_label.as_str(), "injection" | "social_engineering")
             || f.security.sender.as_ref().is_some_and(|s| s.domain_match == "mismatch")
+            || crate::policy::scan_exfiltration(&f.content)
     });
     if has_security_threat {
         workflow.lock().unwrap().security_threat = true;
