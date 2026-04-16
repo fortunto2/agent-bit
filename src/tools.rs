@@ -209,6 +209,31 @@ impl Tool for WriteTool {
             return Ok(out);
         }
 
+        // Middleware 1b: frontmatter-only write on existing file with body — body-loss guard.
+        // `write` without start_line/end_line replaces the entire file. If the new content is
+        // a YAML frontmatter block that ends right after `---` and the existing file has a longer
+        // body, the agent almost certainly intended `prepend_to_file`.
+        let start_line = a.get("start_line").and_then(|v| v.as_i64()).unwrap_or(0);
+        let end_line = a.get("end_line").and_then(|v| v.as_i64()).unwrap_or(0);
+        if start_line == 0 && end_line == 0
+            && content.trim_start().starts_with("---")
+            && let Some(close) = content.match_indices("\n---").nth(0)
+        {
+            // After closing `---`, is there substantive body?
+            let after = content[close.0 + 4..].trim();
+            if after.len() < 20
+                && let Ok(existing) = self.pcm.read(&path, false, 0, 0).await
+                && existing.len() > content.len() + 40
+            {
+                return Ok(ToolOutput::text(format!(
+                    "⛔ Body-loss risk: `write` on existing file `{path}` with frontmatter-only \
+                     content would replace {} bytes of existing body. Use `prepend_to_file` with \
+                     the frontmatter as `header` to keep the body intact.",
+                    existing.len() - content.len()
+                )));
+            }
+        }
+
         // Middleware 2: outbox sent:false auto-inject
         let mut final_args = args.clone();
         if path.ends_with(".json") && path.contains("outbox/") && !path.contains("seq.json") {

@@ -70,6 +70,7 @@ TOOLS AVAILABLE (10 active, 7 on-demand):
 - Per file: at most ONE write. A second write only if first produced invalid syntax.
 - For JSON: validate content before write (no literal newlines in strings, valid JSON syntax).
 - For YAML frontmatter: quote values containing colons, e.g. subject: "Re: Invoice request" (unquoted Re: breaks YAML).
+- ADDING frontmatter to an existing file (OCR/enrichment workflows): use `prepend_to_file` with `header`, NEVER `write`. `write` without `start_line`/`end_line` replaces the entire file — you will silently destroy the body. If you must use `write`, read the original first and include the full body after the frontmatter.
 - Outbox: write email file FIRST, then seq.json. Read outbox guide (AGENTS.MD or README.MD) for format.
 - When instruction gives an email address directly ("send to X@Y.com") — USE THAT ADDRESS.
 - For inbox tasks: process only the EARLIEST pending message, then answer. Do NOT process multiple items.
