@@ -715,8 +715,10 @@ pub fn assess_sender(
     let email = match sender_email {
         Some(e) if !e.is_empty() => e,
         _ => return SenderAssessment {
-            trust: SenderTrust::Unknown, domain_match: "unknown",
-            reasons: vec!["no sender email".into()],
+            // No From header → it's a task note, not inbound mail. Owner's own to-do.
+            trust: SenderTrust::Known,
+            domain_match: "match",
+            reasons: vec!["task note (no From header) → owner task".into()],
         },
     };
 
@@ -1024,8 +1026,10 @@ mod tests {
 
     #[test]
     fn sender_no_email() {
+        // No From header → task note (owner's own to-do list placed in inbox).
         let sa = assess_sender(None, "content", None, &[]);
-        assert_eq!(sa.trust, SenderTrust::Unknown);
+        assert_eq!(sa.trust, SenderTrust::Known);
+        assert_eq!(sa.domain_match, "match");
     }
 
     #[test]

@@ -292,8 +292,13 @@ pub(crate) async fn run_agent(
                 "$ cat {}\n[CLASSIFICATION: {} ({:.2}) | sender: {} | threat: {} ({:.0}%) | {}]\n",
                 f.path, f.security.ml_label, f.security.ml_conf, sender_trust, threat_label, threat * 100.0, f.security.recommendation
             ));
+            // Task note (no email headers) — just a to-do placed in inbox, not inbound mail.
+            // Sender verification doesn't apply; treat as workspace-owner task.
+            if crate::scanner::is_task_note(&f.content) {
+                inbox_content.push_str("[📝 TASK NOTE — no email headers, just a to-do list in inbox; treat as owner task, no sender verification]\n");
+            }
             // Self-email (from == to) — workspace owner writing to themselves. Most trusted.
-            if crate::scanner::is_self_email(&f.content) {
+            else if crate::scanner::is_self_email(&f.content) {
                 inbox_content.push_str("[✓ SELF-EMAIL: workspace owner wrote to themselves — task request, no sender verification needed]\n");
             }
             // Sender trust annotations — KNOWN overrides domain mismatch

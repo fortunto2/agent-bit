@@ -385,6 +385,13 @@ pub(crate) fn extract_sender_email(text: &str) -> Option<String> {
     None
 }
 
+/// Detect task-note style inbox file: no `From:` / `from:` email header at all.
+/// Such files are plain to-do notes placed in inbox, not inbound mail — `sender: UNKNOWN`
+/// is misleading, nothing to verify. Heuristic: no extractable sender email anywhere.
+pub(crate) fn is_task_note(text: &str) -> bool {
+    extract_sender_email(text).is_none()
+}
+
 /// Detect self-addressed inbox message: `from` email matches any `to` email.
 /// Such messages are the workspace owner writing to themselves — they are
 /// trusted task requests, not external inbound mail. Covers YAML frontmatter
