@@ -553,8 +553,21 @@ Agent explores workspace itself via tree + AGENTS.MD + batch tools.
 Providers in `config.toml`. Key fields per provider:
 - `model`, `base_url`, `api_key` / `api_key_env`
 - `auth` -- "keychain" for Claude Code subscription (macOS Keychain OAuth token)
+- `use_chat_api` -- use Chat Completions API instead of Responses API (recommended for agents)
+- `websocket` -- enable/disable WebSocket for Responses API (default: true, ignored for Chat API)
 - Single prompt for all models (explicit decision tree). No prompt_mode needed.
 - `headers` -- extra HTTP headers (e.g. CF Gateway timeout)
+
+### OpenAI API Choice (Chat Completions vs Responses)
+
+**Use Chat Completions (`use_chat_api = true`) for production.** See `benchmarks/prod-analysis/openai-api-comparison.md` for full benchmark data.
+
+Key findings:
+- Chat Completions: 100% pass rate, reliable parallel FC, but 30-50% slower
+- Responses API: faster (WS), but server-side orchestration conflicts with custom agent loops
+- WebSocket: only Responses API, only direct OpenAI (not OpenRouter). 5-8s savings on simple tasks
+- GPT-5.4-mini auto-detects two-phase mode (structured reasoning better than single-phase for mini)
+- `ensure_strict()` applied to all tool schemas (OpenAI strict mode: all props in required)
 
 ### Model Compatibility (Two-Phase FC)
 

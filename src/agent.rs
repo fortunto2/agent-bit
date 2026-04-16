@@ -101,9 +101,19 @@ impl SinglePhaseMode {
     }
 
     /// Auto-detect based on model name.
-    pub fn for_model(_model: &str) -> Self {
-        // Single-phase for ALL models — core_defs() limits to ~8 tools, parallel works
-        Self::from_env()
+    pub fn for_model(model: &str) -> Self {
+        // Env vars override auto-detect
+        if std::env::var("TWO_PHASE").is_ok() || std::env::var("SINGLE_PHASE").is_ok() {
+            return Self::from_env();
+        }
+        // AI-NOTE: GPT-5.4-mini reasoning degrades in single-phase — plan_next called alone
+        // (no parallel FC), retry gives worse results than structured two-phase reasoning.
+        // Two-phase: 3/4 tasks vs single-phase 2/4 in comparative test.
+        if model.contains("gpt-5.4-mini") {
+            return Self::Off;
+        }
+        // Default: single-phase (parallel plan_next+action)
+        Self::Simple
     }
 }
 
@@ -627,7 +637,7 @@ fn reasoning_tool_def() -> ToolDef {
                     "description": "true when task complete"
                 }
             },
-            "required": ["current_state", "security_assessment", "task_type", "plan", "done"],
+            "required": ["current_state", "security_assessment", "task_type", "plan", "verification", "confidence", "done"],
             "additionalProperties": false
         }),
     }
@@ -1163,10 +1173,10 @@ mod tests {
         let def = reasoning_tool_def();
         let props = def.parameters["properties"].as_object().unwrap();
         assert!(props.contains_key("confidence"), "reasoning schema must have confidence field");
-        // confidence is NOT required
+        // AI-NOTE: confidence IS required — OpenAI strict mode needs all props in required
         let required = def.parameters["required"].as_array().unwrap();
         let required_names: Vec<&str> = required.iter().map(|v| v.as_str().unwrap()).collect();
-        assert!(!required_names.contains(&"confidence"), "confidence must NOT be required");
+        assert!(required_names.contains(&"confidence"), "confidence must be required (strict mode)");
     }
 
     #[test]

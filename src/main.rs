@@ -119,7 +119,7 @@ async fn main() -> Result<()> {
 
     let cfg = config::Config::load(&cli.config)?;
     let provider_name = cli.provider.as_deref().unwrap_or(&cfg.llm.provider);
-    let (model, base_url, llm_api_key, extra_headers, prompt_mode, temperature, planning_temperature, sgr_mode, reasoning_effort) = cfg.resolve_provider(provider_name)?;
+    let (model, base_url, llm_api_key, extra_headers, prompt_mode, temperature, planning_temperature, sgr_mode, reasoning_effort, use_chat_api) = cfg.resolve_provider(provider_name)?;
     // Set reasoning_effort as env var for pregrounding::make_llm_config
     if let Some(ref effort) = reasoning_effort {
         unsafe { std::env::set_var("LLM_REASONING_EFFORT", effort); }
@@ -130,6 +130,18 @@ async fn main() -> Result<()> {
         .or_else(|| cfg.defaults.prompt_cache_key.clone());
     if let Some(ref key) = cache_key {
         unsafe { std::env::set_var("LLM_PROMPT_CACHE_KEY", key); }
+    }
+    if use_chat_api {
+        unsafe { std::env::set_var("USE_CHAT_API", "1"); }
+        eprintln!("[pac1] API: Chat Completions (use_chat_api=true)");
+    }
+    // websocket: default true for Responses API, false for Chat Completions
+    let ws_enabled = cfg.providers.get(provider_name)
+        .and_then(|p| p.websocket)
+        .unwrap_or(!use_chat_api); // default: on for Responses API
+    if !ws_enabled {
+        unsafe { std::env::set_var("NO_WS", "1"); }
+        eprintln!("[pac1] WebSocket: disabled");
     }
     if sgr_mode {
         eprintln!("[pac1] SGR mode: pure (single LLM call per step)");
@@ -149,7 +161,7 @@ async fn main() -> Result<()> {
     let fallbacks: Vec<FallbackProvider> = cfg.agent.fallback_providers.iter()
         .filter(|name| name.as_str() != provider_name)
         .filter_map(|name| {
-            cfg.resolve_provider(name).ok().map(|(m, bu, ak, eh, _pm, t, pt, _sgr, _re)| {
+            cfg.resolve_provider(name).ok().map(|(m, bu, ak, eh, _pm, t, pt, _sgr, _re, _chat)| {
                 eprintln!("[pac1] Fallback: {} | Model: {}", name, m);
                 (m, bu, ak, eh, t, pt)
             })

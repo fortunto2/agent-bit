@@ -87,21 +87,41 @@ api_key_env = "CF_AI_API_KEY"
 cf-aig-request-timeout = "300000"
 cf-aig-cache-ttl = "3600"
 
+# GPT-5.4-mini: Responses API + WebSocket (lowest latency)
 [providers.gpt54-mini]
 model = "gpt-5.4-mini"
 api_key_env = "OPENAI_API_KEY"
+# websocket = true  (default for Responses API)
 
+# GPT-5.4-mini: Responses API without WebSocket (HTTP only, for A/B testing)
+[providers.gpt54-mini-http]
+model = "gpt-5.4-mini"
+api_key_env = "OPENAI_API_KEY"
+websocket = false
+
+# GPT-5.4-mini: Chat Completions API (better parallel FC, strict schema)
+[providers.gpt54-mini-chat]
+model = "gpt-5.4-mini"
+api_key_env = "OPENAI_API_KEY"
+use_chat_api = true
+# websocket not applicable (Chat API = HTTP only)
+
+# GPT-5.4 full: Responses API + WebSocket
 [providers.gpt54]
 model = "gpt-5.4"
 api_key_env = "OPENAI_API_KEY"
 
-# Aliases for backward compat
+# GPT-5.4 full: Chat Completions API
+[providers.gpt54-chat]
+model = "gpt-5.4"
+api_key_env = "OPENAI_API_KEY"
+use_chat_api = true
+
+# Alias (backward compat)
 [providers.openai]
 model = "gpt-5.4-mini"
 api_key_env = "OPENAI_API_KEY"
 use_chat_api = true
-# Chat Completions enables parallel tool calls (plan_next + action in one response)
-# Responses API = 1 tool per response, no parallel
 
 [providers.openai-full]
 model = "gpt-5.4"

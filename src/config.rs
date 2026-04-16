@@ -101,6 +101,10 @@ pub struct ProviderSection {
     /// Use Chat Completions API instead of Responses API.
     #[serde(default)]
     pub use_chat_api: Option<bool>,
+    /// Enable WebSocket for Responses API (lower latency, persistent connection).
+    /// Default: true for Responses API, ignored for Chat Completions.
+    #[serde(default)]
+    pub websocket: Option<bool>,
     /// Pricing per million tokens (for budget estimation).
     #[serde(default)]
     pub pricing: Option<PricingSection>,
@@ -138,7 +142,7 @@ impl Config {
     pub fn resolve_provider(
         &self,
         name: &str,
-    ) -> Result<(String, Option<String>, String, Vec<(String, String)>, String, f32, f32, bool, Option<String>)> {
+    ) -> Result<(String, Option<String>, String, Vec<(String, String)>, String, f32, f32, bool, Option<String>, bool)> {
         let p = self
             .providers
             .get(name)
@@ -167,8 +171,9 @@ impl Config {
         let planning_temperature = p.planning_temperature.or(self.defaults.planning_temperature).unwrap_or(0.15);
 
         let sgr_mode = p.sgr_mode.unwrap_or(false);
+        let use_chat_api = p.use_chat_api.unwrap_or(false);
 
-        Ok((p.model.clone(), p.base_url.clone(), api_key, headers, prompt_mode, temperature, planning_temperature, sgr_mode, p.reasoning_effort.clone()))
+        Ok((p.model.clone(), p.base_url.clone(), api_key, headers, prompt_mode, temperature, planning_temperature, sgr_mode, p.reasoning_effort.clone(), use_chat_api))
     }
 }
 
@@ -195,7 +200,7 @@ planning_temperature = 0.4
         let cfg: Config = toml::from_str(toml_str).unwrap();
         let p = cfg.providers.get("test").unwrap();
         assert_eq!(p.planning_temperature, Some(0.4));
-        let (_, _, _, _, _, temp, plan_temp, _, _) = cfg.resolve_provider("test").unwrap();
+        let (_, _, _, _, _, temp, plan_temp, _, _, _) = cfg.resolve_provider("test").unwrap();
         assert!((temp - 0.1).abs() < 0.001);
         assert!((plan_temp - 0.4).abs() < 0.001);
     }
@@ -217,7 +222,7 @@ api_key = "sk-test"
         let cfg: Config = toml::from_str(toml_str).unwrap();
         let p = cfg.providers.get("test").unwrap();
         assert_eq!(p.planning_temperature, None);
-        let (_, _, _, _, _, temp, plan_temp, _, _) = cfg.resolve_provider("test").unwrap();
+        let (_, _, _, _, _, temp, plan_temp, _, _, _) = cfg.resolve_provider("test").unwrap();
         assert!((temp - 0.05).abs() < 0.001); // default temperature
         assert!((plan_temp - 0.15).abs() < 0.001); // default planning_temperature
     }

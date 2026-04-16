@@ -90,6 +90,9 @@ pub(crate) fn make_llm_config(
     extra_headers: &[(String, String)],
     temperature: f32,
 ) -> LlmConfig {
+    // AI-NOTE: use_chat_api from config.toml passed via env var (avoids changing all call sites).
+    // Set by main.rs before any trial runs.
+    let force_chat_api = std::env::var("USE_CHAT_API").is_ok();
     if let Some(url) = base_url {
         let mut cfg = LlmConfig::endpoint(api_key, url, model).temperature(temperature as f64).max_tokens(4096);
         cfg.use_chat_api = true;
@@ -102,6 +105,9 @@ pub(crate) fn make_llm_config(
         cfg.extra_headers = extra_headers.to_vec();
         // Native API providers (Anthropic, Gemini) need genai backend
         cfg.use_genai = model.starts_with("claude") || model.starts_with("gemini");
+        cfg.use_chat_api = force_chat_api;
+        cfg.reasoning_effort = std::env::var("LLM_REASONING_EFFORT").ok();
+        cfg.prompt_cache_key = std::env::var("LLM_PROMPT_CACHE_KEY").ok();
         cfg
     } else {
         let mut cfg = LlmConfig::auto(model).temperature(temperature as f64).max_tokens(4096);
@@ -331,8 +337,13 @@ pub(crate) async fn run_agent(
     config.session_id = session_id.map(|s| s.to_string());
     let llm = Llm::new(&config);
     // WebSocket upgrade for Responses API (OpenAI direct) — lower latency, persistent connection
-    if let Err(e) = llm.connect_ws().await {
-        eprintln!("  ⚠ WS upgrade skipped: {}", e);
+    // NO_WS=1 disables WS for A/B testing
+    if std::env::var("NO_WS").is_err() {
+        if let Err(e) = llm.connect_ws().await {
+            eprintln!("  ⚠ WS upgrade skipped: {}", e);
+        }
+    } else {
+        eprintln!("  📡 WebSocket disabled (NO_WS=1), using HTTP");
     }
 
     // AI-NOTE: FC probe moved to --probe CLI flag (not per-trial). Use `make probe` to test new models.
