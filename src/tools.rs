@@ -113,18 +113,23 @@ impl Tool for ReadTool {
     }
 }
 
-/// Append nested AGENTS.md content if the subtree hasn't been shown yet.
-/// Shared by ReadTool and WriteTool — both trigger injection on first contact.
+/// Append nested AGENTS.md content for every ancestor subtree of `path` that
+/// hasn't been shown yet. Per Model Spec §5 all ancestors apply (deepest wins on
+/// conflict; agent must surface unresolvable conflicts as CLARIFICATION).
+/// Shared by ReadTool and WriteTool — triggers on first contact with each subtree.
 /// Case-insensitive: workspace may have `AGENTS.md` or `AGENTS.MD` per subtree.
 fn append_nested_agents_notice(output: &mut String, pcm: &PcmClient, path: &str) {
     if path.is_empty() { return; }
     let basename = path.rsplit_once('/').map(|(_, b)| b).unwrap_or(path);
     if basename.eq_ignore_ascii_case("AGENTS.md") { return; } // don't inject into AGENTS.md itself
-    let Some((dir, content)) = pcm.nearest_nested_agents(path) else { return; };
-    if !pcm.mark_subtree_injected(&dir) { return; }
-    output.push_str(&format!(
-        "\n\n[NESTED AGENTS.md @ {dir}/AGENTS.md — local refinement for this subtree; must not contradict root AGENTS.md; if it does → OUTCOME_NONE_CLARIFICATION]\n{content}"
-    ));
+    // Inject shallowest-first so agent reads root-closer rules before deeper refinements.
+    let chain = pcm.relevant_nested_agents(&[path]);
+    for (dir, content) in chain {
+        if !pcm.mark_subtree_injected(&dir) { continue; }
+        output.push_str(&format!(
+            "\n\n[NESTED AGENTS.md @ {dir}/AGENTS.md — local refinement for this subtree; must not contradict root AGENTS.md; if it does → OUTCOME_NONE_CLARIFICATION]\n{content}"
+        ));
+    }
 }
 
 /// Fix YAML frontmatter: validate with serde_yaml, auto-quote broken values.

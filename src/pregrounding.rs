@@ -232,15 +232,21 @@ pub(crate) async fn run_agent(
     if !agents_md.is_empty() {
         messages.push(Message::user(&format!("AGENTS.MD (workspace rules):\n{}", agents_md)));
     }
-    // Model Spec §5: nested AGENTS.MD as local refinements for their subtrees.
-    // Eager injection (not lazy via ReadTool) — inbox content is pre-grounded, so
-    // agent may never read files from subtrees that have nested AGENTS.MD otherwise.
-    for (dir, content) in pcm.all_nested_agents() {
+    // Model Spec §5: nested AGENTS.MD = LOCAL refinement for its subtree only.
+    // Eager inject only for subtrees on the ancestor chain of pre-grounded inbox files
+    // (agent never Reads those itself since inbox content is pre-injected).
+    // Subtrees the agent enters later get their nested AGENTS.MD via ReadTool/WriteTool lazy inject.
+    let inbox_paths: Vec<&str> = ready.inbox_files.iter().map(|f| f.path.as_str()).collect();
+    let relevant = pcm.relevant_nested_agents(&inbox_paths);
+    for (dir, content) in &relevant {
         messages.push(Message::user(&format!(
             "NESTED AGENTS.MD @ {dir}/AGENTS.MD — local refinement for this subtree; must not contradict root AGENTS.MD; if conflict is unresolvable → OUTCOME_NONE_CLARIFICATION:\n{content}"
         )));
+        pcm.mark_subtree_injected(dir);
     }
-    pcm.mark_all_subtrees_injected(); // ReadTool/WriteTool stop re-injecting these
+    if !relevant.is_empty() {
+        eprintln!("  📜 Nested AGENTS.MD eagerly injected: {} subtree(s) (from inbox path chain)", relevant.len());
+    }
 
     if !skill_body.is_empty() {
         // AI-NOTE: dynamic context injection — !command in SKILL.md replaced with real data

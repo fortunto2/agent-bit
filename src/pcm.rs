@@ -316,13 +316,32 @@ impl PcmClient {
         Ok(map.len())
     }
 
-    /// Return all preloaded nested AGENTS.md entries as (dir, content) pairs, sorted by dir.
-    /// Used by pregrounding to inject all of them eagerly into the LLM context.
-    pub fn all_nested_agents(&self) -> Vec<(String, String)> {
+    /// Return preloaded nested AGENTS.MD entries whose dir is an ancestor of any of `target_paths`.
+    /// Per Model Spec §5: nested = local refinement, only applies within its subtree.
+    /// Example: paths=["inbox/msg.md"] → returns `inbox/AGENTS.MD` (and any ancestor nested),
+    /// but NOT sibling `accounts/AGENTS.md`.
+    /// Sorted from shallowest to deepest dir (natural reading order).
+    pub fn relevant_nested_agents(&self, target_paths: &[&str]) -> Vec<(String, String)> {
         let map = match self.nested_agents.lock() { Ok(m) => m, Err(_) => return Vec::new() };
-        let mut entries: Vec<(String, String)> = map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-        entries
+        let mut out: Vec<(String, String)> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for raw in target_paths {
+            let normalized = raw.trim_start_matches('/').trim_end_matches('/');
+            let mut current: &str = normalized;
+            loop {
+                if let Some(content) = map.get(current)
+                    && seen.insert(current.to_string())
+                {
+                    out.push((current.to_string(), content.clone()));
+                }
+                match current.rsplit_once('/') {
+                    Some((parent, _)) => current = parent,
+                    None => break,
+                }
+            }
+        }
+        out.sort_by(|a, b| a.0.split('/').count().cmp(&b.0.split('/').count()).then_with(|| a.0.cmp(&b.0)));
+        out
     }
 
     /// Mark every preloaded subtree as injected — used after eager pregrounding injection
