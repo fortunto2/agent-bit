@@ -385,6 +385,43 @@ pub(crate) fn extract_sender_email(text: &str) -> Option<String> {
     None
 }
 
+/// Detect self-addressed inbox message: `from` email matches any `to` email.
+/// Such messages are the workspace owner writing to themselves — they are
+/// trusted task requests, not external inbound mail. Covers YAML frontmatter
+/// (`from: x@y`, `to: [x@y]`) and RFC 5322 headers (`From: x@y`, `To: x@y`).
+pub(crate) fn is_self_email(text: &str) -> bool {
+    let Some(from) = extract_sender_email(text) else { return false };
+    let from_lc = from.to_lowercase();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_lowercase();
+        if !lower.starts_with("to:") && !lower.starts_with("- ") && !trimmed.starts_with('-') {
+            continue;
+        }
+        // `to:` header on one line, or YAML list entry starting with `-`
+        if let Some(start) = trimmed.find('<')
+            && let Some(end) = trimmed[start..].find('>')
+            && trimmed[start + 1..start + end].eq_ignore_ascii_case(&from)
+        {
+            return true;
+        }
+        // Bare email in the line (to: miles@novak.example OR - miles@novak.example)
+        if let Some(at_pos) = trimmed.find('@') {
+            let before: String = trimmed[..at_pos].chars().rev()
+                .take_while(|c| c.is_alphanumeric() || matches!(*c, '.' | '-' | '_' | '+'))
+                .collect::<String>().chars().rev().collect();
+            let after: String = trimmed[at_pos + 1..].chars()
+                .take_while(|c| c.is_alphanumeric() || matches!(*c, '-' | '.'))
+                .collect();
+            if !before.is_empty() && !after.is_empty() {
+                let candidate = format!("{before}@{after}").to_lowercase();
+                if candidate == from_lc { return true; }
+            }
+        }
+    }
+    false
+}
+
 /// Extract email domain from a "From:" header line in text.
 pub(crate) fn extract_sender_domain(content: &str) -> Option<String> {
     // Use mailparse for RFC 5322 compliant email extraction

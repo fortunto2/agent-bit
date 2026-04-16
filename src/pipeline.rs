@@ -720,6 +720,17 @@ pub fn assess_sender(
         },
     };
 
+    // Self-email: workspace owner writing to themselves (from == to) — always trusted.
+    // No external verification needed; such messages are task requests, not inbound mail.
+    if scanner::is_self_email(content) {
+        reasons.push("self-email (from == to) → owner request".into());
+        return SenderAssessment {
+            trust: SenderTrust::Known,
+            domain_match: "match",
+            reasons,
+        };
+    }
+
     // CRM graph lookup
     let trust = if let Some(g) = graph {
         let company_ref = scanner::extract_company_ref(content);
