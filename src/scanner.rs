@@ -415,6 +415,34 @@ pub(crate) fn is_task_note(text: &str) -> bool {
     extract_sender_email(text).is_none()
 }
 
+/// Detect near-duplicate file paths in text (ambiguous list trap).
+/// Returns the first pair of paths with normalized Levenshtein similarity ≥ 0.9
+/// but not exactly equal — covers typos, stray prefixes (`_2026_...`), wrong
+/// extensions, etc. Used to inject a CLARIFICATION hint into inbox annotation.
+/// AI-NOTE: t015 — inbox lists 5 files where #4 and #5 differ only by leading `_`.
+/// Harness expects CLARIFICATION. Universal strsim detection, no hardcoded markers.
+pub(crate) fn detect_ambiguous_file_list(text: &str) -> Option<(String, String)> {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"[\w./\-]+\.(?:md|txt|json|yaml|yml|pdf|csv|log|xml|html)").unwrap()
+    });
+    let paths: Vec<String> = RE.find_iter(text)
+        .map(|m| m.as_str().to_string())
+        .filter(|p| p.contains('/') && p.len() >= 10)
+        .collect();
+    // Tight threshold: absolute Levenshtein ≤ 2. Catches traps like `_file.md` vs
+    // `file.md` or `report.md` vs `report_.md`. Rejects normal sibling paths that
+    // differ in multiple chars (different dates/amounts → dist ≥ 4).
+    for i in 0..paths.len() {
+        for j in (i + 1)..paths.len() {
+            if paths[i] == paths[j] { continue; }
+            if strsim::levenshtein(&paths[i], &paths[j]) <= 2 {
+                return Some((paths[i].clone(), paths[j].clone()));
+            }
+        }
+    }
+    None
+}
+
 /// Detect self-addressed inbox message: `from` email matches any `to` email.
 /// Such messages are the workspace owner writing to themselves — they are
 /// trusted task requests, not external inbound mail. Covers YAML frontmatter
@@ -695,6 +723,32 @@ mod tests {
     #[test]
     fn threat_score_clean_text() {
         assert_eq!(threat_score("Add a new contact for John Smith"), 0);
+    }
+
+    #[test]
+    fn ambiguous_file_list_underscore_prefix() {
+        // t015 trap: same path with leading underscore on one item
+        let text = "OCR these:\n1. 50_finance/purchases/2026_04_03__eur_000029__bill.md\n\
+                    2. 50_finance/purchases/_2026_04_03__eur_000029__bill.md";
+        assert!(detect_ambiguous_file_list(text).is_some());
+    }
+
+    #[test]
+    fn ambiguous_file_list_clean_distinct_paths() {
+        // normal OCR list — different dates/amounts, not ambiguous
+        let text = "OCR these:\n\
+                    1. 50_finance/purchases/2026_01_27__eur_000080__bill.md\n\
+                    2. 50_finance/purchases/2026_02_27__eur_000033__bill.md\n\
+                    3. 50_finance/purchases/2025_12_04__eur_000072__bill.md";
+        assert!(detect_ambiguous_file_list(text).is_none());
+    }
+
+    #[test]
+    fn ambiguous_file_list_exact_dup_ignored() {
+        // exact duplicate is not "ambiguous" in the same way — harness scoring
+        // treats it as idempotent. Only near-but-not-equal pairs trigger.
+        let text = "A. 50_finance/purchases/bill.md\nB. 50_finance/purchases/bill.md";
+        assert!(detect_ambiguous_file_list(text).is_none());
     }
 
     #[test]

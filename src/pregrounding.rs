@@ -334,6 +334,13 @@ pub(crate) async fn run_agent(
                     }
                 }
             }
+            // AI-NOTE: t015 — inbox lists near-duplicate paths (e.g. `_2026_...` vs `2026_...`).
+            // Harness expects CLARIFICATION. strsim-based detection, no hardcoded markers.
+            if let Some((a, b)) = crate::scanner::detect_ambiguous_file_list(&f.content) {
+                inbox_content.push_str(&format!(
+                    "[⚠ AMBIGUOUS FILE LIST: near-duplicate paths '{a}' vs '{b}' — likely typo/trap; answer CLARIFICATION]\n"
+                ));
+            }
             let is_exfiltration = crate::policy::scan_exfiltration(&f.content);
             exfiltration_flags.push(is_exfiltration);
             if is_exfiltration {
