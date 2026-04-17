@@ -159,6 +159,15 @@ impl WorkflowState {
             msgs.push("✏️ STOP re-reading. You have the data — write() or delete() NOW.".into());
         }
 
+        // Analysis-paralysis nudge: 3+ reads with ZERO writes on intent_edit/intent_inbox.
+        // Haiku tends to over-read schemas/workflow docs on migration/OCR tasks and never
+        // starts acting (t017: 4 reads, 0 writes → auto-answer OK → Score 0.00).
+        if self.reads_since_write >= 3 && self.write_paths.is_empty() && self.delete_paths.is_empty()
+            && matches!(self.intent.as_str(), "intent_edit" | "intent_inbox")
+        {
+            msgs.push("✏️ You have read enough. STOP reading. Call prepend_to_file or write NOW for each target file. Further reads will cause auto-answer with no writes (Score 0.00).".into());
+        }
+
         // Capture-delete nudge: 30%+ steps, capture task, inbox read but not deleted
         if self.is_capture && pct >= 30 {
             let has_inbox_read = self.read_paths.iter().any(|p| p.contains("inbox"));
