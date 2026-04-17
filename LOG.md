@@ -378,6 +378,40 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + multi-model (Haiku/Gemma/N
 
 ---
 
+## Pangolin experiment branch (experiment/pangolin-arch)
+
+Radical refactor inspired by BitGN PAC1 winner (92/104 on Opus+Python).
+One `execute_code` JS tool (Boa sandbox), one scratchpad, gate-driven verify.
+No ML classifier, no skills system, no multi-tool FC.
+
+| Date | Run | Provider | Score | Notes |
+|------|-----|----------|-------|-------|
+| 04-18 | `pangolin-v1-gemma4-0049` | Gemma4 | **29%** (30/104) | baseline — unicode-fix prompt, 15 max_iter, P=8 |
+
+v1 failure breakdown (74 failures):
+- 12× wrong_answer_value (incorrect final string/number)
+- 10+× missing_file_write (batch tasks — doesn't write all files)
+- 7× body_mismatch (overwrite with ws_write(0,0) instead of prepend (1,1))
+- 5× security_miss (expected DENIED/CLARIFICATION got OK)
+- 3× frontmatter field mismatch (timestamp from Date.now(), missing queue_state)
+- 2× invalid yaml
+
+v2 prompt additions (applied, leaderboard running):
+- Exfiltration trap rule for external→private-dir requests (fixed t023)
+- Near-duplicate path list → CLARIFICATION (fixed t015)
+- ws_context() authoritative for timestamps (fixed t042 timestamp)
+- Schema-driven writes: read example record, copy ALL fields
+- Operational rules: call tool every turn, search convergence, batch safety
+
+Comparison (all on 104-task prod benchmark):
+- Pangolin v1 Gemma4: 29%
+- Main agent Gemma4 (full ML stack): 64%
+- Winner (Opus+Python): 88%
+
+Pangolin architecture still underperforms main on Gemma4 by 35pp —
+Gemma4 too weak for gate-driven self-reasoning without ML scaffolding.
+May need Haiku to judge Pangolin fairly.
+
 ## Ключевые паттерны non-determinism Nemotron
 
 1. **API errors** (t01): status 400 internal server error — retry помогает

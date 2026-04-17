@@ -101,7 +101,7 @@ async fn run() -> Result<()> {
     // Pre-fetch workspace context: tree (level 2) + date.
     let tree = pcm.tree("/", 3).await.unwrap_or_else(|e| format!("(tree error: {e})"));
     let ctx_raw = pcm.context().await.unwrap_or_default();
-    let ctx_json: Value = serde_json::from_str(&ctx_raw).unwrap_or(Value::Null);
+    let ctx_json = pangolin::parse_context_output(&ctx_raw);
 
     let session = PangolinSession::with_context(pcm.clone(), ctx_json);
     let tool = ExecuteCodeTool { session: session.clone() };

@@ -81,6 +81,26 @@ impl PangolinSession {
     }
 }
 
+/// Extract the workspace timestamp from `pcm.context()` output. PcmClient returns
+/// `"$ date\n<RFC3339>"`; we publish it as `{time, unixTime}` so JS can read
+/// `ws_context().time` and `scratchpad.context.time` uniformly (mirrors Pangolin
+/// original: `scratchpad.context = { time, unixTime }`).
+pub fn parse_context_output(text: &str) -> Value {
+    parse_context_text(text)
+}
+
+fn parse_context_text(text: &str) -> Value {
+    // PCM context output: "$ date\n<RFC3339 time>\n". Second line is the time.
+    let time = text.lines().nth(1).unwrap_or(text).trim().to_string();
+    let unix = chrono::DateTime::parse_from_rfc3339(&time)
+        .ok()
+        .map(|dt| dt.timestamp());
+    match unix {
+        Some(u) => json!({ "time": time, "unixTime": u }),
+        None => json!({ "time": time }),
+    }
+}
+
 // ─── Thread-local handoff so NativeFunctionPointer fns can reach state ──────
 
 thread_local! {
@@ -191,7 +211,6 @@ mod host {
     pub fn ws_write(_this: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
         let path = arg_string(args, 0, ctx)?;
         let content = arg_string(args, 1, ctx)?;
-        // start_line/end_line: 0,0 = overwrite. 1,1 = insert before line 1 (prepend).
         let start_line = arg_opt_i32(args, 2, ctx).unwrap_or(0);
         let end_line = arg_opt_i32(args, 3, ctx).unwrap_or(0);
         let result = with_state(|s, h| h.block_on(s.pcm.write(&path, &content, start_line, end_line)));
@@ -257,10 +276,7 @@ mod host {
     pub fn ws_context(_this: &JsValue, _args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
         let result = with_state(|s, h| h.block_on(s.pcm.context()));
         match result {
-            Ok(text) => {
-                let parsed: Value = serde_json::from_str(&text).unwrap_or(json!({ "raw": text }));
-                json_to_jsvalue(&parsed, ctx)
-            }
+            Ok(text) => json_to_jsvalue(&parse_context_text(&text), ctx),
             Err(e) => Ok(err_to_jsval(e, ctx)),
         }
     }
