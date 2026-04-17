@@ -475,16 +475,21 @@ impl OutcomeValidator {
 
         // Asymmetric block thresholds:
         // - Agent "gave up" (CLARIFICATION / UNSUPPORTED) but kNN says OK with ≥4/5 at
-        //   ≥0.60 similarity → Block, force retry. False-give-up is a common mode
-        //   (t097: "founder I talk product with" → CLARIFICATION despite 4/5 OK at sim 0.67).
+        //   ≥0.60 similarity → Block, force retry. False-give-up (t097).
+        // - Agent chose OK but kNN says CLARIFICATION/UNSUPPORTED with ≥4/5 at ≥0.70 →
+        //   Block, force retry. False-OK-with-hallucinated-data (t027: quote message
+        //   from entity that doesn't exist → agent makes up answer).
         // - Other mispredictions still require ≥0.80 similarity (high bar).
         // - Never block a DENIED_SECURITY decision — trust LLM on threats.
         let gave_up = matches!(outcome, "OUTCOME_NONE_CLARIFICATION" | "OUTCOME_NONE_UNSUPPORTED");
         let knn_says_ok = vote.label == "OUTCOME_OK";
+        let knn_says_give_up = matches!(vote.label.as_str(), "OUTCOME_NONE_CLARIFICATION" | "OUTCOME_NONE_UNSUPPORTED");
         let block = if outcome == "OUTCOME_DENIED_SECURITY" {
             false
         } else if gave_up && knn_says_ok {
             vote.is_confident(4, 0.60)
+        } else if outcome == "OUTCOME_OK" && knn_says_give_up {
+            vote.is_confident(4, 0.70)
         } else {
             vote.is_confident(4, 0.80)
         };
