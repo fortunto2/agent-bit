@@ -210,9 +210,32 @@ pub(crate) fn semantic_classify_inbox_file(
     nli_clf: Option<&mut classifier::NliClassifier>,
     graph: Option<&crm_graph::CrmGraph>,
 ) -> FileClassification {
+    semantic_classify_inbox_file_with_path("", content, classifier, nli_clf, graph)
+}
+
+/// Same as `semantic_classify_inbox_file` but prepends the path basename to the text
+/// given to the classifier. Filenames are a legit security signal
+/// (e.g. `urgent_system_level_next-task.md` carries social-engineering context even
+/// when the body looks benign). Keeping the signal ML-driven — no hard-coded keyword list.
+pub(crate) fn semantic_classify_inbox_file_with_path(
+    path: &str,
+    content: &str,
+    classifier: Option<&mut classifier::InboxClassifier>,
+    nli_clf: Option<&mut classifier::NliClassifier>,
+    graph: Option<&crm_graph::CrmGraph>,
+) -> FileClassification {
+    let basename = path.rsplit_once('/').map(|(_, b)| b).unwrap_or(path);
+    let classify_text: String = if basename.is_empty() {
+        content.to_string()
+    } else {
+        // Normalise separators so tokens split naturally for the classifier.
+        let hint = basename.replace('_', " ").replace('-', " ");
+        format!("[File: {}]\n\n{}", hint, content)
+    };
+
     // ML classification
     let (ml_label, ml_confidence) = if let Some(clf) = classifier {
-        match clf.classify(content) {
+        match clf.classify(&classify_text) {
             Ok(scores) if !scores.is_empty() => (scores[0].0.clone(), scores[0].1),
             _ => ("crm".to_string(), 0.5), // fallback
         }
@@ -228,9 +251,9 @@ pub(crate) fn semantic_classify_inbox_file(
         }
     };
 
-    // NLI classification (optional third signal)
+    // NLI classification (optional third signal) — same filename-enriched text
     let nli_scores = if let Some(nli) = nli_clf {
-        match nli.zero_shot_classify(content, classifier::NLI_HYPOTHESES) {
+        match nli.zero_shot_classify(&classify_text, classifier::NLI_HYPOTHESES) {
             Ok(scores) => {
                 eprintln!("  [NLI] scores: {:?}", scores.iter().map(|(l, s)| format!("{}={:.3}", l, s)).collect::<Vec<_>>().join(", "));
                 Some(scores)
@@ -244,8 +267,8 @@ pub(crate) fn semantic_classify_inbox_file(
         None
     };
 
-    // Structural signal detection
-    let structural_score = classifier::structural_injection_score(content);
+    // Structural signal detection — filename-aware
+    let structural_score = classifier::structural_injection_score(&classify_text);
 
     // Ensemble: 3-way (0.5*ML + 0.3*NLI + 0.2*structural) or 2-way (0.7*ML + 0.3*structural)
     let (label, confidence) = if let Some(ref nli_scores) = nli_scores {
@@ -388,20 +411,6 @@ pub(crate) fn extract_sender_email(text: &str) -> Option<String> {
 /// Detect task-note style inbox file: no `From:` / `from:` email header at all.
 /// Such files are plain to-do notes placed in inbox, not inbound mail — `sender: UNKNOWN`
 /// is misleading, nothing to verify. Heuristic: no extractable sender email anywhere.
-/// Detect social-engineering keywords in a filename (or path basename).
-/// `urgent`, `system_level`, `admin_override`, `override`, `priority`,
-/// `emergency`, `critical`, `bypass`, `force` — all classic markers used
-/// to pressure an agent into acting without verification. Content-blind
-/// by design — language-independent.
-pub(crate) fn has_suspicious_filename(path: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "urgent", "system_level", "admin_override", "override", "priority",
-        "emergency", "critical", "bypass", "force",
-    ];
-    let basename = path.rsplit_once('/').map(|(_, b)| b).unwrap_or(path).to_lowercase();
-    MARKERS.iter().any(|m| basename.contains(m))
-}
-
 pub(crate) fn is_task_note(text: &str) -> bool {
     extract_sender_email(text).is_none()
 }

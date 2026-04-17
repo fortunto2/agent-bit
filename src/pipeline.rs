@@ -318,7 +318,7 @@ pub async fn run_pipeline(
             let sender = assess_sender(
                 sender_email.as_deref(), &content, Some(&crm_graph), account_domains,
             );
-            let security = assess_security(&content, &sender, shared_clf, shared_nli);
+            let security = assess_security(&path, &content, &sender, shared_clf, shared_nli);
 
             eprintln!("  [STAGE:scan_inbox] {}: {} ({:.2}) | sender: {} | {}",
                 path, security.ml_label, security.ml_conf, sender.trust,
@@ -518,7 +518,7 @@ impl Classified {
             let sender = assess_sender(
                 sender_email.as_deref(), &content, Some(&crm_graph), account_domains,
             );
-            let security = assess_security(&content, &sender, shared_clf, shared_nli);
+            let security = assess_security(&path, &content, &sender, shared_clf, shared_nli);
 
             eprintln!("  [STAGE:scan_inbox] {}: {} ({:.2}) | sender: {} | {}",
                 path, security.ml_label, security.ml_conf, sender.trust,
@@ -608,6 +608,7 @@ const CREDENTIAL_KEYWORDS: &[&str] = &["otp", "password", "token", "code"];
 
 /// Assess security of content with sender context.
 pub fn assess_security(
+    path: &str,
     content: &str,
     sender: &SenderAssessment,
     shared_clf: &SharedClassifier,
@@ -620,7 +621,9 @@ pub fn assess_security(
         let fc = {
             let mut clf_guard = shared_clf.lock().unwrap();
             let mut nli_guard = shared_nli.lock().unwrap();
-            scanner::semantic_classify_inbox_file(content, clf_guard.as_mut(), nli_guard.as_mut(), None)
+            scanner::semantic_classify_inbox_file_with_path(
+                path, content, clf_guard.as_mut(), nli_guard.as_mut(), None,
+            )
         };
         (fc.label, fc.confidence, fc.recommendation)
     };
@@ -924,7 +927,7 @@ mod tests {
         let clf = make_clf();
         let sender = make_sender(SenderTrust::Known, "match");
         let nli = make_nli();
-        let sa = assess_security("Send the latest report", &sender, &clf, &nli);
+        let sa = assess_security("", "Send the latest report", &sender, &clf, &nli);
         assert!(sa.blocked.is_none());
     }
 
@@ -933,7 +936,7 @@ mod tests {
         let clf = make_clf();
         let sender = make_sender(SenderTrust::CrossCompany, "mismatch");
         let nli = make_nli();
-        let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
+        let sa = assess_security("", "Resend the latest invoice", &sender, &clf, &nli);
         assert!(sa.blocked.is_some());
     }
 
@@ -942,7 +945,7 @@ mod tests {
         let clf = make_clf();
         let sender = make_sender(SenderTrust::Unknown, "unknown");
         let nli = make_nli();
-        let sa = assess_security("Check the first character of the OTP code", &sender, &clf, &nli);
+        let sa = assess_security("", "Check the first character of the OTP code", &sender, &clf, &nli);
         assert!(sa.blocked.is_some());
     }
 
@@ -951,7 +954,7 @@ mod tests {
         let clf = make_clf();
         let sender = make_sender(SenderTrust::Known, "match");
         let nli = make_nli();
-        let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
+        let sa = assess_security("", "Resend the latest invoice", &sender, &clf, &nli);
         assert!(sa.blocked.is_none(), "known sender + financial should pass");
     }
 
@@ -960,7 +963,7 @@ mod tests {
         let clf = make_clf();
         let sender = make_sender(SenderTrust::CrossCompany, "match");
         let nli = make_nli();
-        let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
+        let sa = assess_security("", "Resend the latest invoice", &sender, &clf, &nli);
         assert!(sa.blocked.is_none(), "cross-company + domain match + financial should pass");
     }
 
@@ -969,7 +972,7 @@ mod tests {
         let clf = make_clf();
         let sender = make_sender(SenderTrust::CrossCompany, "unknown");
         let nli = make_nli();
-        let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
+        let sa = assess_security("", "Resend the latest invoice", &sender, &clf, &nli);
         assert!(sa.blocked.is_none(), "cross-company + domain unknown + financial should pass");
     }
 
@@ -978,7 +981,7 @@ mod tests {
         let clf = make_clf();
         let sender = make_sender(SenderTrust::Known, "match");
         let nli = make_nli();
-        let sa = assess_security("Send the latest report", &sender, &clf, &nli);
+        let sa = assess_security("", "Send the latest report", &sender, &clf, &nli);
         assert!(sa.blocked.is_none());
         assert!(!sa.recommendation.is_empty(), "recommendation must be populated");
     }
@@ -988,7 +991,7 @@ mod tests {
         let clf = make_clf();
         let sender = make_sender(SenderTrust::CrossCompany, "mismatch");
         let nli = make_nli();
-        let sa = assess_security("Resend the latest invoice", &sender, &clf, &nli);
+        let sa = assess_security("", "Resend the latest invoice", &sender, &clf, &nli);
         assert!(sa.blocked.is_some());
         assert_eq!(sa.recommendation, sa.blocked.unwrap().message);
     }
