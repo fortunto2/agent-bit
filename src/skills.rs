@@ -28,19 +28,34 @@ pub fn load(project_dir: &Path) -> SkillRegistry {
 //   models failed because they followed the wrong skill. Nemotron ignored it.
 pub fn select_body<'a>(registry: &'a SkillRegistry, security_label: &str, intent: &str, instruction: &str) -> &'a str {
     let is_security_label = matches!(security_label, "injection" | "social_engineering" | "credential");
+    let valid = |skill: &Skill| -> bool {
+        // Keyword-gated skills: if a skill declares keywords, at least one must match the instruction.
+        // Otherwise the skill hijacks all intent-matching tasks (e.g. nora-migration at priority 40
+        // was winning every intent_email inbox even without "NORA" mentioned).
+        if skill.keywords.is_empty() { return true; }
+        let instr_lower = instruction.to_lowercase();
+        skill.keywords.iter().any(|kw| instr_lower.contains(&kw.to_lowercase()))
+    };
+    let select_gated = |labels: &[&str]| -> Option<&Skill> {
+        let picked = registry.select(labels, instruction)?;
+        if valid(picked) { return Some(picked); }
+        // Picked skill failed keyword gate: re-scan by priority, skipping unmatched keyword-gated skills.
+        registry.skills()
+            .iter()
+            .filter(|s| s.triggers.iter().any(|t| labels.contains(&t.as_str())))
+            .find(|s| valid(s))
+    };
     if is_security_label {
-        // Security label → security skill first, intent as fallback
-        if let Some(skill) = registry.select(&[security_label, intent], instruction) {
+        if let Some(skill) = select_gated(&[security_label, intent]) {
             eprintln!("  🎯 Skill: {} (priority={})", skill.name, skill.priority);
             return &skill.body;
         }
     } else {
-        // Benign label → intent first (prevents security-injection hijacking cleanup/delete tasks)
-        if let Some(skill) = registry.select(&[intent], instruction) {
+        if let Some(skill) = select_gated(&[intent]) {
             eprintln!("  🎯 Skill: {} (priority={}, via intent)", skill.name, skill.priority);
             return &skill.body;
         }
-        if let Some(skill) = registry.select(&[security_label], instruction) {
+        if let Some(skill) = select_gated(&[security_label]) {
             eprintln!("  🎯 Skill: {} (priority={}, via label)", skill.name, skill.priority);
             return &skill.body;
         }
