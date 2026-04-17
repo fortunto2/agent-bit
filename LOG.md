@@ -671,3 +671,27 @@ doesn't extend TTL.
 - **Final submission: gpt-5.4 full** — 75% pass, better precision on ambiguous
 - **Mini not recommended** — too many execution misses
 
+
+### 2026-04-17 (late): v4 auto-fallback — 78/104 = 75%
+
+**Commit:** `49225dd` ReadTool auto-fallback + LOG update.
+
+**Leaderboard trajectory (same day):**
+- v2 (8806c47 with skip_plan_next regression): **51% (53/104)**
+- v3 (a350ba2 revert + cache + search-first): **75% (78/104)**
+- **v4 (49225dd auto-fallback read→list on dir): 78% (81/104)**
+
+**Single fix effect — ReadTool fallback:**
+- v3 had 18× "PCM Read failed: invalid_argument" (agent called read() on directory)
+- v4: 0 such errors — silent fallback to list(), agent continues without retry
+- Sanity: 12/12 pass on selective test (4 easy + 8 previously-failing)
+
+**Remaining v4 failures (23 total):**
+- 5× OK→CLARIFICATION (agent gave up) — asymmetric validator threshold could loosen
+- 5× CLARIFICATION→OK (should refuse) — subtle security cases
+- 3× missing OCR bill writes
+- 1× missing canonical ref
+- 2× missing capability markers
+- 7× miscellaneous
+
+**Haiku production ready at 78% — 3× baseline (15-25% on top-fail subset → 78% full bench).**
