@@ -255,6 +255,16 @@ output = 25.00
 cache_read = 0.50
 cache_write = 6.25
 
+# Opus 4.7 requires restricted param set (no temperature, no reasoning_effort).
+# Needs dedicated client path — use or-opus (4.6) for now.
+[providers.or-opus-47]
+model = "anthropic/claude-opus-4.7"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+[providers.or-opus-47.pricing]
+input = 5.00
+output = 25.00
+
 [providers.or-gpt54mini]
 model = "openai/gpt-5.4-mini"
 base_url = "https://openrouter.ai/api/v1"
