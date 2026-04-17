@@ -31,6 +31,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.32"  # phoenix: pangolin-bench span attributes
 async-trait = "0.1"
 toml = "0.8"
 futures = "0.3"

@@ -123,14 +123,20 @@ async fn run() -> Result<()> {
     }];
 
     // Root span for the whole trial — every LLM and execute_code span becomes its child,
-    // so Phoenix shows ONE trace per trial instead of 7 disconnected ROOT traces.
+    // so Phoenix shows ONE trace per trial instead of disconnected ROOT traces.
     let root_span = tracing::info_span!(
         "pangolin_trial",
         task.id = %cli.task,
         session.id = %session_id,
         trial.id = %trial.trial_id,
-        "openinference.span.kind" = "AGENT",
     );
+
+    {
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        root_span.set_attribute("openinference.span.kind", "AGENT");
+        root_span.set_attribute("langsmith.span.kind", "AGENT");
+        root_span.set_attribute("input.value", trial.instruction.clone());
+    }
 
     let loop_body = async {
         let mut answer: Option<AnswerPayload> = None;
@@ -142,6 +148,12 @@ async fn run() -> Result<()> {
 
             eprintln!("\n[pangolin] ── iter {} ──", iter);
             let iter_span = tracing::info_span!("iter", n = iter);
+        
+            {
+                use tracing_opentelemetry::OpenTelemetrySpanExt;
+                iter_span.set_attribute("openinference.span.kind", "CHAIN");
+                iter_span.set_attribute("langsmith.span.kind", "CHAIN");
+            }
             let (calls, text) = match llm.tools_call_with_text(&messages, &tool_defs)
                 .instrument(iter_span.clone()).await
             {
@@ -172,9 +184,15 @@ async fn run() -> Result<()> {
                     parent: &iter_span,
                     "execute_code",
                     iter = iter,
-                    code = %code_preview,
-                    "openinference.span.kind" = "TOOL",
                 );
+            
+                {
+                    use tracing_opentelemetry::OpenTelemetrySpanExt;
+                    exec_span.set_attribute("openinference.span.kind", "TOOL");
+                    exec_span.set_attribute("langsmith.span.kind", "TOOL");
+                    exec_span.set_attribute("tool.name", "execute_code");
+                    exec_span.set_attribute("input.value", code_preview.clone());
+                }
                 let mut actx = sgr_agent::context::AgentContext::default();
                 let result = match tool.execute(arguments, &mut actx)
                     .instrument(exec_span.clone()).await
@@ -184,10 +202,12 @@ async fn run() -> Result<()> {
                 };
                 let out = result.content.clone();
                 // Attach output + scratchpad to the span so Phoenix shows the full trail.
-                #[cfg(feature = "telemetry")]
+            
                 {
                     use tracing_opentelemetry::OpenTelemetrySpanExt;
-                    exec_span.set_attribute("output", out.clone());
+                    // Phoenix renders these in the Info tab:
+                    exec_span.set_attribute("output.value", out.clone());
+                    exec_span.set_attribute("output.mime_type", "text/plain");
                     exec_span.set_attribute(
                         "scratchpad",
                         serde_json::to_string(&session.scratchpad_snapshot()).unwrap_or_default(),
@@ -206,7 +226,22 @@ async fn run() -> Result<()> {
         (answer, iter)
     };
 
-    let (answer, iter) = loop_body.instrument(root_span).await;
+    let (answer, iter) = loop_body.instrument(root_span.clone()).await;
+
+    {
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        if let Some(ref a) = answer {
+            root_span.set_attribute(
+                "output.value",
+                serde_json::to_string(&serde_json::json!({
+                    "outcome": a.outcome, "answer": a.message, "refs": a.refs, "iterations": iter
+                })).unwrap_or_default(),
+            );
+            root_span.set_attribute("output.mime_type", "application/json");
+        } else {
+            root_span.set_attribute("output.value", format!("no answer in {iter} iterations"));
+        }
+    }
 
     let Some(a) = answer else {
         eprintln!("[pangolin] ✗ no answer in {} iterations", cli.max_iter);
