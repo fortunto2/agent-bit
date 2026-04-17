@@ -17,6 +17,7 @@ use sgr_agent::llm::Llm;
 use sgr_agent::tool::ToolDef;
 use sgr_agent::types::{Message, ToolCall};
 use sgr_agent::agent_tool::Tool;
+use tracing::Instrument;
 
 // Reuse the agent-bit modules by path.
 #[path = "../bitgn.rs"]
@@ -121,74 +122,91 @@ async fn run() -> Result<()> {
         parameters: tool.parameters_schema(),
     }];
 
-    let mut answer: Option<AnswerPayload> = None;
-    let mut iter = 0usize;
-    while iter < cli.max_iter && answer.is_none() {
-        iter += 1;
-        let sp = serde_json::to_string_pretty(&session.scratchpad_snapshot()).unwrap_or_default();
-        messages.push(Message::user(format!("<scratchpad>\n{sp}\n</scratchpad>")));
+    // Root span for the whole trial — every LLM and execute_code span becomes its child,
+    // so Phoenix shows ONE trace per trial instead of 7 disconnected ROOT traces.
+    let root_span = tracing::info_span!(
+        "pangolin_trial",
+        task.id = %cli.task,
+        session.id = %session_id,
+        trial.id = %trial.trial_id,
+        "openinference.span.kind" = "AGENT",
+    );
 
-        eprintln!("\n[pangolin] ── iter {} ──", iter);
-        let (calls, text) = match llm.tools_call_with_text(&messages, &tool_defs).await {
-            Ok(v) => v,
-            Err(e) => { eprintln!("[pangolin] LLM error: {e}"); break; }
-        };
+    let loop_body = async {
+        let mut answer: Option<AnswerPayload> = None;
+        let mut iter: usize = 0;
+        while iter < cli.max_iter && answer.is_none() {
+            iter += 1;
+            let sp = serde_json::to_string_pretty(&session.scratchpad_snapshot()).unwrap_or_default();
+            messages.push(Message::user(format!("<scratchpad>\n{sp}\n</scratchpad>")));
 
-        if !text.is_empty() {
-            eprintln!("  🧠 {}", text.chars().take(220).collect::<String>());
-        }
-        if calls.is_empty() {
-            eprintln!("  ⚠ no tool calls — nudging");
-            messages.push(Message::assistant(text.clone()));
-            messages.push(Message::user(
-                "You must call execute_code. Populate scratchpad.{answer,outcome,refs} and call ws_answer() as the terminal line.",
-            ));
-            continue;
-        }
-
-        messages.push(Message::assistant_with_tool_calls(text, calls.clone()));
-
-        for call in calls {
-            let ToolCall { id, name, arguments } = call;
-            if name != "execute_code" { continue; }
-            let code_preview = arguments.get("code").and_then(|v| v.as_str()).unwrap_or("");
-            eprintln!("  → execute_code: {}", code_preview.chars().take(180).collect::<String>());
-            // Phoenix span: `execute_code` step with full code + output for step-by-step replay.
-            let span = tracing::info_span!(
-                "execute_code",
-                iter = iter,
-                task.id = %cli.task,
-                session.id = %session_id,
-                code = %code_preview,
-            );
-            let _enter = span.enter();
-            use sgr_agent::agent_tool::Tool;
-            let mut actx = sgr_agent::context::AgentContext::default();
-            let result = tool.execute(arguments, &mut actx).await
-                .map_err(|e| anyhow!("tool: {e}"))?;
-            let out = result.content.clone();
-            // Attach output + scratchpad snapshot to the span so Phoenix shows the full trail.
-            #[cfg(feature = "telemetry")]
+            eprintln!("\n[pangolin] ── iter {} ──", iter);
+            let iter_span = tracing::info_span!("iter", n = iter);
+            let (calls, text) = match llm.tools_call_with_text(&messages, &tool_defs)
+                .instrument(iter_span.clone()).await
             {
-                use tracing_opentelemetry::OpenTelemetrySpanExt;
-                span.set_attribute("output", out.clone());
-                span.set_attribute(
-                    "scratchpad",
-                    serde_json::to_string(&session.scratchpad_snapshot()).unwrap_or_default(),
-                );
-                span.set_attribute("openinference.span.kind", "TOOL");
-            }
-            drop(_enter);
-            eprintln!("  ← {}", out.chars().take(220).collect::<String>());
-            messages.push(Message::tool(id, out));
+                Ok(v) => v,
+                Err(e) => { eprintln!("[pangolin] LLM error: {e}"); break; }
+            };
 
-            if let Some(a) = session.take_answer() {
-                eprintln!("\n[pangolin] ✓ ws_answer captured: outcome={}, refs={}", a.outcome, a.refs.len());
-                answer = Some(a);
-                break;
+            if !text.is_empty() {
+                eprintln!("  🧠 {}", text.chars().take(220).collect::<String>());
+            }
+            if calls.is_empty() {
+                eprintln!("  ⚠ no tool calls — nudging");
+                messages.push(Message::assistant(text.clone()));
+                messages.push(Message::user(
+                    "You must call execute_code. Populate scratchpad.{answer,outcome,refs} and call ws_answer() as the terminal line.",
+                ));
+                continue;
+            }
+
+            messages.push(Message::assistant_with_tool_calls(text, calls.clone()));
+
+            for call in calls {
+                let ToolCall { id, name, arguments } = call;
+                if name != "execute_code" { continue; }
+                let code_preview = arguments.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                eprintln!("  → execute_code: {}", code_preview.chars().take(180).collect::<String>());
+                let exec_span = tracing::info_span!(
+                    parent: &iter_span,
+                    "execute_code",
+                    iter = iter,
+                    code = %code_preview,
+                    "openinference.span.kind" = "TOOL",
+                );
+                let mut actx = sgr_agent::context::AgentContext::default();
+                let result = match tool.execute(arguments, &mut actx)
+                    .instrument(exec_span.clone()).await
+                {
+                    Ok(r) => r,
+                    Err(e) => { eprintln!("[pangolin] tool error: {e}"); return (None, iter); }
+                };
+                let out = result.content.clone();
+                // Attach output + scratchpad to the span so Phoenix shows the full trail.
+                #[cfg(feature = "telemetry")]
+                {
+                    use tracing_opentelemetry::OpenTelemetrySpanExt;
+                    exec_span.set_attribute("output", out.clone());
+                    exec_span.set_attribute(
+                        "scratchpad",
+                        serde_json::to_string(&session.scratchpad_snapshot()).unwrap_or_default(),
+                    );
+                }
+                eprintln!("  ← {}", out.chars().take(220).collect::<String>());
+                messages.push(Message::tool(id, out));
+
+                if let Some(a) = session.take_answer() {
+                    eprintln!("\n[pangolin] ✓ ws_answer captured: outcome={}, refs={}", a.outcome, a.refs.len());
+                    answer = Some(a);
+                    break;
+                }
             }
         }
-    }
+        (answer, iter)
+    };
+
+    let (answer, iter) = loop_body.instrument(root_span).await;
 
     let Some(a) = answer else {
         eprintln!("[pangolin] ✗ no answer in {} iterations", cli.max_iter);
