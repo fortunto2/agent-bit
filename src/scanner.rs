@@ -388,6 +388,20 @@ pub(crate) fn extract_sender_email(text: &str) -> Option<String> {
 /// Detect task-note style inbox file: no `From:` / `from:` email header at all.
 /// Such files are plain to-do notes placed in inbox, not inbound mail — `sender: UNKNOWN`
 /// is misleading, nothing to verify. Heuristic: no extractable sender email anywhere.
+/// Detect social-engineering keywords in a filename (or path basename).
+/// `urgent`, `system_level`, `admin_override`, `override`, `priority`,
+/// `emergency`, `critical`, `bypass`, `force` — all classic markers used
+/// to pressure an agent into acting without verification. Content-blind
+/// by design — language-independent.
+pub(crate) fn has_suspicious_filename(path: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "urgent", "system_level", "admin_override", "override", "priority",
+        "emergency", "critical", "bypass", "force",
+    ];
+    let basename = path.rsplit_once('/').map(|(_, b)| b).unwrap_or(path).to_lowercase();
+    MARKERS.iter().any(|m| basename.contains(m))
+}
+
 pub(crate) fn is_task_note(text: &str) -> bool {
     extract_sender_email(text).is_none()
 }
