@@ -15,20 +15,20 @@ WORKFLOW:
   6. Write outbox email WITH attachments field — "to" = sender's email
   7. Update seq.json (increment ID by 1)
 
-OUTLINE — Resend invoice email (MUST include attachments field):
-  1. Read the inbox message → identify the SENDER (From: header / display name) and the
-     requested invoice identifier.
-  2. Look up the sender in contacts/ (search by the name that appeared in the message) and
-     read their canonical email from the contact record.
-  3. Locate the invoice file via search in the invoices directory for the requested identifier.
-  4. Read the outbox guide and the outbox seq file to learn format + next id.
-  5. Write the outbox email: `to` = sender's canonical email, `attachments` = [path to invoice].
-  6. Update seq (increment id), answer(OUTCOME_OK).
-  Use actual names/paths from THIS trial; do not copy placeholder values from this outline.
+EXAMPLE — Resend invoice email (placeholders: <SENDER>, <LAST>, <INV-ID>, <N> — not real values):
+  read({"path": "inbox/<msg-file>"}) → From: <SENDER> ... 'Resend invoice <INV-ID>'
+  Sender is <SENDER> → search contacts for their email.
+  search({"pattern": "<LAST>", "path": "contacts"}) → contacts/<contact-file>.json
+  read({"path": "contacts/<contact-file>.json"}) → <sender-email>
+  search({"pattern": "<INV-ID>", "path": "my-invoices"}) → my-invoices/<INV-ID>.json
+  read({"path": "outbox/seq.json"}) → {"id": <N>}
+  write({"path": "outbox/<N>.json", "content": "{\"id\":<N>,\"subject\":\"Invoice <INV-ID>\",\"to\":\"<sender-email>\",\"body\":\"Please find attached.\",\"sent\":false,\"attachments\":[\"my-invoices/<INV-ID>.json\"]}"})
+  write({"path": "outbox/seq.json", "content": "{\"id\": <N+1>}"})
+  answer({"message": "Invoice resent to sender", "outcome": "OUTCOME_OK"})
 
 CRITICAL RULES:
   - "to" = the SENDER who requested the resend (not just any contact at the account)
   - ALWAYS include "attachments" field with the invoice file path
   - Use the ID from seq.json AS-IS for the filename, then increment for seq update
   - Search contacts for the sender's email (match by name from inbox From: header)
-  - attachments is an array of file paths: ["my-invoices/INV-001-04.json"]
+  - `attachments` is an array of file paths, e.g. `["my-invoices/<INV-ID>.json"]`
