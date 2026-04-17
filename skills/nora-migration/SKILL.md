@@ -1,7 +1,7 @@
 ---
 name: nora-migration
 description: Prepend queue frontmatter to workspace docs for NORA migration
-triggers: [intent_edit, intent_inbox, intent_query]
+triggers: [intent_edit, intent_inbox, intent_query, intent_email]
 priority: 40
 keywords: [NORA, migration, migrate, "queue up"]
 ---
