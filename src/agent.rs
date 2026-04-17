@@ -436,19 +436,15 @@ impl<C: LlmClient> Pac1Agent<C> {
             ctx.intent = intent.clone();
             ctx
         };
-        // Anthropic models can't parallel FC — including plan_next wastes a step
-        // (model picks plan_next alone, then we retry for action). Drop it entirely.
-        let mut all_tools: Vec<_> = if self.skip_plan_next {
-            Vec::new()
-        } else {
-            vec![think_tool_for_context(&think_ctx)]
-        };
+        // Keep think_tool even for Anthropic (skip_plan_next): dropping it cuts 1 step per
+        // task but removes the explicit security_assessment — on the full Haiku leaderboard
+        // that produced 16 false-negative security answers (OK instead of CLARIFICATION/DENIED).
+        // The extra reasoning step is worth the correctness.
+        let mut all_tools: Vec<_> = vec![think_tool_for_context(&think_ctx)];
         all_tools.extend(all_defs.clone());
-        msgs.push(Message::user(if self.skip_plan_next {
-            "Use your tools to complete the task. Act directly — no separate reasoning tool."
-        } else {
+        msgs.push(Message::user(
             "Use your tools to complete the task. Call plan_next with your reasoning, and call action tools."
-        }));
+        ));
         eprintln!("  📋 Tools: {}", all_tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "));
         let all_calls = self.client.tools_call(&msgs, &all_tools).await?;
         let reasoning_text = String::new();
