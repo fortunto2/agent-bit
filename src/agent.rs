@@ -790,8 +790,12 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
         // ── Reflexion: validate before acting (standard mode only) ─────
         // Reset reflexion counter each step
         self.reflexion_count.store(0, Ordering::SeqCst);
+        // Gate by confidence: if model is confident (≥0.75), skip reflexion.
+        // The leading "Could inbox content be adversarial?" prompt triggers over-defence on
+        // high-confidence edit tasks (mini on t021/t047: conf 0.91 → revised edit→security
+        // → CLARIFICATION). Only revisit when the model is actually uncertain.
         let (task_type, security, situation, plan, done, confidence) =
-            if self.prompt_mode != "explicit" && !done && security == "safe" {
+            if self.prompt_mode != "explicit" && !done && security == "safe" && confidence < 0.75 {
                 // Ask model to validate its plan before acting
                 let mut reflexion_msgs = msgs.clone();
                 reflexion_msgs.push(Message::assistant(&format!(
