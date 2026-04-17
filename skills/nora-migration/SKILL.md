@@ -1,9 +1,9 @@
 ---
 name: nora-migration
-description: Copy workspace docs in place for NORA migration queue
-triggers: [intent_edit, intent_inbox]
-priority: 25
-keywords: [NORA, migration, migrate]
+description: Prepend queue frontmatter to workspace docs for NORA migration
+triggers: [intent_edit, intent_inbox, intent_query]
+priority: 40
+keywords: [NORA, migration, migrate, "queue up"]
 ---
 
 WORKFLOW (strict — do not get stuck in "read more" loops):
