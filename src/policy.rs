@@ -117,6 +117,20 @@ pub fn is_auto_ref_path(_path: &str) -> bool {
     true
 }
 
+/// True if `path` points at an actual inbox source file — directly under
+/// `inbox/` or `00_inbox/`, and not a meta file (AGENTS.MD / README.MD).
+/// Used by workflow guards to decide whether "read inbox" requires "delete inbox".
+pub fn is_inbox_source(path: &str) -> bool {
+    let p = path.trim_start_matches('/');
+    let under_inbox = p.starts_with("inbox/")
+        || p.starts_with("00_inbox/")
+        || p.contains("/inbox/")
+        || p.contains("/00_inbox/");
+    if !under_inbox { return false; }
+    let basename = p.rsplit_once('/').map(|(_, b)| b).unwrap_or(p).to_lowercase();
+    !PROTECTED_BASENAMES.contains(&basename.as_str())
+}
+
 // ── Channel Trust ───────────────────────────────────────────────────────
 
 /// Channel handle trust level — parsed from docs/channels/*.txt files.

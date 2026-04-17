@@ -159,9 +159,7 @@ impl WorkflowState {
             msgs.push("✏️ STOP re-reading. You have the data — write() or delete() NOW.".into());
         }
 
-        // Analysis-paralysis nudge: 3+ reads with ZERO writes on intent_edit/intent_inbox.
-        // Haiku tends to over-read schemas/workflow docs on migration/OCR tasks and never
-        // starts acting (t017: 4 reads, 0 writes → auto-answer OK → Score 0.00).
+        // Analysis-paralysis: 3+ reads with zero writes on edit/inbox tasks → force action.
         if self.reads_since_write >= 3 && self.write_paths.is_empty() && self.delete_paths.is_empty()
             && matches!(self.intent.as_str(), "intent_edit" | "intent_inbox")
         {
@@ -268,16 +266,8 @@ impl WorkflowState {
         // AI-NOTE: check inbox read/delete regardless of intent — ML classifier is non-deterministic.
         // If agent read ANY inbox file, it must delete it before answering OK.
         if tool == "answer" {
-            // Match only files directly inside an inbox directory (NOT workflow docs
-            // whose filename happens to contain "inbox", e.g. `processing-inbox-email.md`).
-            let is_inbox_source = |p: &str| {
-                let p = p.trim_start_matches('/');
-                let under_inbox = p.starts_with("inbox/") || p.starts_with("00_inbox/") || p.contains("/inbox/") || p.contains("/00_inbox/");
-                under_inbox && !p.ends_with("AGENTS.MD") && !p.ends_with("AGENTS.md")
-                    && !p.ends_with("README.MD") && !p.ends_with("README.md")
-            };
-            let has_inbox_read = self.read_paths.iter().any(|p| is_inbox_source(p));
-            let has_inbox_delete = self.delete_paths.iter().any(|p| is_inbox_source(p));
+            let has_inbox_read = self.read_paths.iter().any(|p| crate::policy::is_inbox_source(p));
+            let has_inbox_delete = self.delete_paths.iter().any(|p| crate::policy::is_inbox_source(p));
             let outcome = path.to_lowercase();
             if has_inbox_read && !has_inbox_delete && outcome.contains("ok") {
                 return Guard::Block(

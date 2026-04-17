@@ -344,36 +344,6 @@ impl PcmClient {
         out
     }
 
-    /// Mark every preloaded subtree as injected — used after eager pregrounding injection
-    /// so ReadTool/WriteTool don't re-inject the same content on subsequent tool calls.
-    pub fn mark_all_subtrees_injected(&self) {
-        if let Ok(map) = self.nested_agents.lock()
-            && let Ok(mut set) = self.injected_subtrees.lock()
-        {
-            for dir in map.keys() {
-                set.insert(dir.clone());
-            }
-        }
-    }
-
-    /// Return nested AGENTS.md content for the subtree containing `target_path`, if any.
-    /// Walks up the path from most specific to least. Returns (dir, content) of nearest match.
-    pub fn nearest_nested_agents(&self, target_path: &str) -> Option<(String, String)> {
-        let map = self.nested_agents.lock().ok()?;
-        if map.is_empty() { return None; }
-        let normalized = target_path.trim_start_matches('/').trim_end_matches('/');
-        let mut current: &str = normalized;
-        loop {
-            if let Some(content) = map.get(current) {
-                return Some((current.to_string(), content.clone()));
-            }
-            match current.rsplit_once('/') {
-                Some((parent, _)) => current = parent,
-                None => return None,
-            }
-        }
-    }
-
     /// Mark a subtree's nested AGENTS.md as already injected into the LLM context.
     /// Returns true if this is the first mark (caller should inject), false if already seen.
     /// Separate from `nearest_nested_agents()` to keep the read API pure.

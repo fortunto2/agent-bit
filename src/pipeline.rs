@@ -715,7 +715,6 @@ pub fn assess_sender(
     let email = match sender_email {
         Some(e) if !e.is_empty() => e,
         _ => return SenderAssessment {
-            // No From header → it's a task note, not inbound mail. Owner's own to-do.
             trust: SenderTrust::Known,
             domain_match: "match",
             reasons: vec!["task note (no From header) → owner task".into()],

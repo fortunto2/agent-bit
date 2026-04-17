@@ -473,27 +473,15 @@ impl OutcomeValidator {
         eprintln!("  🔬 Outcome validator: kNN→{} ({}/{} votes, top sim {:.3}) but chosen {}",
             vote.label, vote.votes, vote.k, vote.top_similarity, outcome);
 
-        // Asymmetric block thresholds:
-        // - Agent "gave up" (CLARIFICATION / UNSUPPORTED) but kNN says OK with ≥4/5 at
-        //   ≥0.60 similarity → Block, force retry. False-give-up (t097).
-        // - Agent chose OK but kNN says CLARIFICATION/UNSUPPORTED with ≥4/5 at ≥0.70 →
-        //   Block, force retry. False-OK-with-hallucinated-data (t027: quote message
-        //   from entity that doesn't exist → agent makes up answer).
-        // - Other mispredictions still require ≥0.80 similarity (high bar).
-        // - Never block a DENIED_SECURITY decision — trust LLM on threats.
-        let gave_up = matches!(outcome, "OUTCOME_NONE_CLARIFICATION" | "OUTCOME_NONE_UNSUPPORTED");
-        let knn_says_ok = vote.label == "OUTCOME_OK";
-        let knn_says_give_up = matches!(vote.label.as_str(), "OUTCOME_NONE_CLARIFICATION" | "OUTCOME_NONE_UNSUPPORTED");
-        let block = if outcome == "OUTCOME_DENIED_SECURITY" {
-            false
-        } else if gave_up && knn_says_ok {
-            vote.is_confident(4, 0.60)
-        } else if outcome == "OUTCOME_OK" && knn_says_give_up {
-            vote.is_confident(4, 0.70)
-        } else {
-            vote.is_confident(4, 0.80)
+        // Thresholds: give-up→OK 0.60, OK→give-up 0.70, other 0.80; never block DENIED.
+        let give_up = ["OUTCOME_NONE_CLARIFICATION", "OUTCOME_NONE_UNSUPPORTED"];
+        let threshold = match (outcome, vote.label.as_str()) {
+            ("OUTCOME_DENIED_SECURITY", _) => return ValidationMode::Warn(warning),
+            (o, "OUTCOME_OK") if give_up.contains(&o) => 0.60,
+            ("OUTCOME_OK", l) if give_up.contains(&l) => 0.70,
+            _ => 0.80,
         };
-        if block {
+        if vote.is_confident(4, threshold) {
             ValidationMode::Block(warning)
         } else {
             ValidationMode::Warn(warning)

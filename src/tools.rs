@@ -134,6 +134,17 @@ fn append_nested_agents_notice(output: &mut String, pcm: &PcmClient, path: &str)
 
 /// Fix YAML frontmatter: validate with serde_yaml, auto-quote broken values.
 /// Returns Some(fixed) if changes were made, None if content is valid.
+/// Returns `Some(bytes_lost)` when `new_content` is effectively a frontmatter-only
+/// block and the on-disk file is substantially longer (agent almost certainly
+/// meant `prepend_to_file`). `None` = safe to proceed.
+async fn detect_body_loss(new_content: &str, path: &str, pcm: &PcmClient) -> Option<usize> {
+    if !new_content.trim_start().starts_with("---") { return None; }
+    let close = new_content.find("\n---")?;
+    if new_content[close + 4..].trim().len() >= 20 { return None; }
+    let existing = pcm.read(path, false, 0, 0).await.ok()?;
+    (existing.len() > new_content.len() + 40).then(|| existing.len() - new_content.len())
+}
+
 fn fix_yaml_frontmatter(content: &str) -> Option<String> {
     let rest = content.strip_prefix("---\n")?;
     let end = rest.find("\n---")?;
@@ -209,29 +220,17 @@ impl Tool for WriteTool {
             return Ok(out);
         }
 
-        // Middleware 1b: frontmatter-only write on existing file with body — body-loss guard.
-        // `write` without start_line/end_line replaces the entire file. If the new content is
-        // a YAML frontmatter block that ends right after `---` and the existing file has a longer
-        // body, the agent almost certainly intended `prepend_to_file`.
+        // Body-loss guard: frontmatter-only write over non-empty file.
         let start_line = a.get("start_line").and_then(|v| v.as_i64()).unwrap_or(0);
         let end_line = a.get("end_line").and_then(|v| v.as_i64()).unwrap_or(0);
         if start_line == 0 && end_line == 0
-            && content.trim_start().starts_with("---")
-            && let Some(close) = content.match_indices("\n---").nth(0)
+            && let Some(lost_bytes) = detect_body_loss(&content, &path, &self.pcm).await
         {
-            // After closing `---`, is there substantive body?
-            let after = content[close.0 + 4..].trim();
-            if after.len() < 20
-                && let Ok(existing) = self.pcm.read(&path, false, 0, 0).await
-                && existing.len() > content.len() + 40
-            {
-                return Ok(ToolOutput::text(format!(
-                    "⛔ Body-loss risk: `write` on existing file `{path}` with frontmatter-only \
-                     content would replace {} bytes of existing body. Use `prepend_to_file` with \
-                     the frontmatter as `header` to keep the body intact.",
-                    existing.len() - content.len()
-                )));
-            }
+            return Ok(ToolOutput::text(format!(
+                "⛔ Body-loss risk: `write` on existing file `{path}` with frontmatter-only \
+                 content would replace {lost_bytes} bytes of existing body. Use `prepend_to_file` \
+                 with the frontmatter as `header` to keep the body intact."
+            )));
         }
 
         // Middleware 2: outbox sent:false auto-inject
