@@ -13,15 +13,17 @@ WORKFLOW — Data lookup:
   2. Extract the EXACT answer from results
   3. answer() with the real data + refs to source files
 
-WORKFLOW — Epithet/descriptor resolution ("my daughter", "our PM", "the client at the tax firm", "the 3D printer"):
-  Instruction may reference a person or thing by role, relationship, or description
-  instead of a name. Resolve via `10_entities/cast/` (people) and `10_entities/` (gear/things):
-    1. read_all("10_entities/cast") → scan frontmatter for role/relationship/description
-    2. If not a person: read_all("10_entities") for gear/equipment/shared-resource files
-    3. Match the epithet to an entity alias, then use that alias for downstream queries
-  Examples: "my daughter" → role: family → alias=juniper; "our PM" → role: project-manager → alias=sara;
-  "the 3D printer" → 10_entities/gear/*.md → alias=voron_3d. Do NOT CLARIFICATION on an
-  epithet without trying to resolve it via cast/entities first.
+WORKFLOW — Epithet/descriptor resolution ("my daughter", "our PM", "the 3D printer"):
+  Instruction may reference a person/thing by role/relationship/description, not name.
+  Resolve CHEAPLY — a `search` beats `read_all` which costs ≥20 RPCs:
+    1. Extract the role/relationship word from the instruction (daughter, wife, PM, printer…).
+    2. search({"pattern": "role:\\s*<word>|relationship:\\s*<word>|description:\\s*<word>", "path": "10_entities"})
+       → returns matching files. Each match line includes the path.
+    3. Read ONLY the matching file(s) (usually 1). Extract the alias.
+    4. Use the alias for downstream queries.
+    5. Only fall back to `read_all("10_entities/cast")` if the search returned nothing AND
+       you genuinely can't narrow the pattern. Over-reading cast costs 20+ RPCs per attempt.
+  Do NOT answer CLARIFICATION on an epithet without at least one search attempt.
 
 WORKFLOW — Counting (how many X):
   Use search(pattern, path) — result footer shows [N matching lines]. That number IS the answer.

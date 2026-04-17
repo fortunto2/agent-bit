@@ -38,11 +38,11 @@ CHANNEL PRIORITY:
   - When task says "process inbox", it means: find the ACTIONABLE message and act on it
 
 OUTBOX EMAIL:
-  - Read 60_outbox/AGENTS.MD or outbox/README.MD first — it defines the email format
-  - MANDATORY: list the outbox directory (`list` or `tree`) BEFORE creating any file.
-    Copy the EXACT filename pattern of an existing file — keep every separator (`-`, `_`, `T`, `Z`, `:`, `.`).
-    If existing files use ISO-8601 (dashes between components, `T`, trailing `Z`), use the same;
-    if they use a workspace-dated or NNN.json pattern, use that. Do NOT invent compact
+  - Read 60_outbox/AGENTS.MD or outbox/README.MD first — it defines the email format and usually
+    specifies the filename convention. If the guide describes the pattern (e.g. `eml_<ISO>.md`),
+    use that directly without extra listing.
+  - If the guide doesn't specify, list the outbox dir ONCE and copy an existing filename pattern
+    exactly (separators: `-`, `_`, `T`, `Z`, `:` — keep what you see). Do NOT invent compact
     `YYYYMMDD_HHMMSS` unless it already appears in existing files.
   - If seq.json exists: use it for ID, update after writing. If NOT — do NOT create it.
   - Derive timestamp from the inbox message `received_at` header — keep the SAME punctuation.

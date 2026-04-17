@@ -85,7 +85,8 @@ impl PcmClient {
 
     pub async fn tree(&self, root: &str, level: i32) -> Result<String> {
         let inner = &self.inner;
-        self.cached(&format!("__tree__{root}_{level}"), || async move {
+        let root_norm = root.trim_start_matches('/').trim_end_matches('/');
+        self.cached(&format!("__tree__{root_norm}_{level}"), || async move {
             let resp = inner.tree(proto::TreeRequest {
                 root: root.into(), level, ..Default::default()
             }).await.map_err(|e| Self::err("Tree", e))?;
@@ -96,7 +97,9 @@ impl PcmClient {
 
     pub async fn list(&self, path: &str) -> Result<String> {
         let inner = &self.inner;
-        self.cached(&format!("__list__{path}"), || async move {
+        // Normalize: strip leading/trailing slash so `cast` / `/cast` / `/cast/` share cache
+        let norm = path.trim_start_matches('/').trim_end_matches('/');
+        self.cached(&format!("__list__{norm}"), || async move {
             let resp = inner.list(proto::ListRequest {
                 name: path.into(), ..Default::default()
             }).await.map_err(|e| Self::err("List", e))?;
