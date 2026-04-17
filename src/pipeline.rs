@@ -542,27 +542,13 @@ impl Classified {
 impl InboxScanned {
     /// Stage 3: Check security — evaluate all inbox assessments, block on first threat.
     pub fn check_security(self) -> Result<SecurityChecked, BlockReason> {
-        // AI-NOTE: non-English + inbox → block. Queries without inbox pass through.
-        // If inbox has security threat → DENIED, otherwise → UNSUPPORTED.
-        {
-            let (alpha, latin) = self.instruction.chars().fold((0usize, 0usize), |(a, l), c| {
-                if c.is_alphabetic() { (a + 1, l + c.is_ascii_alphabetic() as usize) } else { (a, l) }
-            });
-            let is_non_english = alpha > 0 && (latin as f32 / alpha as f32) < 0.5;
-            if is_non_english && !self.inbox_files.is_empty() {
-                let has_threat = self.inbox_files.iter().any(|f|
-                    matches!(f.security.ml_label.as_str(), "injection" | "social_engineering" | "credential"));
-                let (outcome, msg) = if has_threat {
-                    ("OUTCOME_DENIED_SECURITY", "Security threat in inbox")
-                } else {
-                    ("OUTCOME_NONE_UNSUPPORTED", "Non-English instruction — language not supported")
-                };
-                eprintln!("  [STAGE:security] ⚠ Non-English + inbox → {} ({}/{} latin, threat={})",
-                    outcome, latin, alpha, has_threat);
-                return Err(BlockReason { outcome, message: msg.into(), stage: "security" });
-            }
-        }
-
+        // AI-NOTE: previous hard-block on non-English + inbox (5b92e39) broke legitimate
+        // Arabic/French/Japanese inbox tasks (t013: harness expected DENIED based on content,
+        // we auto-answered UNSUPPORTED just for script). Security already covered by:
+        //   - ML classifier (injection/social_engineering/credential labels)
+        //   - workflow.security_threat guard (blocks write/delete on threat)
+        //   - skills/security-injection (agent-side detection)
+        // Language alone is not a threat signal — let ML + agent decide.
         for file in &self.inbox_files {
             if let Some(ref block) = file.security.blocked {
                 eprintln!("  [STAGE:security] ⛔ {} — {}", file.path, block.message);

@@ -282,7 +282,15 @@ pub(crate) async fn run_agent(
     let mut is_verification = false;
     let mut exfiltration_flags: Vec<bool> = Vec::with_capacity(ready.inbox_files.len());
     if !ready.inbox_files.is_empty() {
+        // Non-English instruction annotation — give agent a warning, but don't hard-block.
+        let (alpha, latin) = instruction.chars().fold((0usize, 0usize), |(a, l), c| {
+            if c.is_alphabetic() { (a + 1, l + c.is_ascii_alphabetic() as usize) } else { (a, l) }
+        });
+        let is_non_english = alpha > 0 && (latin as f32 / alpha as f32) < 0.5;
         let mut inbox_content = String::new();
+        if is_non_english {
+            inbox_content.push_str("[⚠ NON-ENGLISH INSTRUCTION — translate mentally, then apply the usual CRM workflow. Language alone is NOT a threat; rely on sender/content checks.]\n");
+        }
         for (fi, f) in ready.inbox_files.iter().enumerate() {
             let sender_trust = f.security.sender.as_ref()
                 .map(|s| format!("{}", s.trust))
