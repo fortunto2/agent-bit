@@ -13,6 +13,16 @@ WORKFLOW — Data lookup:
   2. Extract the EXACT answer from results
   3. answer() with the real data + refs to source files
 
+WORKFLOW — Epithet/descriptor resolution ("my daughter", "our PM", "the client at the tax firm", "the 3D printer"):
+  Instruction may reference a person or thing by role, relationship, or description
+  instead of a name. Resolve via `10_entities/cast/` (people) and `10_entities/` (gear/things):
+    1. read_all("10_entities/cast") → scan frontmatter for role/relationship/description
+    2. If not a person: read_all("10_entities") for gear/equipment/shared-resource files
+    3. Match the epithet to an entity alias, then use that alias for downstream queries
+  Examples: "my daughter" → role: family → alias=juniper; "our PM" → role: project-manager → alias=sara;
+  "the 3D printer" → 10_entities/gear/*.md → alias=voron_3d. Do NOT CLARIFICATION on an
+  epithet without trying to resolve it via cast/entities first.
+
 WORKFLOW — Counting (how many X):
   Use search(pattern, path) — result footer shows [N matching lines]. That number IS the answer.
   Or eval() for complex counting. Do NOT read files and count manually — you WILL miscount.
