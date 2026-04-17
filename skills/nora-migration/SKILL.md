@@ -9,9 +9,10 @@ keywords: [NORA, migration, migrate, "queue up"]
 WORKFLOW (strict — do not get stuck in "read more" loops):
   1. Parse the ACTUAL file names from the user's instruction (after "NORA:"). The preloaded
      "FILES REFERENCED IN INSTRUCTION" block lists resolved paths — use them directly.
-  2. Read AT MOST ONE workflow doc for the required queue fields (pick the one whose name
-     matches "queueing" or "bulk-processing" or "nora-mcp" migration). After that ONE read,
-     STOP reading — you have enough to act.
+  2. Read EXACTLY ONE workflow doc that describes NORA migration — prefer filename containing
+     "migrating-to-nora" or "nora-mcp" (NOT "processing-inbox-email", NOT generic schemas).
+     Extract the REAL `queue_target` value (e.g. "vault2") from this doc. Do NOT invent "NORA"
+     as the queue_target — it's a workspace name, not the target.
   3. IMMEDIATELY start calling prepend_to_file for each target file. Do NOT read schemas,
      drafts, outbox, or sender guides. Do NOT re-read workflow docs. Every read after step 2
      is wasted — the harness grades file outcomes, not your analysis.
