@@ -695,3 +695,27 @@ doesn't extend TTL.
 - 7× miscellaneous
 
 **Haiku production ready at 78% — 3× baseline (15-25% on top-fail subset → 78% full bench).**
+
+### 2026-04-17 (evening): Free-tier comparison — Nemotron OR + Gemma 4 vs Haiku
+
+**Commits:** `7cabee0` (Nemotron routing fix) + config tidy.
+
+**Nemotron routing fix:**
+- Old: `workers-ai/@cf/nvidia/nemotron-3-120b-a12b` → 400 "does not exist"
+- Cloudflare Workers AI dropped the native Nemotron hosting; the endpoint lives
+  at `openrouter/nvidia/...` via CF Gateway (needs OR key) OR plain OpenRouter.
+- Switched `nemotron` provider to `nvidia/nemotron-3-super-120b-a12b:free` on OpenRouter.
+
+**Three-way leaderboard (104 tasks, same codebase, v4):**
+
+| Model | Pass | Partial | Fail | Pass rate | Cost |
+|-------|------|---------|------|-----------|------|
+| **Haiku 4.5** (or-haiku) | **81** | 0 | 23 | **78%** | ~$5 |
+| Nemotron 3 super 120b (OR free) | 67 | 2 | 35 | 65% | $0 |
+| Gemma 4 26b (CF Workers) | 66 | 0 | 38 | 63% | $0 |
+
+**Free-tier ≈ 64%.** Haiku adds **+13-15pp** for $5. All three run the same code
+(post loop-iteration v4 fixes — 20 universal fixes + auto-fallback + revert).
+
+**Takeaway:** Haiku is the cost-effective production choice; Nemotron/Gemma are
+valid zero-cost fallbacks.
