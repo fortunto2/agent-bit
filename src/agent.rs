@@ -436,12 +436,16 @@ impl<C: LlmClient> Pac1Agent<C> {
             ctx.intent = intent.clone();
             ctx
         };
-        let mut all_tools = vec![think_tool_for_context(&think_ctx)];
+        // Anthropic models can't parallel FC — including plan_next wastes a step
+        // (model picks plan_next alone, then we retry for action). Drop it entirely.
+        let mut all_tools: Vec<_> = if self.skip_plan_next {
+            Vec::new()
+        } else {
+            vec![think_tool_for_context(&think_ctx)]
+        };
         all_tools.extend(all_defs.clone());
         msgs.push(Message::user(if self.skip_plan_next {
-            // AI-NOTE: Anthropic models call plan_next alone (no parallel FC), so don't ask for parallel.
-            // They'll naturally alternate: plan_next → action → plan_next → action (2 calls/step).
-            "Use your tools to complete the task."
+            "Use your tools to complete the task. Act directly — no separate reasoning tool."
         } else {
             "Use your tools to complete the task. Call plan_next with your reasoning, and call action tools."
         }));
