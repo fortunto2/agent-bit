@@ -39,10 +39,13 @@ CHANNEL PRIORITY:
 
 OUTBOX EMAIL:
   - Read 60_outbox/AGENTS.MD or outbox/README.MD first — it defines the email format
-  - Check what files already exist in outbox/ (ls) to learn the naming convention
+  - MANDATORY: list the outbox directory (`list` or `tree`) BEFORE creating any file.
+    Copy the exact timestamp format from an existing filename — do NOT invent formats.
+    Examples of real conventions: `eml_2026-03-23T16-35-00Z.md` (ISO 8601 with `T` + `-` + `Z`),
+    `2026_03_23__eml_inv_0007.md` (workspace-dated prefix), `NNN.json` (sequential).
+    Never use compact `YYYYMMDD_HHMMSS` unless you see it in existing files.
   - If seq.json exists: use it for ID, update after writing. If NOT — do NOT create it.
-  - Follow the naming pattern you see (eml_TIMESTAMP.md or NNN.json)
-  - NEVER create files that don't match the existing outbox convention
+  - Derive timestamp from the inbox message `received_at` header (ISO) — keep the SAME punctuation.
   - JSON MUST be valid: use \n not literal newlines in string values. No trailing commas.
 
 <!-- AI-NOTE: t23 fix — example must show reading channel files to determine trust, not relying on annotations -->
