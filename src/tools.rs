@@ -98,7 +98,23 @@ impl Tool for ReadTool {
     async fn execute_readonly(&self, args: Value, ctx: &sgr_agent::context::AgentContext) -> Result<ToolOutput, ToolError> {
         let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-        let result = self.inner.execute_readonly(args.clone(), ctx).await?;
+        let result = match self.inner.execute_readonly(args.clone(), ctx).await {
+            Ok(r) => r,
+            Err(e) => {
+                // Auto-fallback: read() on a directory returns invalid_argument.
+                // Delegate to list() and prepend a hint so the model learns.
+                let msg = format!("{}", e);
+                if msg.contains("invalid_argument") && !path.is_empty()
+                    && let Ok(listing) = self.pcm.list(&path).await
+                {
+                    return Ok(ToolOutput::text(format!(
+                        "[auto: read({}) failed — path is a directory, showing list() instead]\n{}",
+                        path, listing
+                    )));
+                }
+                return Err(e);
+            }
+        };
         let mut output = guard_content(result.content);
 
         append_nested_agents_notice(&mut output, &self.pcm, &path);
