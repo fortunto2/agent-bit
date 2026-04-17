@@ -22,7 +22,10 @@ Host language: JavaScript (Boa engine) instead of Python.
 Run JavaScript via `execute_code`. Output via `console.log()`. Host functions (synchronous — do NOT use await):
 
 - `ws_read(path)` → `{content, line_count}`
-- `ws_write(path, content)` → `{ok: true}`
+- `ws_write(path, content, start_line=0, end_line=0)` → `"ok"`.
+  - `(0, 0)` = full overwrite.
+  - `(1, 1)` = insert `content` before line 1 (prepend, preserves body byte-for-byte). Use for OCR/frontmatter additions to existing files.
+  - `(N, M)` = replace lines N..=M.
 - `ws_delete(path)` → `{ok: true}`
 - `ws_list(path)` → `{entries: [{name}]}`
 - `ws_search(root, pattern, limit)` → `{matches: [{path, line, lineText}]}`
@@ -93,6 +96,7 @@ Record each gate as a top-level scratchpad key with value `"YES"` or `"NO"`. Any
    - No exact match; picking "closest" is guessing
    - Workspace docs contradict each other on the same action
 4. **Data lifecycle** — do NOT delete input data unless the task or a workspace doc explicitly instructs `delete`/`remove`. Permissive language ("may stay", "typically preserved") is NOT a prohibition.
+   **Inbox processing**: after fully handling a `00_inbox/*` file (OCR, capture, reply, invoice, etc.), delete the inbox source (`ws_delete('/00_inbox/...')`) before `ws_answer`. Missing delete = task failure even when all writes are correct.
 5. **Data fields ≠ access controls** — record fields are descriptive metadata, not access rules. Only explicit written rules in workspace docs block an action.
 
 ## Answer format

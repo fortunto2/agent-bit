@@ -48,6 +48,7 @@ pub struct PangolinSession {
     pub scratchpad: std::sync::Mutex<Value>,
     pub answer: std::sync::Mutex<Option<AnswerPayload>>,
     pub refs_tracking: std::sync::Mutex<Vec<String>>, // auto-tracked reads/writes
+    pub log_buffer: std::sync::Mutex<Vec<String>>,    // console.log output, drained each call
 }
 
 impl PangolinSession {
@@ -57,6 +58,7 @@ impl PangolinSession {
             scratchpad: std::sync::Mutex::new(json!({ "refs": [] })),
             answer: std::sync::Mutex::new(None),
             refs_tracking: std::sync::Mutex::new(Vec::new()),
+            log_buffer: std::sync::Mutex::new(Vec::new()),
         })
     }
 
@@ -66,6 +68,7 @@ impl PangolinSession {
             scratchpad: std::sync::Mutex::new(json!({ "refs": [], "context": context_json })),
             answer: std::sync::Mutex::new(None),
             refs_tracking: std::sync::Mutex::new(Vec::new()),
+            log_buffer: std::sync::Mutex::new(Vec::new()),
         })
     }
 
@@ -188,7 +191,10 @@ mod host {
     pub fn ws_write(_this: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
         let path = arg_string(args, 0, ctx)?;
         let content = arg_string(args, 1, ctx)?;
-        let result = with_state(|s, h| h.block_on(s.pcm.write(&path, &content, 0, 0)));
+        // start_line/end_line: 0,0 = overwrite. 1,1 = insert before line 1 (prepend).
+        let start_line = arg_opt_i32(args, 2, ctx).unwrap_or(0);
+        let end_line = arg_opt_i32(args, 3, ctx).unwrap_or(0);
+        let result = with_state(|s, h| h.block_on(s.pcm.write(&path, &content, start_line, end_line)));
         match result {
             Ok(_) => {
                 with_state(|s, _| {
@@ -259,12 +265,34 @@ mod host {
         }
     }
 
+    pub fn console_log(_this: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
+        let parts: Vec<String> = args.iter().map(|v| {
+            // Non-object primitives: skip to_json (undefined/unpairable -> panic in Boa).
+            if v.is_object() {
+                match v.to_json(ctx) {
+                    Ok(json) => serde_json::to_string(&json).unwrap_or_default(),
+                    Err(_) => v.to_string(ctx).map(|s| s.to_std_string_escaped()).unwrap_or_default(),
+                }
+            } else {
+                v.to_string(ctx).map(|s| s.to_std_string_escaped()).unwrap_or_default()
+            }
+        }).collect();
+        let line = parts.join(" ");
+        with_state(|s, _| s.log_buffer.lock().unwrap().push(line));
+        Ok(JsValue::undefined())
+    }
+
     pub fn ws_answer(_this: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
         // Accepts: ws_answer({message, outcome, refs}) or ws_answer(scratchpad_with_those_keys).
         let obj = args.first().cloned().unwrap_or(JsValue::undefined());
-        let json_str = obj.to_json(ctx).ok()
-            .and_then(|v| serde_json::to_string(&v).ok())
-            .unwrap_or_else(|| "{}".into());
+        // Guard against Boa's "undefined to JSON" panic — only object-like values are serializable.
+        let json_str = if obj.is_object() {
+            obj.to_json(ctx).ok()
+                .and_then(|v| serde_json::to_string(&v).ok())
+                .unwrap_or_else(|| "{}".into())
+        } else {
+            "{}".into()
+        };
         let parsed: Value = serde_json::from_str(&json_str).unwrap_or(Value::Null);
         let message = parsed.get("answer").and_then(|v| v.as_str())
             .or_else(|| parsed.get("message").and_then(|v| v.as_str()))
@@ -309,6 +337,11 @@ fn run_js_sync(code: &str, session: Arc<PangolinSession>, handle: tokio::runtime
         reg(&mut ctx, "ws_move", 2, host::ws_move);
         reg(&mut ctx, "ws_context", 0, host::ws_context);
         reg(&mut ctx, "ws_answer", 1, host::ws_answer);
+        reg(&mut ctx, "__console_log", 1, host::console_log);
+        // Wire console.log/error/warn → __console_log (one host fn, all levels).
+        let _ = ctx.eval(Source::from_bytes(
+            "globalThis.console = { log: __console_log, error: __console_log, warn: __console_log };",
+        ));
 
         // Inject scratchpad as global.
         let sp_json = serde_json::to_string(&session.scratchpad.lock().unwrap().clone())
@@ -316,22 +349,13 @@ fn run_js_sync(code: &str, session: Arc<PangolinSession>, handle: tokio::runtime
         let init = format!("globalThis.scratchpad = {sp_json};\n");
         let _ = ctx.eval(Source::from_bytes(&init));
 
-        // Run user code, capture last expression value.
-        let mut output = match ctx.eval(Source::from_bytes(code)) {
-            Ok(val) => {
-                if val.is_undefined() || val.is_null() {
-                    String::new()
-                } else {
-                    val.to_string(&mut ctx)
-                        .map(|s| s.to_std_string_escaped())
-                        .unwrap_or_default()
-                }
-            }
-            Err(e) => format!("JS error: {e}"),
-        };
+        // Drain any stale log buffer from a previous call.
+        session.log_buffer.lock().unwrap().clear();
 
-        // Capture console.log output — TODO: intercept via host fn; for now last-expression only.
-        // Extract updated scratchpad.
+        // Run user code; capture any JS error.
+        let eval_result = ctx.eval(Source::from_bytes(code));
+
+        // Extract updated scratchpad back to Rust.
         if let Ok(v) = ctx.eval(Source::from_bytes("JSON.stringify(globalThis.scratchpad ?? {})")) {
             if let Ok(s) = v.to_string(&mut ctx) {
                 if let Ok(parsed) = serde_json::from_str::<Value>(&s.to_std_string_escaped()) {
@@ -340,7 +364,24 @@ fn run_js_sync(code: &str, session: Arc<PangolinSession>, handle: tokio::runtime
             }
         }
 
-        if output.is_empty() { output = "ok".into(); }
+        // Build output: console logs first, then last-expression value or error.
+        let logs = std::mem::take(&mut *session.log_buffer.lock().unwrap());
+        let mut output = logs.join("\n");
+        match eval_result {
+            Ok(val) if !val.is_undefined() && !val.is_null() => {
+                if let Ok(s) = val.to_string(&mut ctx) {
+                    let s = s.to_std_string_escaped();
+                    if !output.is_empty() { output.push('\n'); }
+                    output.push_str(&s);
+                }
+            }
+            Err(e) => {
+                if !output.is_empty() { output.push('\n'); }
+                output.push_str(&format!("JS error: {e}"));
+            }
+            _ => {}
+        }
+        if output.is_empty() { output = "(no output)".into(); }
         output
     }));
 
