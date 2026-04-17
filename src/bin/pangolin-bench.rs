@@ -122,19 +122,18 @@ async fn run() -> Result<()> {
         parameters: tool.parameters_schema(),
     }];
 
-    // Root span for the whole trial — every LLM and execute_code span becomes its child,
-    // so Phoenix shows ONE trace per trial instead of disconnected ROOT traces.
+    // Root span — single trace per trial. sgr-agent LLM calls inherit parent
+    // automatically via tracing subscriber; annotate_session (trial.result) is
+    // attached below via root_span.in_scope(...).
     let root_span = tracing::info_span!(
         "pangolin_trial",
         task.id = %cli.task,
         session.id = %session_id,
         trial.id = %trial.trial_id,
     );
-
     {
         use tracing_opentelemetry::OpenTelemetrySpanExt;
         root_span.set_attribute("openinference.span.kind", "AGENT");
-        root_span.set_attribute("langsmith.span.kind", "AGENT");
         root_span.set_attribute("input.value", trial.instruction.clone());
     }
 
@@ -147,15 +146,11 @@ async fn run() -> Result<()> {
             messages.push(Message::user(format!("<scratchpad>\n{sp}\n</scratchpad>")));
 
             eprintln!("\n[pangolin] ── iter {} ──", iter);
-            let iter_span = tracing::info_span!("iter", n = iter);
-        
-            {
-                use tracing_opentelemetry::OpenTelemetrySpanExt;
-                iter_span.set_attribute("openinference.span.kind", "CHAIN");
-                iter_span.set_attribute("langsmith.span.kind", "CHAIN");
-            }
+            // `agent_step` matches sgr-agent app_loop convention — Phoenix already
+            // knows this span shape; no custom attributes needed here.
+            let step_span = tracing::info_span!("agent_step", step = iter);
             let (calls, text) = match llm.tools_call_with_text(&messages, &tool_defs)
-                .instrument(iter_span.clone()).await
+                .instrument(step_span.clone()).await
             {
                 Ok(v) => v,
                 Err(e) => { eprintln!("[pangolin] LLM error: {e}"); break; }
@@ -181,7 +176,7 @@ async fn run() -> Result<()> {
                 let code_preview = arguments.get("code").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 eprintln!("  → execute_code: {}", code_preview.chars().take(180).collect::<String>());
                 let exec_span = tracing::info_span!(
-                    parent: &iter_span,
+                    parent: &step_span,
                     "execute_code",
                     iter = iter,
                 );
@@ -189,7 +184,6 @@ async fn run() -> Result<()> {
                 {
                     use tracing_opentelemetry::OpenTelemetrySpanExt;
                     exec_span.set_attribute("openinference.span.kind", "TOOL");
-                    exec_span.set_attribute("langsmith.span.kind", "TOOL");
                     exec_span.set_attribute("tool.name", "execute_code");
                     exec_span.set_attribute("input.value", code_preview.clone());
                 }
@@ -254,8 +248,11 @@ async fn run() -> Result<()> {
         .with_context(|| "submit answer to PCM")?;
     let ended = harness.end_trial(&trial.trial_id).await?;
     let score = ended.score.unwrap_or(0.0);
-    // Phoenix annotation: adds score + outcome evaluator to the session in the UI.
-    sgr_agent::annotate_session(&cli.task, score, &a.outcome, iter as u32);
+    // Phoenix annotation: child of root_span so trial.result shares the trace
+    // with pangolin_trial (otherwise it's a sibling ROOT — Session UI splits).
+    root_span.in_scope(|| {
+        sgr_agent::annotate_session(&cli.task, score, &a.outcome, iter as u32);
+    });
     eprintln!("\n[pangolin] Score: {score:.2}");
     for d in &ended.score_detail { eprintln!("  • {d}"); }
     Ok(())
