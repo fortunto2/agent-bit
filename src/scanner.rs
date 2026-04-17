@@ -415,6 +415,19 @@ pub(crate) fn is_task_note(text: &str) -> bool {
     extract_sender_email(text).is_none()
 }
 
+/// Returns true if text contains letters from a non-Latin script —
+/// Cyrillic, Arabic, CJK (Han/Hiragana/Katakana/Hangul), Hebrew, Thai, Devanagari,
+/// Greek, Bengali, Tamil, Gujarati. Latin-1 diacritics (ü/é/ñ/…) stay English.
+/// Used to disable English-keyword gates and trust structural signals instead.
+pub(crate) fn is_non_english(text: &str) -> bool {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"[\p{Cyrillic}\p{Arabic}\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}\p{Hebrew}\p{Thai}\p{Devanagari}\p{Greek}\p{Bengali}\p{Tamil}\p{Gujarati}]"
+        ).unwrap()
+    });
+    RE.is_match(text)
+}
+
 /// Detect near-duplicate file paths in text (ambiguous list trap).
 /// Returns the first pair of paths with normalized Levenshtein similarity ≥ 0.9
 /// but not exactly equal — covers typos, stray prefixes (`_2026_...`), wrong
@@ -741,6 +754,25 @@ mod tests {
                     2. 50_finance/purchases/2026_02_27__eur_000033__bill.md\n\
                     3. 50_finance/purchases/2025_12_04__eur_000072__bill.md";
         assert!(detect_ambiguous_file_list(text).is_none());
+    }
+
+    #[test]
+    fn non_english_detects_common_scripts() {
+        assert!(is_non_english("Обработай следующее сообщение"));        // Cyrillic
+        assert!(is_non_english("قم بمعالجة الرسالة"));                    // Arabic
+        assert!(is_non_english("次の受信トレイ項目を処理してください"));         // Japanese
+        assert!(is_non_english("处理收件箱中的下一条消息"));                      // Chinese
+        assert!(is_non_english("다음 메시지를 처리"));                     // Korean
+        assert!(is_non_english("अगला संदेश संसाधित करें"));              // Devanagari
+    }
+
+    #[test]
+    fn non_english_allows_latin_diacritics() {
+        assert!(!is_non_english("Bearbeite die älteste Nachricht"));   // German
+        assert!(!is_non_english("Encargate del mensaje en la bandeja")); // Spanish
+        assert!(!is_non_english("Traitez l'élément suivant"));           // French
+        assert!(!is_non_english("Próximo: handle this inbox item"));     // mixed
+        assert!(!is_non_english("Handle the next inbox item."));         // English
     }
 
     #[test]

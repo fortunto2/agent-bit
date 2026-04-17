@@ -29,9 +29,6 @@ pub fn load(project_dir: &Path) -> SkillRegistry {
 pub fn select_body<'a>(registry: &'a SkillRegistry, security_label: &str, intent: &str, instruction: &str) -> &'a str {
     let is_security_label = matches!(security_label, "injection" | "social_engineering" | "credential");
     let valid = |skill: &Skill| -> bool {
-        // Keyword-gated skills: if a skill declares keywords, at least one must match the instruction.
-        // Otherwise the skill hijacks all intent-matching tasks (e.g. nora-migration at priority 40
-        // was winning every intent_email inbox even without "NORA" mentioned).
         if skill.keywords.is_empty() { return true; }
         let instr_lower = instruction.to_lowercase();
         skill.keywords.iter().any(|kw| instr_lower.contains(&kw.to_lowercase()))

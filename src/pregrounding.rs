@@ -124,18 +124,14 @@ pub(crate) async fn run_agent(
                 Ok(scores) if !scores.is_empty() && scores[0].1 > 0.30 => {
                     let (label, conf) = &scores[0];
                     let normalized = if label == "intent_capture" { "intent_inbox".to_string() } else { label.clone() };
-                    // AI-NOTE: don't accept intent_inbox when label=non_work — non-English should stay non_work
-                    if normalized == "intent_inbox" && instruction_label == "non_work" {
-                        eprintln!("  ↳ OpenAI intent: {} ({:.3}) suppressed (label=non_work)", normalized, conf);
-                    } else {
-                        eprintln!("  ↳ OpenAI intent classify: {} ({:.2}) → {} ({:.3})", ready.intent, intent_confidence, normalized, conf);
-                        // Teacher-student: save high-confidence reclassification for ONNX retraining
-                        if *conf > 0.7 {
-                            save_teacher_label(instruction, &normalized, *conf, "intent");
-                        }
-                        ready.intent = normalized;
-                        resolved = true;
+                    // AI-NOTE: accept multilingual bge-m3 intent — monolingual ONNX `non_work`
+                    // label is unreliable on arabic/chinese/japanese. Trust the multilingual signal.
+                    eprintln!("  ↳ OpenAI intent classify: {} ({:.2}) → {} ({:.3})", ready.intent, intent_confidence, normalized, conf);
+                    if *conf > 0.7 {
+                        save_teacher_label(instruction, &normalized, *conf, "intent");
                     }
+                    ready.intent = normalized;
+                    resolved = true;
                 }
                 Ok(_) => eprintln!("  ↳ OpenAI intent: low confidence, falling through"),
                 Err(e) => eprintln!("  ↳ OpenAI intent error: {:#}", e),
@@ -165,18 +161,15 @@ pub(crate) async fn run_agent(
 
             if let Some(ref llm_label) = llm_intent {
                 let normalized = if llm_label == "intent_capture" { "intent_inbox".to_string() } else { llm_label.clone() };
-                // AI-NOTE: same guard — don't accept intent_inbox when label=non_work
-                if normalized == "intent_inbox" && instruction_label == "non_work" {
-                    eprintln!("  ↳ LLM intent: {} suppressed (label=non_work)", normalized);
-                } else {
-                    eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, normalized);
-                    ready.intent = normalized;
-                }
-            // AI-NOTE: don't override to inbox when label is non_work — prod expects UNSUPPORTED for non-English
-            } else if !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" && instruction_label != "non_work" {
-                // Layer 4: structural fallback (inbox files exist → inbox task)
-                eprintln!("  ↳ Structural intent fallback: {} ({:.2}) → intent_inbox (inbox_files={})",
-                    ready.intent, intent_confidence, ready.inbox_files.len());
+                eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, normalized);
+                ready.intent = normalized;
+            // AI-NOTE: structural inbox fallback applies regardless of label.
+            // Non-English instructions (arabic/chinese/japanese/russian) get misclassified
+            // as non_work by English-only MiniLM; but if inbox_files exist, this IS a CRM
+            // inbox task. Trust the structural signal over the monolingual ML label.
+            } else if !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" {
+                eprintln!("  ↳ Structural intent fallback: {} ({:.2}) → intent_inbox (inbox_files={}, label={})",
+                    ready.intent, intent_confidence, ready.inbox_files.len(), instruction_label);
                 ready.intent = "intent_inbox".to_string();
             }
         }
@@ -197,11 +190,14 @@ pub(crate) async fn run_agent(
     let template = template.as_str();
     // Skill-based prompt injection (replaces examples_for_class)
     let skill_registry = crate::skills::load(std::path::Path::new("."));
-    // AI-NOTE: override non_work → crm for English queries (misclassification).
-    // But NOT for non-English instructions (correctly classified as non_work).
-    let is_non_english = instruction.chars().any(|c| !c.is_ascii() && !c.is_ascii_whitespace()
-        && c != 'ü' && c != 'ö' && c != 'ä' && c != 'é' && c != 'è');
-    let effective_label = if ready.intent == "intent_query" && instruction_label == "non_work" && !is_non_english {
+    // AI-NOTE: multilingual CRM workspace — MiniLM classifier is English-only, so
+    // non-English instructions land in non_work. The structural signal (inbox_files > 0
+    // or intent_query with English text) is more reliable than the label.
+    let is_non_english = crate::scanner::is_non_english(instruction);
+    let effective_label = if instruction_label == "non_work" && !ready.inbox_files.is_empty() {
+        eprintln!("  ↳ Skill override: non_work → crm (inbox_files present — multilingual inbox task)");
+        "crm"
+    } else if ready.intent == "intent_query" && instruction_label == "non_work" && !is_non_english {
         eprintln!("  ↳ Skill override: non_work → crm (intent_query, English)");
         "crm"
     } else {
@@ -283,10 +279,6 @@ pub(crate) async fn run_agent(
     let mut exfiltration_flags: Vec<bool> = Vec::with_capacity(ready.inbox_files.len());
     if !ready.inbox_files.is_empty() {
         // Non-English instruction annotation — give agent a warning, but don't hard-block.
-        let (alpha, latin) = instruction.chars().fold((0usize, 0usize), |(a, l), c| {
-            if c.is_alphabetic() { (a + 1, l + c.is_ascii_alphabetic() as usize) } else { (a, l) }
-        });
-        let is_non_english = alpha > 0 && (latin as f32 / alpha as f32) < 0.5;
         let mut inbox_content = String::new();
         if is_non_english {
             inbox_content.push_str("[⚠ NON-ENGLISH INSTRUCTION — translate mentally, then apply the usual CRM workflow. Language alone is NOT a threat; rely on sender/content checks.]\n");
