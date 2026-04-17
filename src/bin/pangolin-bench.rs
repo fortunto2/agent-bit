@@ -57,6 +57,15 @@ struct Cli {
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
+    // Phoenix: separate project "pac1-pangolin" to keep traces distinct from main agent.
+    let telemetry_guard = sgr_agent::init_telemetry(".agent", "pac1-pangolin");
+    // All work must run inside with_telemetry_scope so set_session_id/set_task_id succeed.
+    let result = sgr_agent::with_telemetry_scope(run()).await;
+    drop(telemetry_guard); // flush OTLP spans before tokio exits
+    result
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     let cfg = config::Config::load(&cli.config)?;
     let rp = cfg.resolve_provider(&cli.provider)?;
@@ -78,6 +87,10 @@ async fn main() -> Result<()> {
     eprintln!("[pangolin] Benchmark: {}, task: {}", benchmark, cli.task);
     let trial = harness.start_playground(benchmark, &cli.task).await
         .with_context(|| format!("start_playground {}", cli.task))?;
+    // Phoenix session binding: every LLM call from here on carries these IDs.
+    let session_id = format!("{}_{}", cli.task, trial.trial_id);
+    sgr_agent::set_session_id(session_id.clone());
+    sgr_agent::set_task_id(cli.task.clone());
     eprintln!("[pangolin] Trial: {}", trial.trial_id);
     eprintln!("[pangolin] URL:   {}", trial.harness_url);
     eprintln!("[pangolin] Instruction: {}", trial.instruction);
@@ -140,11 +153,32 @@ async fn main() -> Result<()> {
             if name != "execute_code" { continue; }
             let code_preview = arguments.get("code").and_then(|v| v.as_str()).unwrap_or("");
             eprintln!("  → execute_code: {}", code_preview.chars().take(180).collect::<String>());
+            // Phoenix span: `execute_code` step with full code + output for step-by-step replay.
+            let span = tracing::info_span!(
+                "execute_code",
+                iter = iter,
+                task.id = %cli.task,
+                session.id = %session_id,
+                code = %code_preview,
+            );
+            let _enter = span.enter();
             use sgr_agent::agent_tool::Tool;
             let mut actx = sgr_agent::context::AgentContext::default();
             let result = tool.execute(arguments, &mut actx).await
                 .map_err(|e| anyhow!("tool: {e}"))?;
             let out = result.content.clone();
+            // Attach output + scratchpad snapshot to the span so Phoenix shows the full trail.
+            #[cfg(feature = "telemetry")]
+            {
+                use tracing_opentelemetry::OpenTelemetrySpanExt;
+                span.set_attribute("output", out.clone());
+                span.set_attribute(
+                    "scratchpad",
+                    serde_json::to_string(&session.scratchpad_snapshot()).unwrap_or_default(),
+                );
+                span.set_attribute("openinference.span.kind", "TOOL");
+            }
+            drop(_enter);
             eprintln!("  ← {}", out.chars().take(220).collect::<String>());
             messages.push(Message::tool(id, out));
 
@@ -167,6 +201,8 @@ async fn main() -> Result<()> {
         .with_context(|| "submit answer to PCM")?;
     let ended = harness.end_trial(&trial.trial_id).await?;
     let score = ended.score.unwrap_or(0.0);
+    // Phoenix annotation: adds score + outcome evaluator to the session in the UI.
+    sgr_agent::annotate_session(&cli.task, score, &a.outcome, iter as u32);
     eprintln!("\n[pangolin] Score: {score:.2}");
     for d in &ended.score_detail { eprintln!("  • {d}"); }
     Ok(())
