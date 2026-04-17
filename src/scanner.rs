@@ -595,6 +595,14 @@ pub(crate) fn check_sender_domain_match(
     content: &str,
     account_domains: &[(String, String)],
 ) -> &'static str {
+    // Suspicious pseudo-TLDs are a hard mismatch regardless of CRM knowledge.
+    // Not real TLDs — typical typosquat / phishing markers.
+    let sd_lower = sender_domain.to_lowercase();
+    const FAKE_TLDS: &[&str] = &[".bak", ".old", ".test", ".fake", ".invalid", ".localhost"];
+    if FAKE_TLDS.iter().any(|t| sd_lower.ends_with(t)) {
+        return "mismatch";
+    }
+
     let sender_stem = domain_stem(sender_domain);
     if sender_stem.is_empty() {
         return "unknown";
