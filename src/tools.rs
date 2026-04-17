@@ -117,7 +117,7 @@ impl Tool for ReadTool {
         };
         let mut output = guard_content(result.content);
 
-        append_nested_agents_notice(&mut output, &self.pcm, &path);
+        append_nested_agents_notice(&mut output, &self.pcm, &path).await;
 
         if let Some(ref wf) = self.workflow {
             for msg in wf.lock().unwrap().post_action("read", &path) {
@@ -134,12 +134,12 @@ impl Tool for ReadTool {
 /// conflict; agent must surface unresolvable conflicts as CLARIFICATION).
 /// Shared by ReadTool and WriteTool — triggers on first contact with each subtree.
 /// Case-insensitive: workspace may have `AGENTS.md` or `AGENTS.MD` per subtree.
-fn append_nested_agents_notice(output: &mut String, pcm: &PcmClient, path: &str) {
+async fn append_nested_agents_notice(output: &mut String, pcm: &PcmClient, path: &str) {
     if path.is_empty() { return; }
     let basename = path.rsplit_once('/').map(|(_, b)| b).unwrap_or(path);
     if basename.eq_ignore_ascii_case("AGENTS.md") { return; } // don't inject into AGENTS.md itself
     // Inject shallowest-first so agent reads root-closer rules before deeper refinements.
-    let chain = pcm.relevant_nested_agents(&[path]);
+    let chain = pcm.relevant_nested_agents(&[path]).await;
     for (dir, content) in chain {
         if !pcm.mark_subtree_injected(&dir) { continue; }
         output.push_str(&format!(
@@ -281,7 +281,7 @@ impl Tool for WriteTool {
         let result = self.inner.execute(final_args, ctx).await?;
         let mut msg = result.content;
 
-        append_nested_agents_notice(&mut msg, &self.pcm, &path);
+        append_nested_agents_notice(&mut msg, &self.pcm, &path).await;
 
         // Middleware 3b: workflow post_action + hooks
         if let Some(ref wf) = self.workflow {

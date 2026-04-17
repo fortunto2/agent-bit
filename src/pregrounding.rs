@@ -237,7 +237,7 @@ pub(crate) async fn run_agent(
     // (agent never Reads those itself since inbox content is pre-injected).
     // Subtrees the agent enters later get their nested AGENTS.MD via ReadTool/WriteTool lazy inject.
     let inbox_paths: Vec<&str> = ready.inbox_files.iter().map(|f| f.path.as_str()).collect();
-    let relevant = pcm.relevant_nested_agents(&inbox_paths);
+    let relevant = pcm.relevant_nested_agents(&inbox_paths).await;
     for (dir, content) in &relevant {
         messages.push(Message::user(&format!(
             "NESTED AGENTS.MD @ {dir}/AGENTS.MD — local refinement for this subtree; must not contradict root AGENTS.MD; if conflict is unresolvable → OUTCOME_NONE_CLARIFICATION:\n{content}"

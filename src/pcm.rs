@@ -23,10 +23,12 @@ pub struct PcmClient {
     /// Read cache — keyed by path. Invalidated by write/delete to same path.
     /// Single owner: PcmClient. All tools share via Arc<PcmClient>.
     read_cache: Mutex<std::collections::HashMap<String, String>>,
-    /// Nested AGENTS.md index — dir → content. Loaded once per trial via
-    /// `preload_nested_agents()`. Empty map = no nested overrides or not loaded yet.
-    /// Keys are normalized dir paths WITHOUT leading/trailing slashes (e.g. "40_projects/foo").
+    /// Nested AGENTS.md content cache — dir → Some(content) once fetched.
+    /// Missing entries mean not fetched yet (`nested_agents_paths` knows they exist).
     nested_agents: Mutex<std::collections::HashMap<String, String>>,
+    /// Known nested AGENTS.md locations — dir → actual filename (case: "AGENTS.md" vs "AGENTS.MD").
+    /// Populated by `preload_nested_agents()` (2 finds, no reads); content fetched on demand.
+    nested_agents_paths: Mutex<std::collections::HashMap<String, String>>,
     /// Subtrees where nested AGENTS.md was already injected to LLM context — dedup by dir.
     /// Avoids repeated injection on every read within same subtree.
     injected_subtrees: Mutex<std::collections::HashSet<String>>,
@@ -45,6 +47,7 @@ impl PcmClient {
             recent_reads: Mutex::new(Vec::new()),
             read_cache: Mutex::new(std::collections::HashMap::new()),
             nested_agents: Mutex::new(std::collections::HashMap::new()),
+            nested_agents_paths: Mutex::new(std::collections::HashMap::new()),
             injected_subtrees: Mutex::new(std::collections::HashSet::new()),
             rpc_count: AtomicU32::new(0),
         }
@@ -281,42 +284,46 @@ impl PcmClient {
         Ok(out)
     }
 
-    /// Preload nested AGENTS.md files across workspace.
-    /// Two parallel finds (lowercase + uppercase) — harness `find` is case-sensitive
-    /// and prod workspaces mix cases per subtree (`accounts/AGENTS.md` vs `inbox/AGENTS.MD`).
-    /// Then batch silent reads of the found files (no `recent_reads` pollution).
-    /// Cheap: 2 find RPC + N≤10 silent reads. Returns number of nested subtrees indexed.
+    /// Discover nested AGENTS.md locations — two parallel finds (lowercase + uppercase TLD
+    /// mix in prod workspaces). Content is NOT read here — only paths cached for lazy fetch.
+    /// Cheap: 2 find RPC, no reads. Returns number of nested subtrees discovered.
     pub async fn preload_nested_agents(&self) -> Result<usize> {
         let (lower, upper) = tokio::join!(
             self.find("/", "AGENTS.md", "files", 50),
             self.find("/", "AGENTS.MD", "files", 50),
         );
         let merged = format!("{}\n{}", lower.unwrap_or_default(), upper.unwrap_or_default());
-        let paths: Vec<String> = merged.lines()
-            .filter(|l| !l.is_empty() && !l.starts_with("$ find"))
-            .map(|s| s.trim_start_matches('/').to_string())
-            .filter(|p| !p.is_empty() && !p.eq_ignore_ascii_case("AGENTS.md"))
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
-        if paths.is_empty() { return Ok(0); }
-
-        // read_silent: preload paths MUST NOT pollute recent_reads → AnswerTool auto-refs
-        let reads = futures::future::join_all(paths.iter().map(|p| async move {
-            let content = self.read_silent(p).await.ok();
-            (p.clone(), content)
-        })).await;
-
-        let mut map = self.nested_agents.lock().unwrap();
-        for (path, content) in reads {
-            if let Some(c) = content {
-                let dir = path.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
-                if !dir.is_empty() {
-                    map.insert(dir, c);
-                }
-            }
+        let mut map = self.nested_agents_paths.lock().unwrap();
+        for line in merged.lines() {
+            if line.is_empty() || line.starts_with("$ find") { continue; }
+            let path = line.trim_start_matches('/').to_string();
+            if path.is_empty() || path.eq_ignore_ascii_case("AGENTS.md") { continue; }
+            let dir = match path.rsplit_once('/') {
+                Some((d, _)) if !d.is_empty() => d.to_string(),
+                _ => continue,
+            };
+            map.entry(dir).or_insert(path);
         }
         Ok(map.len())
+    }
+
+    /// Fetch nested AGENTS.md content for a dir (on demand). First call reads via silent path,
+    /// subsequent calls hit the in-memory map. Returns None if dir has no nested AGENTS.md.
+    pub async fn fetch_nested_agents(&self, dir: &str) -> Option<String> {
+        if let Ok(map) = self.nested_agents.lock()
+            && let Some(hit) = map.get(dir)
+        {
+            return Some(hit.clone());
+        }
+        let path = {
+            let paths = self.nested_agents_paths.lock().ok()?;
+            paths.get(dir).cloned()?
+        };
+        let content = self.read_silent(&path).await.ok()?;
+        if let Ok(mut map) = self.nested_agents.lock() {
+            map.insert(dir.to_string(), content.clone());
+        }
+        Some(content)
     }
 
     /// Return preloaded nested AGENTS.MD entries whose dir is an ancestor of any of `target_paths`.
@@ -324,23 +331,32 @@ impl PcmClient {
     /// Example: paths=["inbox/msg.md"] → returns `inbox/AGENTS.MD` (and any ancestor nested),
     /// but NOT sibling `accounts/AGENTS.md`.
     /// Sorted from shallowest to deepest dir (natural reading order).
-    pub fn relevant_nested_agents(&self, target_paths: &[&str]) -> Vec<(String, String)> {
-        let map = match self.nested_agents.lock() { Ok(m) => m, Err(_) => return Vec::new() };
-        let mut out: Vec<(String, String)> = Vec::new();
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for raw in target_paths {
-            let normalized = raw.trim_start_matches('/').trim_end_matches('/');
-            let mut current: &str = normalized;
-            loop {
-                if let Some(content) = map.get(current)
-                    && seen.insert(current.to_string())
-                {
-                    out.push((current.to_string(), content.clone()));
+    pub async fn relevant_nested_agents(&self, target_paths: &[&str]) -> Vec<(String, String)> {
+        // Collect dirs on the ancestor chain where a nested AGENTS.md was discovered.
+        let chain_dirs: Vec<String> = {
+            let paths = match self.nested_agents_paths.lock() { Ok(m) => m, Err(_) => return Vec::new() };
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut out: Vec<String> = Vec::new();
+            for raw in target_paths {
+                let normalized = raw.trim_start_matches('/').trim_end_matches('/');
+                let mut current: &str = normalized;
+                loop {
+                    if paths.contains_key(current) && seen.insert(current.to_string()) {
+                        out.push(current.to_string());
+                    }
+                    match current.rsplit_once('/') {
+                        Some((parent, _)) => current = parent,
+                        None => break,
+                    }
                 }
-                match current.rsplit_once('/') {
-                    Some((parent, _)) => current = parent,
-                    None => break,
-                }
+            }
+            out
+        };
+        // Fetch content lazily for each relevant dir (usually 0-2 reads).
+        let mut out = Vec::with_capacity(chain_dirs.len());
+        for dir in chain_dirs {
+            if let Some(content) = self.fetch_nested_agents(&dir).await {
+                out.push((dir, content));
             }
         }
         out.sort_by(|a, b| a.0.split('/').count().cmp(&b.0.split('/').count()).then_with(|| a.0.cmp(&b.0)));
