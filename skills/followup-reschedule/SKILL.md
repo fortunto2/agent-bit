@@ -18,14 +18,14 @@ WORKFLOW:
   7. Update the reminder JSON with the same new date
   8. answer(OUTCOME_OK) with refs to BOTH files
 
-EXAMPLE — Reschedule follow-up:
-  search({"pattern": "Acme", "path": "accounts"}) → accounts/acct_003.json
-  read({"path": "accounts/acct_003.json"}) → {..., "next_follow_up": "2026-04-01", ...}
-  write({"path": "accounts/acct_003.json", "content": "{...same fields, \"next_follow_up\": \"2026-04-15\"}"})
-  list({"path": "reminders"}) → reminders/rem_003.json
-  read({"path": "reminders/rem_003.json"}) → {..., "date": "2026-04-01", ...}
-  write({"path": "reminders/rem_003.json", "content": "{...same fields, \"date\": \"2026-04-15\"}"})
-  answer({"message": "Rescheduled follow-up to 2026-04-15", "outcome": "OUTCOME_OK", "refs": ["accounts/acct_003.json", "reminders/rem_003.json"]})
+OUTLINE — Reschedule follow-up:
+  search(<account name or keyword>, accounts path) → <account file>
+  read(<account file>) → note the current `next_follow_up` / `follow_up_date` value
+  write(<account file>, full original JSON with ONLY the date field updated to the new value)
+  list(reminders path) → locate the reminder whose `account_id` matches the account
+  read + write that reminder file the same way, keeping every other field intact
+  answer(OUTCOME_OK, refs = [account_file, reminder_file])
+  Use paths and dates from THIS trial — do not reuse placeholders.
 
 CRITICAL: Update BOTH the account AND the reminder. Missing one = failure.
 CRITICAL: Read the FULL JSON before writing — preserve ALL existing fields, only change the date.
