@@ -719,3 +719,35 @@ doesn't extend TTL.
 
 **Takeaway:** Haiku is the cost-effective production choice; Nemotron/Gemma are
 valid zero-cost fallbacks.
+
+## Pangolin-style one-tool experiments (2026-04-18)
+
+Three branches, all pushed:
+
+- `experiment/pangolin-arch` — Boa JS `execute_code` tool with live workspace
+- `experiment/pangolin-py` — Python subprocess variant (zero heavy Rust deps)
+- `feat/eval-readonly-helper` — eval_full as 17th tool in main (minimal path)
+
+**Pangolin-py Gemma4:** v1 58% baseline → prompt-add validators tuning cycle
+v2→v6 in 40-60% range → exact v1 rollback confirmed 53% reproducible.
+**Haiku:** 54% (v7). Main Haiku baseline **78%** — Pangolin-arch loses 24pp
+to full-stack (ML classifier + skills + feature matrix).
+
+**feat/eval-readonly-helper on main Gemma4:**
+| run | pass | notes |
+|-----|------|-------|
+| baseline | 64.0% (64/104) | main before eval_full |
+| v1 (eval only) | 64.4% (67/104) | eval registered, legacy prompt |
+| v3 (fixed prompt) | ~64% (65/102) | ws_* API documented, 45%→39% eval JS error rate |
+
+Scratchpad injection shown live: **815 injections, all 2 keys baseline**.
+Neither Gemma4 nor Haiku mutate scratchpad without explicit examples.
+Switched to `PAC1_SCRATCHPAD=on` opt-in (default off).
+
+**Conclusion:** Pangolin architecture delivers 88% on Opus (original author).
+On Gemma4/Haiku it sits 6-24pp below our full-stack main. eval_full as an
+additive tool is plumbing-complete; measurable gain is within non-det noise.
+Value will appear when we test Opus/Sonnet 4.7 tier models.
+
+See `docs/pangolin-py-results.md` (on `experiment/pangolin-py`) for deeper
+analysis of failure categories.
