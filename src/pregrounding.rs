@@ -451,7 +451,15 @@ pub(crate) async fn run_agent(
         .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
         .register(sgr_agent_tools::ListTool(pcm.clone()))                        // → sgr-agent-tools
         .register(sgr_agent_tools::TreeTool(pcm.clone()))                        // → sgr-agent-tools
-        .register(sgr_agent_tools::EvalTool(pcm.clone()))                         // → sgr-agent-tools
+        // EvalFullTool — Pangolin-style execute_code with live workspace access + scratchpad.
+        // Replaces the read-only EvalTool (files pre-loaded via glob). Live host fns:
+        // ws_read/write/delete/list/search/find/tree/move/context; scratchpad persists between eval calls.
+        .register({
+            let ctx_raw = pcm.context().await.unwrap_or_default();
+            let ctx_json = crate::eval_full::parse_context_output(&ctx_raw);
+            let session = crate::eval_full::EvalSession::with_context(pcm.clone(), ctx_json);
+            crate::eval_full::EvalFullTool { session }
+        })
         .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone(), Some(workflow.clone()))) // PAC1-specific
         .register(tools::ContextTool(pcm.clone()))                               // PAC1-specific
         // EXTENDED

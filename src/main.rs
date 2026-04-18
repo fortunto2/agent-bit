@@ -41,6 +41,8 @@ mod trial_dump;
 mod scanner;
 #[allow(dead_code)]
 mod pac1_sgr;
+#[allow(dead_code)]
+mod eval_full;
 mod feature_matrix;
 mod skills;
 mod tools;
