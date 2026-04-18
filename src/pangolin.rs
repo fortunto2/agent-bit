@@ -282,13 +282,16 @@ mod host {
     }
 
     pub fn console_log(_this: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
-        let parts: Vec<String> = args.iter().map(|v| {
-            // Non-object primitives: skip to_json (undefined/unpairable -> panic in Boa).
+        // Route through JSON.stringify for objects (handles undefined safely), to_string otherwise.
+        let parts: Vec<String> = args.iter().enumerate().map(|(i, v)| {
             if v.is_object() {
-                match v.to_json(ctx) {
-                    Ok(json) => serde_json::to_string(&json).unwrap_or_default(),
-                    Err(_) => v.to_string(ctx).map(|s| s.to_std_string_escaped()).unwrap_or_default(),
-                }
+                let name = format!("__log_arg_{i}");
+                ctx.global_object().set(JsString::from(name.as_str()), v.clone(), true, ctx).ok();
+                ctx.eval(Source::from_bytes(&format!("JSON.stringify(globalThis.{name} ?? null)")))
+                    .ok()
+                    .and_then(|r| r.to_string(ctx).ok())
+                    .map(|s| s.to_std_string_escaped())
+                    .unwrap_or_default()
             } else {
                 v.to_string(ctx).map(|s| s.to_std_string_escaped()).unwrap_or_default()
             }
@@ -299,16 +302,19 @@ mod host {
     }
 
     pub fn ws_answer(_this: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
-        // Accepts: ws_answer({message, outcome, refs}) or ws_answer(scratchpad_with_those_keys).
-        let obj = args.first().cloned().unwrap_or(JsValue::undefined());
-        // Guard against Boa's "undefined to JSON" panic — only object-like values are serializable.
-        let json_str = if obj.is_object() {
-            obj.to_json(ctx).ok()
-                .and_then(|v| serde_json::to_string(&v).ok())
-                .unwrap_or_else(|| "{}".into())
-        } else {
-            "{}".into()
-        };
+        // Accepts: ws_answer({answer, outcome, refs}) or ws_answer(scratchpad_with_those_keys).
+        // Use JSON.stringify (JS standard) — it naturally drops undefined values instead of
+        // panicking like `JsValue::to_json` does.
+        let arg = args.first().cloned().unwrap_or(JsValue::undefined());
+        ctx.global_object().set(js_string!("__ans_arg"), arg, true, ctx).ok();
+        let json_str = ctx
+            .eval(Source::from_bytes(
+                "JSON.stringify(globalThis.__ans_arg ?? {}) || '{}'",
+            ))
+            .ok()
+            .and_then(|v| v.to_string(ctx).ok())
+            .map(|s| s.to_std_string_escaped())
+            .unwrap_or_else(|| "{}".into());
         let parsed: Value = serde_json::from_str(&json_str).unwrap_or(Value::Null);
         let message = parsed.get("answer").and_then(|v| v.as_str())
             .or_else(|| parsed.get("message").and_then(|v| v.as_str()))
