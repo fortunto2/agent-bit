@@ -145,8 +145,9 @@ mod host {
     }
 
     fn json_to_jsvalue(v: &Value, ctx: &mut Context) -> JsResult<JsValue> {
+        // Value→string→JsValue (use llm_json repair as fallback — cheap safety net).
         let s = serde_json::to_string(v).unwrap_or_else(|_| "null".into());
-        JsValue::from_json(&serde_json::from_str(&s).unwrap_or(Value::Null), ctx)
+        JsValue::from_json(&sgr_agent::str_ext::parse_tool_args(&s), ctx)
     }
 
     fn err_to_jsval(e: impl std::fmt::Display, ctx: &mut Context) -> JsValue {
@@ -315,7 +316,8 @@ mod host {
             .and_then(|v| v.to_string(ctx).ok())
             .map(|s| s.to_std_string_escaped())
             .unwrap_or_else(|| "{}".into());
-        let parsed: Value = serde_json::from_str(&json_str).unwrap_or(Value::Null);
+        // Universal repair fallback via sgr-agent's parse_tool_args (llm_json).
+        let parsed: Value = sgr_agent::str_ext::parse_tool_args(&json_str);
         let message = parsed.get("answer").and_then(|v| v.as_str())
             .or_else(|| parsed.get("message").and_then(|v| v.as_str()))
             .unwrap_or("").to_string();
@@ -380,9 +382,9 @@ fn run_js_sync(code: &str, session: Arc<PangolinSession>, handle: tokio::runtime
         // Extract updated scratchpad back to Rust.
         if let Ok(v) = ctx.eval(Source::from_bytes("JSON.stringify(globalThis.scratchpad ?? {})")) {
             if let Ok(s) = v.to_string(&mut ctx) {
-                if let Ok(parsed) = serde_json::from_str::<Value>(&s.to_std_string_escaped()) {
-                    *session.scratchpad.lock().unwrap() = parsed;
-                }
+                // llm_json repair fallback — agent sometimes produces not-quite-JSON in scratchpad.
+                let parsed = sgr_agent::str_ext::parse_tool_args(&s.to_std_string_escaped());
+                *session.scratchpad.lock().unwrap() = parsed;
             }
         }
 
