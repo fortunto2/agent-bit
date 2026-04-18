@@ -43,6 +43,8 @@ mod scanner;
 mod pac1_sgr;
 #[allow(dead_code)]
 mod pangolin;
+#[allow(dead_code)]
+mod pangolin_py;
 mod feature_matrix;
 mod skills;
 mod tools;
