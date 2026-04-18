@@ -427,6 +427,7 @@ impl<C: LlmClient> Pac1Agent<C> {
                 let keys = snapshot.as_object().map(|o| o.len()).unwrap_or(0);
                 if keys > 0 {
                     let sp_str = serde_json::to_string_pretty(&snapshot).unwrap_or_default();
+                    eprintln!("  📒 Scratchpad inject: {} keys, {} bytes", keys, sp_str.len());
                     msgs.push(Message::user(&format!(
                         "<scratchpad>\n{sp_str}\n</scratchpad>\nSet/read state via `eval` — mutations survive across steps."
                     )));

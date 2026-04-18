@@ -403,10 +403,11 @@ impl Tool for EvalFullTool {
     fn name(&self) -> &str { "eval" }
     fn description(&self) -> &str {
         "Run JavaScript with LIVE workspace access. Host fns: ws_read/write/delete/list/search/find/tree/move/context. \
-         `scratchpad` persists across eval calls. Use for batch aggregation (sum totals across N files), \
-         multi-file transforms (OCR 5 invoices in one block), filtering/sorting. \
-         Writes/deletes still pass through workspace policy — same safety as atomic tools. \
-         Final answer goes via AnswerTool, not here."
+         Inside the JS a global `scratchpad` object is visible — it's the SAME object you see as <scratchpad> tag \
+         every turn. Mutate it (scratchpad.total=241, scratchpad.identity_gate='NO') to remember results across \
+         steps without re-computing. Use this tool for batch aggregation (sum totals across N files), multi-file \
+         transforms (OCR 5 invoices in one block), filtering/sorting, or to stash intermediate state. Writes/deletes \
+         still pass through workspace policy — same safety as atomic tools. Final answer goes via AnswerTool."
     }
     fn is_read_only(&self) -> bool { false }
     fn parameters_schema(&self) -> Value { json_schema_for::<ExecuteArgs>() }
