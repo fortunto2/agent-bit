@@ -138,6 +138,30 @@ release-build:
 leaderboard:
 	cargo run --release -- --provider $(or $(LB_PROVIDER),openai-v2) --run "$(or $(NAME),sgr-agent-v$(shell date +%Y%m%d))"
 
+# ─── Pangolin-py experiment helpers ─────────────────────────────────────────
+
+# Quick 5-task sample (P=5, ~2 min). Override via TASKS="t001 t002 …".
+pango-sample:
+	bash scripts/pango-sample.sh
+
+pango-sample-js:
+	VARIANT=js bash scripts/pango-sample.sh
+
+# Full leaderboard run. P=8 safe default, bump via PARALLEL=20 for faster iteration.
+# Usage: make pango-full NAME=py-v5 PARALLEL=20
+pango-full:
+	cargo run --release --bin pangolin-py-leaderboard -- \
+	  --provider $(or $(PROVIDER),cf-gemma4) \
+	  --run "pangolin-$(or $(NAME),py-$(shell date +%Y%m%d_%H%M))" \
+	  --parallel $(or $(PARALLEL),8) --max-iter $(or $(MAX_ITER),15) \
+	  --prompt prompts/pangolin-py.md
+
+pango-full-js:
+	cargo run --release --bin pangolin-leaderboard -- \
+	  --provider $(or $(PROVIDER),cf-gemma4) \
+	  --run "pangolin-$(or $(NAME),js-$(shell date +%Y%m%d_%H%M))" \
+	  --parallel $(or $(PARALLEL),8) --max-iter $(or $(MAX_ITER),15)
+
 # Competition day: preflight + warmup + scored leaderboard run
 competition:
 	@$(MAKE) preflight
