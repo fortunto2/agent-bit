@@ -36,19 +36,20 @@ use crate::pcm::PcmClient;
 // ─── Shared state between tool calls ────────────────────────────────────────
 
 /// State that persists across multiple `eval` invocations within one task.
-/// Shared via Arc so multiple eval calls see the same scratchpad / tracking.
+/// `scratchpad` is `Arc<Mutex<_>>` so the same handle can be cloned into the
+/// agent side for cross-tool `<scratchpad>` injection.
 pub struct EvalSession {
     pub pcm: Arc<PcmClient>,
-    pub scratchpad: std::sync::Mutex<Value>,
-    pub refs_tracking: std::sync::Mutex<Vec<String>>, // auto-tracked reads/writes
-    pub log_buffer: std::sync::Mutex<Vec<String>>,    // console.log output, drained each call
+    pub scratchpad: Arc<std::sync::Mutex<Value>>,
+    pub refs_tracking: std::sync::Mutex<Vec<String>>,
+    pub log_buffer: std::sync::Mutex<Vec<String>>,
 }
 
 impl EvalSession {
     pub fn new(pcm: Arc<PcmClient>) -> Arc<Self> {
         Arc::new(Self {
             pcm,
-            scratchpad: std::sync::Mutex::new(json!({ "refs": [] })),
+            scratchpad: Arc::new(std::sync::Mutex::new(json!({ "refs": [] }))),
             refs_tracking: std::sync::Mutex::new(Vec::new()),
             log_buffer: std::sync::Mutex::new(Vec::new()),
         })
@@ -57,7 +58,7 @@ impl EvalSession {
     pub fn with_context(pcm: Arc<PcmClient>, context_json: Value) -> Arc<Self> {
         Arc::new(Self {
             pcm,
-            scratchpad: std::sync::Mutex::new(json!({ "refs": [], "context": context_json })),
+            scratchpad: Arc::new(std::sync::Mutex::new(json!({ "refs": [], "context": context_json }))),
             refs_tracking: std::sync::Mutex::new(Vec::new()),
             log_buffer: std::sync::Mutex::new(Vec::new()),
         })

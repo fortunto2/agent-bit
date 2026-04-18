@@ -147,6 +147,10 @@ pub struct Pac1Agent<C: LlmClient> {
     /// AI-NOTE: Anthropic models can't do parallel FC — plan_next always called alone, wastes a retry.
     /// Skip plan_next entirely for these models: action tools only, 1 LLM call/step.
     skip_plan_next: bool,
+    /// Optional cross-tool scratchpad. When set AND `PAC1_SCRATCHPAD != "off"`,
+    /// a `<scratchpad>{json}</scratchpad>` user message is injected before each
+    /// LLM call. Agent mutates via `eval` (shares same Arc via EvalSession).
+    scratchpad: Option<std::sync::Arc<std::sync::Mutex<serde_json::Value>>>,
 }
 
 impl<C: LlmClient> Pac1Agent<C> {
@@ -182,7 +186,15 @@ impl<C: LlmClient> Pac1Agent<C> {
             cached_task_type: Mutex::new(None),
             cached_security: Mutex::new(None),
             think_context: Mutex::new(ThinkContext::default()),
+            scratchpad: None,
         }
+    }
+
+    /// Enable cross-tool scratchpad injection. Pass the same Arc as EvalSession
+    /// so `eval` mutations are visible as `<scratchpad>` tag next LLM call.
+    pub fn with_scratchpad(mut self, sp: std::sync::Arc<std::sync::Mutex<serde_json::Value>>) -> Self {
+        self.scratchpad = Some(sp);
+        self
     }
 
     /// Set the ML-classified instruction intent for task-type forcing.
@@ -404,6 +416,21 @@ impl<C: LlmClient> Pac1Agent<C> {
             for nudge in wf.lock().unwrap().advance_step() {
                 eprintln!("  📌 Workflow: {}", nudge.trunc(80));
                 msgs.push(Message::user(&nudge));
+            }
+        }
+
+        // Scratchpad injection (opt-in via PAC1_SCRATCHPAD != "off"; Arc shared with EvalSession).
+        if let Some(ref sp) = self.scratchpad {
+            let disabled = std::env::var("PAC1_SCRATCHPAD").as_deref() == Ok("off");
+            if !disabled {
+                let snapshot = sp.lock().unwrap().clone();
+                let keys = snapshot.as_object().map(|o| o.len()).unwrap_or(0);
+                if keys > 0 {
+                    let sp_str = serde_json::to_string_pretty(&snapshot).unwrap_or_default();
+                    msgs.push(Message::user(&format!(
+                        "<scratchpad>\n{sp_str}\n</scratchpad>\nSet/read state via `eval` — mutations survive across steps."
+                    )));
+                }
             }
         }
 
@@ -733,6 +760,21 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
             for nudge in wf.lock().unwrap().advance_step() {
                 eprintln!("  📌 Workflow: {}", nudge.trunc(80));
                 msgs.push(Message::user(&nudge));
+            }
+        }
+
+        // Scratchpad injection (opt-in via PAC1_SCRATCHPAD != "off"; shared with EvalSession).
+        if let Some(ref sp) = self.scratchpad {
+            let disabled = std::env::var("PAC1_SCRATCHPAD").as_deref() == Ok("off");
+            if !disabled {
+                let snapshot = sp.lock().unwrap().clone();
+                let keys = snapshot.as_object().map(|o| o.len()).unwrap_or(0);
+                if keys > 0 {
+                    let sp_str = serde_json::to_string_pretty(&snapshot).unwrap_or_default();
+                    msgs.push(Message::user(&format!(
+                        "<scratchpad>\n{sp_str}\n</scratchpad>\nSet/read state via `eval` — mutations survive across steps."
+                    )));
+                }
             }
         }
 

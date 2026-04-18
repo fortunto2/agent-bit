@@ -442,6 +442,13 @@ pub(crate) async fn run_agent(
     // AI-NOTE: removed seq.json pre-check — agent reads outbox README itself (via skill).
     // Old approach: hardcoded outbox path guessing. New: agent-driven, workspace-agnostic.
 
+    // Shared scratchpad between EvalFullTool and Pac1Agent (cross-step memory,
+    // injected as <scratchpad> user message before each LLM call).
+    let ctx_raw_for_sp = pcm.context().await.unwrap_or_default();
+    let ctx_json_for_sp = crate::eval_full::parse_context_output(&ctx_raw_for_sp);
+    let eval_session = crate::eval_full::EvalSession::with_context(pcm.clone(), ctx_json_for_sp);
+    let scratchpad_arc = eval_session.scratchpad.clone();
+
     // ── Tool Registry (Claude Code / Codex inspired: core + extended + management) ──
     let registry = ToolRegistry::new()
         // CORE (Claude Code equivalents + PAC1 answer)
@@ -454,12 +461,7 @@ pub(crate) async fn run_agent(
         // EvalFullTool — Pangolin-style execute_code with live workspace access + scratchpad.
         // Replaces the read-only EvalTool (files pre-loaded via glob). Live host fns:
         // ws_read/write/delete/list/search/find/tree/move/context; scratchpad persists between eval calls.
-        .register({
-            let ctx_raw = pcm.context().await.unwrap_or_default();
-            let ctx_json = crate::eval_full::parse_context_output(&ctx_raw);
-            let session = crate::eval_full::EvalSession::with_context(pcm.clone(), ctx_json);
-            crate::eval_full::EvalFullTool { session }
-        })
+        .register(crate::eval_full::EvalFullTool { session: eval_session.clone() })
         .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone(), Some(workflow.clone()))) // PAC1-specific
         .register(tools::ContextTool(pcm.clone()))                               // PAC1-specific
         // EXTENDED
@@ -477,7 +479,8 @@ pub(crate) async fn run_agent(
         .register_deferred(tools::GetSkillTool(skill_registry.clone()));
 
     let single_phase = agent::SinglePhaseMode::resolve(overrides.single_phase.as_deref(), model);
-    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, config.rejects_prefill(), model, Some(workflow.clone()), single_phase);
+    let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, config.rejects_prefill(), model, Some(workflow.clone()), single_phase)
+        .with_scratchpad(scratchpad_arc);
     agent.set_intent(&instruction_intent);
     agent.set_think_context(agent::ThinkContext {
         intent: instruction_intent.clone(),
