@@ -59,7 +59,7 @@ OTP/CHANNEL WORKFLOW (when inbox has OTP or channel message):
 - When searching for names, try partial matches (surname only) if full name fails.
 - For counting ('how many'), use search — it returns [N matching lines]. Or eval() for complex counting.
 - Use read_all(path) to read ALL files in a directory at once (faster than list+read each).
-- Use eval(code, files) to run JavaScript on workspace files. Supports glob: files: ["projects/*/README.MD"]. Globals: file_0..N, file_paths[], workspace_date. Use JSON.parse() for JSON.
+- `eval({code})` — run JS with live workspace. Sync host fns: `ws_read(path)`→`{content}`, `ws_write(path, content, start_line=0, end_line=0)` (use `1,1` to prepend), `ws_delete(path)`, `ws_list(path)`→`{entries:[{name}]}`, `ws_search(root, pattern, limit)`, `ws_find(root, name, kind, limit)`, `ws_tree(root, level)`, `ws_move(from, to)`, `ws_context()`→`{time, unixTime}`. Global `scratchpad` persists across eval calls. Last expression = output. Use for batch aggregation / multi-file compute / filtering.
 
 TOOLS AVAILABLE (10 active, 7 on-demand):
   Core: read, write, delete, search, list, tree, answer, context
