@@ -419,10 +419,13 @@ impl<C: LlmClient> Pac1Agent<C> {
             }
         }
 
-        // Scratchpad injection (opt-in via PAC1_SCRATCHPAD != "off"; Arc shared with EvalSession).
+        // Scratchpad injection — opt-IN via PAC1_SCRATCHPAD=on (default off).
+        // Empirical: Gemma4/Haiku never mutated scratchpad during a 104-trial run
+        // (always 2 keys baseline). Feature works (injection confirmed), but model
+        // doesn't use it unless explicitly shown how. Keep plumbing, disable by default.
         if let Some(ref sp) = self.scratchpad {
-            let disabled = std::env::var("PAC1_SCRATCHPAD").as_deref() == Ok("off");
-            if !disabled {
+            let enabled = std::env::var("PAC1_SCRATCHPAD").as_deref() == Ok("on");
+            if enabled {
                 let snapshot = sp.lock().unwrap().clone();
                 let keys = snapshot.as_object().map(|o| o.len()).unwrap_or(0);
                 if keys > 0 {
