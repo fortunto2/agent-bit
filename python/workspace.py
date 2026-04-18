@@ -47,52 +47,19 @@ def _rpc(method, **kwargs):
         return {"error": f"bad rpc reply: {line!r}"}
 
 
-_OUTCOMES = {
-    "OUTCOME_OK",
-    "OUTCOME_DENIED_SECURITY",
-    "OUTCOME_NONE_CLARIFICATION",
-    "OUTCOME_NONE_UNSUPPORTED",
-    "OUTCOME_ERR_INTERNAL",
-}
-
-
 class _Workspace:
-    def __init__(self):
-        # Track paths touched for pre-submit refs-completeness check.
-        self._reads = []
-        self._writes = []
-        self._deletes = []
-
     def read(self, path):
-        r = _rpc("read", path=path)
-        if "error" not in r and path not in self._reads:
-            self._reads.append(path)
-        return r
+        return _rpc("read", path=path)
 
     def write(self, path, content, start_line=0, end_line=0):
-        r = _rpc("write", path=path, content=content, start_line=start_line, end_line=end_line)
-        if r == "ok" and path not in self._writes:
-            self._writes.append(path)
-        return r
-
-    def overwrite(self, path, content):
-        """Explicit full rewrite — bypass the read-before-write guard. Use when
-        the task genuinely calls for replacing the whole file (rare)."""
-        r = _rpc("write", path=path, content=content, start_line=0, end_line=0)
-        if r == "ok" and path not in self._writes:
-            self._writes.append(path)
-        return r
+        return _rpc("write", path=path, content=content, start_line=start_line, end_line=end_line)
 
     def prepend(self, path, content):
-        """Insert `content` before line 1 — preserves original body byte-for-byte.
-        Use for frontmatter/header adds on existing files."""
+        """Insert `content` before line 1 — preserves original body byte-for-byte."""
         return self.write(path, content, start_line=1, end_line=1)
 
     def delete(self, path):
-        r = _rpc("delete", path=path)
-        if r == "ok" and path not in self._deletes:
-            self._deletes.append(path)
-        return r
+        return _rpc("delete", path=path)
 
     def list(self, path="/"):
         return _rpc("list", path=path)
@@ -112,27 +79,12 @@ class _Workspace:
     def context(self):
         return _rpc("context")
 
-    def answer(self, sp, verify=None):
-        """Submit final answer. `sp` is a dict with answer/outcome/refs.
-        `verify(sp) -> bool` — optional; if provided, False/exception blocks submission."""
-        outcome = sp.get("outcome", "OUTCOME_OK")
-
-        # Optional user-provided verify (non-breaking — only blocks if explicitly False).
-        if verify is not None and callable(verify):
-            try:
-                ok = verify(sp)
-            except Exception as e:
-                msg = f"VERIFY ERROR: {e}. Fix verify() and retry ws.answer()."
-                print(msg); raise ValueError(msg)
-            if not ok:
-                msg = "SUBMISSION BLOCKED: verify(sp) returned False. Fix scratchpad and retry."
-                print(msg); raise ValueError(msg)
-
-        # Persist answer for Rust host to pick up.
+    def answer(self, sp):
+        """Submit final answer — sp is a dict with answer/outcome/refs."""
         with open(_ANSWER_PATH, "w") as f:
             json.dump({
                 "message": sp.get("answer", ""),
-                "outcome": outcome,
+                "outcome": sp.get("outcome", "OUTCOME_OK"),
                 "refs": sp.get("refs", []),
             }, f)
         return "submitted"

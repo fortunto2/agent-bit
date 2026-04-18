@@ -31,8 +31,10 @@ User-defined top-level variables persist between `execute_code` calls (JSON-seri
 ### Methods
 
 - `ws.read(path)` → `{content, raw}` on success, `{error}` on failure. `content` has the `"$ cat path\n"` header stripped.
-- `ws.write(path, content, start_line=0, end_line=0)` → `"ok"`. `(0,0)` = full write / new file. `(N,M)` = replace lines N..=M.
-- `ws.prepend(path, header)` → `"ok"`. Inserts `header` before line 1, **original body preserved byte-for-byte**. Use for OCR / frontmatter-add / queue-tagging. Avoid `ws.write(path, content, 0, 0)` on existing files — it overwrites the body.
+- `ws.write(path, content, start_line=0, end_line=0)` → `"ok"`.
+  - `(0, 0)` = full overwrite (NEW files only).
+  - `(1, 1)` = insert before line 1 (prepend). Preserves body byte-for-byte. Use for OCR/frontmatter.
+  - `(N, M)` = replace lines N..=M.
 - `ws.delete(path)` → `"ok"`
 - `ws.list(path)` → `{"entries": [{"name": ...}, ...]}`
 - `ws.search(root, pattern, limit=10)` → `{"matches": [{"path", "line", "lineText"}]}`.
@@ -40,7 +42,7 @@ User-defined top-level variables persist between `execute_code` calls (JSON-seri
 - `ws.tree(root="/", level=0)` → `{"tree": str}`
 - `ws.move(from_name, to_name)` → `"ok"`
 - `ws.context()` → `{"time": "RFC3339", "unixTime": int}` — **authoritative clock**. Any timestamp you write to a record MUST come from here.
-- `ws.answer(sp)` — submits final answer. `sp` is a dict with `answer`, `outcome`, `refs`. Optional 2nd arg `verify(sp) -> bool` — if you provide it, False blocks submission (for your own sanity checks).
+- `ws.answer(sp)` — submits final answer. `sp` is a dict with `answer`, `outcome`, `refs`. Terminal call.
 
 ### Efficiency — minimize execute_code calls
 
@@ -52,7 +54,7 @@ User-defined top-level variables persist between `execute_code` calls (JSON-seri
 
 After call 1, use only already-loaded data — no additional reads in call 2+.
 
-### Decision-tree pattern with `verify`:
+### Decision-tree pattern — `ws.answer` is terminal:
 
 ```python
 if gate_fires_no:
@@ -60,24 +62,15 @@ if gate_fires_no:
     scratchpad["answer"] = "..."
     scratchpad["outcome"] = "OUTCOME_NONE_CLARIFICATION"
     scratchpad["refs"] = all_paths_from_call_1
-
-    def verify(sp):
-        return any(v in ("NO", "BLOCKED") for v in sp.values() if isinstance(v, str)) \
-               and sp["outcome"] != "OUTCOME_OK"
-    ws.answer(scratchpad, verify)
+    ws.answer(scratchpad)
 else:
-    ws.prepend(invoice_path, yaml_frontmatter)  # NOT ws.write(path, content)
-    ws.delete(inbox_path)
+    ws.write(...)
+    ws.delete(...)
     scratchpad["answer"] = "..."
     scratchpad["outcome"] = "OUTCOME_OK"
-    scratchpad["refs"] = [invoice_path, inbox_path, schema_path]
-
-    def verify(sp):
-        return sp["answer"] and sp["refs"] and sp["outcome"] == "OUTCOME_OK"
-    ws.answer(scratchpad, verify)
+    scratchpad["refs"] = [...]
+    ws.answer(scratchpad)
 ```
-
-**Default to OUTCOME_OK** when the task produced real artifacts. Only return CLARIFICATION when you actually cannot proceed (not as a "safe" default).
 
 **Hard stop after gate-NO**: call `ws.answer` in the SAME execute_code block. Blocked tasks complete in exactly 2 calls.
 
@@ -88,7 +81,7 @@ else:
 - **Identity matching**: `ws.list` the likely directory in call 1 + `ws.read` every candidate. Compare in Python, not via extra `ws.search` in call 2.
 - **`ws.search` truncates** at `limit`, misses content inside fenced code blocks / ASCII tables. For critical coverage read the directory.
 - **Batch safety**: when processing a list (OCR N files, migrate M docs), process ALL items in one call. Workspace docs saying "halt if incomplete" are absolute.
-- **Schema-driven writes**: before a prepend/write on an existing record, read the workflow/schema doc **AND one existing record of the same type** in call 1. Enumerate fields you see in the neighbor's frontmatter and mirror them exactly — omitting defaults (`sent: False`, `queue_state: "pending"`, `bulk_processing_workflow: "nora_mcp"`) fails the harness with a body-mismatch of ~20-40 bytes.
+- **Schema-driven writes**: before creating or updating a record, read the workflow/schema doc AND one existing record of that type. Copy EVERY field you see in the example — omitting defaults (`sent: False`, `queue_state: "pending"`) fails the harness.
 - **Path conventions**: `scratchpad["refs"]` uses absolute paths (leading `/`). But `attachments[]`, `source_channel` fields inside written records follow workspace schema — usually workspace-relative (no leading `/`). Read an existing record first, mirror its style.
 - **YAML safety**: values with `:` (subjects, URLs, paths with spaces) need double quotes OR `|` block scalar. Bare `subject: Re: request` fails yaml.
 - **Budget discipline**: by call #5 you SHOULD be calling `ws.answer`. By call #8 you MUST — submit `OUTCOME_NONE_CLARIFICATION` with whatever refs you have rather than "no answer provided".
