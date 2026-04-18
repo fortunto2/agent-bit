@@ -1,7 +1,7 @@
 //! Pangolin-arch full leaderboard runner (experiment).
 //!
 //! Runs ALL trials in a BitGN leaderboard run through the one-tool agent, in
-//! parallel (--parallel N), with Phoenix tracing under project `pac1-pangolin`.
+//! parallel (--parallel N), with Phoenix tracing under project `pac1-pangolin-py`.
 //!
 //! Usage: `cargo run --release --bin pangolin-leaderboard -- \
 //!    --provider cf-gemma4 --run pangolin-v1 --parallel 10`
@@ -64,7 +64,7 @@ struct Cli {
 #[tokio::main(flavor = "multi_thread", worker_threads = 8)]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-    let telemetry_guard = sgr_agent::init_telemetry(".agent", "pac1-pangolin");
+    let telemetry_guard = sgr_agent::init_telemetry(".agent", "pac1-pangolin-py");
     let result = sgr_agent::with_telemetry_scope(run()).await;
     drop(telemetry_guard);
     result
