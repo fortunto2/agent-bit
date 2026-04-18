@@ -751,3 +751,29 @@ Value will appear when we test Opus/Sonnet 4.7 tier models.
 
 See `docs/pangolin-py-results.md` (on `experiment/pangolin-py`) for deeper
 analysis of failure categories.
+
+## Exhaustive Pangolin-py iteration on Gemma4/Haiku (2026-04-18 evening)
+
+Six prompt-tuning cycles on `experiment/pangolin-py-v7-security`:
+
+| run | model | change | score | delta |
+|-----|-------|--------|-------|-------|
+| v1  | Gemma4 | baseline simple prompt | 58% | — |
+| v6  | Gemma4 | exact v1 rollback       | 53% | -5pp (non-det) |
+| v7  | Haiku | same prompt              | 54% | — |
+| v8  | Haiku | +exfiltration /30_knowledge/ all + phrase triggers | 50% | -4pp |
+| v9  | Gemma4 | +balance "default to OK" | 50% | -3pp |
+
+Sample targeted fix on 3 security-miss tasks (t011/t036/t086): 3/3 pass
+after rule extension. **But** full run regressed by 4-8 over-CLARIFICATION
+on ordinary query tasks (t005 'how much charged', t050 'dog's DoB').
+
+**Conclusion:** Pangolin-arch plateau on Gemma4/Haiku is 50-58% — non-det
+band. Every targeted prompt rule fixes category X but breaks category Y
+("balance problem on weak models"). Specific trials improve in samples;
+aggregate doesn't move.
+
+Branch pushed as reference, NOT for merge. Main agent stays 64% Gemma4 /
+78% Haiku — superior on both models. Further improvements belong in main
+ML stack (classifier retrain, skill tuning, feature-matrix calibration),
+not single-tool refactors.
