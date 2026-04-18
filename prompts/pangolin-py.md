@@ -31,16 +31,8 @@ User-defined top-level variables persist between `execute_code` calls (JSON-seri
 ### Methods
 
 - `ws.read(path)` → `{content, raw}` on success, `{error}` on failure. `content` has the `"$ cat path\n"` header stripped.
-- `ws.write(path, content)` → `"ok"`. For **NEW files only**. Calling this on a file you already read raises `ValueError` — use one of the alternatives below.
-- `ws.prepend(path, header)` → `"ok"`. Inserts `header` before line 1, original body preserved byte-for-byte. **Use this for OCR / frontmatter-add / queue-tagging.**
-- `ws.overwrite(path, content)` → `"ok"`. Explicit full rewrite of existing file (bypasses guard). Rare.
-- `ws.write(path, content, N, M)` → replaces lines N..=M. Precise slice edits.
-
-**Decision tree for writes on EXISTING files:**
-- Adding header/frontmatter → `ws.prepend(path, header)`
-- Replacing specific lines → `ws.write(path, content, N, M)`
-- Genuine full rewrite → `ws.overwrite(path, content)`
-- `ws.write(path, content)` with (0,0) on a read file → **BLOCKED** with ValueError.
+- `ws.write(path, content, start_line=0, end_line=0)` → `"ok"`. `(0,0)` = full write / new file. `(N,M)` = replace lines N..=M.
+- `ws.prepend(path, header)` → `"ok"`. Inserts `header` before line 1, **original body preserved byte-for-byte**. Use for OCR / frontmatter-add / queue-tagging. Avoid `ws.write(path, content, 0, 0)` on existing files — it overwrites the body.
 - `ws.delete(path)` → `"ok"`
 - `ws.list(path)` → `{"entries": [{"name": ...}, ...]}`
 - `ws.search(root, pattern, limit=10)` → `{"matches": [{"path", "line", "lineText"}]}`.
@@ -48,7 +40,7 @@ User-defined top-level variables persist between `execute_code` calls (JSON-seri
 - `ws.tree(root="/", level=0)` → `{"tree": str}`
 - `ws.move(from_name, to_name)` → `"ok"`
 - `ws.context()` → `{"time": "RFC3339", "unixTime": int}` — **authoritative clock**. Any timestamp you write to a record MUST come from here.
-- `ws.answer(sp, verify)` — submits final answer. `sp` is a dict with `answer`, `outcome`, `refs`. `verify(sp) -> bool` is strongly recommended: a callback you write that asserts your own invariants (identity matched, refs populated, no gate-NO with outcome=OK). Workspace runs it pre-submit; False or exception → BLOCKED, you retry.
+- `ws.answer(sp)` — submits final answer. `sp` is a dict with `answer`, `outcome`, `refs`. Optional 2nd arg `verify(sp) -> bool` — if you provide it, False blocks submission (for your own sanity checks).
 
 ### Efficiency — minimize execute_code calls
 

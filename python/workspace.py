@@ -70,17 +70,6 @@ class _Workspace:
         return r
 
     def write(self, path, content, start_line=0, end_line=0):
-        # Hard block: ws.write(path, content, 0, 0) on a file you already READ
-        # during this session is almost always a body-loss mistake. Force the agent
-        # to either ws.prepend (add header) or ws.overwrite (explicit rewrite).
-        if start_line == 0 and end_line == 0 and path in self._reads:
-            raise ValueError(
-                f"BLOCKED: ws.write('{path}', content) with range=(0,0) on a file already "
-                f"read this session would overwrite the original body. Use one of:\n"
-                f"  - ws.prepend(path, header)  ← add YAML frontmatter, preserve body\n"
-                f"  - ws.overwrite(path, content)  ← explicit full rewrite (rare)\n"
-                f"  - ws.write(path, content, N, M)  ← replace lines N..=M"
-            )
         r = _rpc("write", path=path, content=content, start_line=start_line, end_line=end_line)
         if r == "ok" and path not in self._writes:
             self._writes.append(path)
@@ -125,36 +114,11 @@ class _Workspace:
 
     def answer(self, sp, verify=None):
         """Submit final answer. `sp` is a dict with answer/outcome/refs.
-
-        `verify(sp) -> bool` — optional but strongly recommended. If provided,
-        it's called before submission. False or raising = BLOCKED.
-
-        Also checks automatically:
-        - outcome is a known OUTCOME_*
-        - if outcome != OUTCOME_OK AND scratchpad has any gate_key == 'NO'/'BLOCKED', OK is rejected
-        - warns about writes on blocked outcome
-        - warns about read paths missing from refs
-        """
+        `verify(sp) -> bool` — optional; if provided, False/exception blocks submission."""
         outcome = sp.get("outcome", "OUTCOME_OK")
-        if outcome not in _OUTCOMES:
-            msg = f"SUBMISSION BLOCKED: unknown outcome {outcome!r}. Valid: {sorted(_OUTCOMES)}"
-            print(msg)
-            raise ValueError(msg)
 
-        # Gate-NO consistency check.
-        gates_no = [k for k, v in sp.items()
-                    if isinstance(v, str) and v in ("NO", "BLOCKED")]
-        if gates_no and outcome == "OUTCOME_OK":
-            msg = (f"SUBMISSION BLOCKED: gate(s) {gates_no} fired NO/BLOCKED "
-                   f"but outcome=OUTCOME_OK. Fix outcome or clear the gate.")
-            print(msg)
-            raise ValueError(msg)
-
-        # Run user-provided verify if any.
-        if verify is not None:
-            if not callable(verify):
-                msg = "SUBMISSION BLOCKED: verify must be callable (def verify(sp): ...)"
-                print(msg); raise ValueError(msg)
+        # Optional user-provided verify (non-breaking — only blocks if explicitly False).
+        if verify is not None and callable(verify):
             try:
                 ok = verify(sp)
             except Exception as e:
@@ -163,15 +127,6 @@ class _Workspace:
             if not ok:
                 msg = "SUBMISSION BLOCKED: verify(sp) returned False. Fix scratchpad and retry."
                 print(msg); raise ValueError(msg)
-
-        # Warnings (non-blocking) — help the model see issues in Phoenix trace.
-        refs = set(sp.get("refs") or [])
-        missing = [p for p in self._reads if p not in refs and p.lstrip("/") not in refs]
-        if missing:
-            print(f"WARNING: {len(missing)} read path(s) not in refs: {missing[:5]}")
-        if outcome != "OUTCOME_OK" and self._writes:
-            print(f"WARNING: outcome={outcome} but {len(self._writes)} write(s) happened: "
-                  f"{self._writes[:5]}. Blocked outcomes should produce zero writes.")
 
         # Persist answer for Rust host to pick up.
         with open(_ANSWER_PATH, "w") as f:

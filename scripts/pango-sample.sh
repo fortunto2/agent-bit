@@ -34,9 +34,9 @@ wait "${pids[@]}"
 pass=0
 for t in $TASKS; do
   log="/tmp/${PREFIX}_${t}.log"
-  score=$(grep -oE "Score: [01]\.[0-9]+" "$log" | head -1 | awk '{print $2}')
-  outcome=$(grep -oE "OUTCOME_[A-Z_]+" "$log" | tail -1)
-  detail=$(grep "^ *•" "$log" | head -1 | sed 's/^ *• //' | cut -c1-80)
+  score=$(grep -aoE "Score: [01]\.[0-9]+" "$log" | head -1 | awk '{print $2}')
+  outcome=$(grep -aoE "OUTCOME_[A-Z_]+" "$log" | tail -1)
+  detail=$(grep -a "^ *•" "$log" | head -1 | sed 's/^ *• //' | cut -c1-80)
   status="✗"
   if [ "$score" = "1.00" ]; then status="✓"; pass=$((pass+1)); fi
   printf "%s %-6s %s %-28s %s\n" "$status" "$t" "$score" "${outcome:-?}" "${detail:-}"
