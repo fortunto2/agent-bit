@@ -449,34 +449,45 @@ pub(crate) async fn run_agent(
     let eval_session = crate::eval_full::EvalSession::with_context(pcm.clone(), ctx_json_for_sp);
     let scratchpad_arc = eval_session.scratchpad.clone();
 
-    // ── Tool Registry (Claude Code / Codex inspired: core + extended + management) ──
-    let registry = ToolRegistry::new()
-        // CORE (Claude Code equivalents + PAC1 answer)
+    // ── Tool Registry ──
+    // UNIFIED mode (`PAC1_UNIFIED=on`): minimal 6-tool surface — read, write, delete,
+    // search, eval, answer. Everything else (list, tree, find, prepend, copy, read_all,
+    // mkdir, move, date_calc, lookup_contact) is reachable from inside `eval` via
+    // ws_* host fns. Lets the LLM treat the workspace as one API surface.
+    //
+    // Default (unset / off): full 14-active tool set as before.
+    let unified = std::env::var("PAC1_UNIFIED").as_deref() == Ok("on");
+    if unified { eprintln!("  🧪 Unified tool mode: 6-tool surface (eval absorbs batch ops)"); }
+
+    let mut registry = ToolRegistry::new()
+        // CORE — always present, even in unified mode
         .register(tools::ReadTool::new(pcm.clone(), Some(workflow.clone())))
         .register(tools::WriteTool::new(pcm.clone(), hook_registry.clone(), Some(workflow.clone())))
+        .register(sgr_agent_tools::PrependTool(pcm.clone()))  // byte-perfect frontmatter add
         .register(tools::DeleteTool::new(pcm.clone(), Some(workflow.clone())))
         .register(tools::SearchTool(pcm.clone(), Some(crm_graph.clone())))
-        .register(sgr_agent_tools::ListTool(pcm.clone()))                        // → sgr-agent-tools
-        .register(sgr_agent_tools::TreeTool(pcm.clone()))                        // → sgr-agent-tools
-        // EvalFullTool — Pangolin-style execute_code with live workspace access + scratchpad.
-        // Replaces the read-only EvalTool (files pre-loaded via glob). Live host fns:
-        // ws_read/write/delete/list/search/find/tree/move/context; scratchpad persists between eval calls.
         .register(crate::eval_full::EvalFullTool { session: eval_session.clone() })
-        .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone(), Some(workflow.clone()))) // PAC1-specific
-        .register(tools::ContextTool(pcm.clone()))                               // PAC1-specific
-        // EXTENDED
-        .register(sgr_agent_tools::ReadAllTool(pcm.clone()))                     // → sgr-agent-tools
-        .register(tools::DateTool(pcm.clone()))                                  // chrono date math
-        .register(tools::LookupContactTool(pcm.clone()))                          // on-demand entity lookup
-        // DEFERRED
-        .register_deferred(sgr_agent_tools::MkDirTool(pcm.clone()))              // → sgr-agent-tools
-        .register_deferred(sgr_agent_tools::MoveTool(pcm.clone()))               // → sgr-agent-tools
-        .register(sgr_agent_tools::CopyTool(pcm.clone()))                         // → sgr-agent-tools
-        .register(sgr_agent_tools::PrependTool(pcm.clone()))                      // → sgr-agent-tools
-        .register_deferred(sgr_agent_tools::FindTool(pcm.clone()))
-        .register_deferred(sgr_agent_tools::ApplyPatchTool(pcm.clone()))         // Codex diff DSL
-        .register_deferred(tools::ListSkillsTool(skill_registry.clone()))
-        .register_deferred(tools::GetSkillTool(skill_registry.clone()));
+        .register(tools::AnswerTool::new(pcm.clone(), outcome_validator.clone(), Some(workflow.clone())));
+
+    if !unified {
+        registry = registry
+            .register(sgr_agent_tools::ListTool(pcm.clone()))
+            .register(sgr_agent_tools::TreeTool(pcm.clone()))
+            .register(tools::ContextTool(pcm.clone()))
+            // EXTENDED
+            .register(sgr_agent_tools::ReadAllTool(pcm.clone()))
+            .register(tools::DateTool(pcm.clone()))
+            .register(tools::LookupContactTool(pcm.clone()))
+            // DEFERRED (surfaced on demand)
+            .register_deferred(sgr_agent_tools::MkDirTool(pcm.clone()))
+            .register_deferred(sgr_agent_tools::MoveTool(pcm.clone()))
+            .register(sgr_agent_tools::CopyTool(pcm.clone()))
+            .register_deferred(sgr_agent_tools::FindTool(pcm.clone()))
+            .register_deferred(sgr_agent_tools::ApplyPatchTool(pcm.clone()))
+            .register_deferred(tools::ListSkillsTool(skill_registry.clone()))
+            .register_deferred(tools::GetSkillTool(skill_registry.clone()));
+    }
+    let registry = registry;
 
     let single_phase = agent::SinglePhaseMode::resolve(overrides.single_phase.as_deref(), model);
     let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, config.rejects_prefill(), model, Some(workflow.clone()), single_phase)
