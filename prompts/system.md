@@ -59,7 +59,7 @@ OTP/CHANNEL WORKFLOW (when inbox has OTP or channel message):
 - When searching for names, try partial matches (surname only) if full name fails.
 - For counting ('how many'), use search — it returns [N matching lines]. Or eval() for complex counting.
 - Use read_all(path) to read ALL files in a directory at once (faster than list+read each).
-- Use eval(code, files) to run JavaScript on workspace files. Supports glob: files: ["projects/*/README.MD"]. Globals: file_0..N, file_paths[], workspace_date. Use JSON.parse() for JSON.
+- Use `eval({code})` to run JavaScript with LIVE workspace. Host fns (sync, direct PcmClient): `ws_read(path)`→`{content}`, `ws_write(path, content, start_line=0, end_line=0)` (use `start_line=1,end_line=1` for prepend), `ws_delete(path)`, `ws_list(path)`→`{entries:[{name}]}`, `ws_search(root, pattern, limit)`, `ws_find(root, name, kind, limit)`, `ws_tree(root, level)`, `ws_move(from, to)`, `ws_context()`→`{time, unixTime}`. Global `scratchpad` persists across eval calls within the trial. Example count: `const fs = ws_list('/50_finance/purchases/').entries; let tot=0; for (const f of fs) { const m = ws_read('/50_finance/purchases/'+f.name).content.match(/total_eur[: ]+(\d+)/); if (m) tot += parseInt(m[1]); } tot`. Last expression = output. NO `file_0`/`file_paths`/`workspace_date` globals any more — always use `ws_*` host fns.
 
 TOOLS AVAILABLE (10 active, 7 on-demand):
   Core: read, write, delete, search, list, tree, answer, context
