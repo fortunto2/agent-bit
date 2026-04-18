@@ -256,6 +256,14 @@ mod host {
         }
     }
 
+    pub fn ws_mkdir(_this: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
+        let path = arg_string(args, 0, ctx)?;
+        match with_state(|s, h| h.block_on(s.pcm.mkdir(&path))) {
+            Ok(_) => Ok(JsValue::from(js_string!("ok"))),
+            Err(e) => Ok(err_to_jsval(e, ctx)),
+        }
+    }
+
     pub fn ws_move(_this: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
         let from = arg_string(args, 0, ctx)?;
         let to = arg_string(args, 1, ctx)?;
@@ -324,6 +332,7 @@ fn run_js_sync(code: &str, session: Arc<EvalSession>, handle: tokio::runtime::Ha
         reg(&mut ctx, "ws_tree", 2, host::ws_tree);
         reg(&mut ctx, "ws_write", 2, host::ws_write);
         reg(&mut ctx, "ws_delete", 1, host::ws_delete);
+        reg(&mut ctx, "ws_mkdir", 1, host::ws_mkdir);
         reg(&mut ctx, "ws_move", 2, host::ws_move);
         reg(&mut ctx, "ws_context", 0, host::ws_context);
         reg(&mut ctx, "__console_log", 1, host::console_log);
