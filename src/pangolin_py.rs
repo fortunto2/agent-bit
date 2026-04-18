@@ -238,6 +238,10 @@ import sys, os, json, atexit, re, math, hashlib, base64  # noqa: F401
 from datetime import datetime, timedelta, date  # noqa: F401
 from collections import defaultdict, Counter  # noqa: F401
 from pathlib import PurePosixPath  # noqa: F401
+try:
+    import yaml  # PyYAML — optional, needed for self-validation of frontmatter
+except ImportError:
+    yaml = None
 sys.path.insert(0, "python")
 from workspace import ws, scratchpad  # noqa: F401
 

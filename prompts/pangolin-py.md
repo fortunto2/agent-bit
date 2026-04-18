@@ -96,7 +96,26 @@ else:
 - **Identity matching**: `ws.list` the likely directory in call 1 + `ws.read` every candidate. Compare in Python, not via extra `ws.search` in call 2.
 - **`ws.search` truncates** at `limit`, misses content inside fenced code blocks / ASCII tables. For critical coverage read the directory.
 - **Batch safety**: when processing a list (OCR N files, migrate M docs), process ALL items in one call. Workspace docs saying "halt if incomplete" are absolute.
-- **Schema-driven writes**: before creating or updating a record, read the workflow/schema doc AND one existing record of that type. Copy EVERY field you see in the example — omitting defaults (`sent: False`, `queue_state: "pending"`) fails the harness.
+- **Schema-driven writes — mandatory pattern for prepend/write on existing records:**
+
+  1. **Pre-read BEFORE writing**: in call 1, read the workflow/schema doc AND pick **one existing record of the target type** via `ws.list` + `ws.read`. E.g. for OCR on `/50_finance/invoices/foo.md`: also `ws.list('/50_finance/invoices/')` and read the oldest neighbor. For NORA queue: read one already-queued doc. This gives you the **complete field list**.
+
+  2. **Build the frontmatter by enumerating the example**: iterate `yaml.safe_load(example_header)` keys, fill in your task-specific values, re-emit as YAML. Never type fields from memory — you will miss 1-2 every time.
+
+  3. **Self-validate after prepend** — read back the file you just wrote, parse its frontmatter, compare keys against the example:
+     ```python
+     import yaml
+     result = ws.prepend(target_path, my_header)
+     readback = ws.read(target_path)["content"]
+     got = yaml.safe_load(readback.split("---")[1])
+     want = yaml.safe_load(example_header.split("---")[1])
+     missing = set(want) - set(got)
+     if missing:
+         raise RuntimeError(f"frontmatter missing fields {missing} — rebuild header and retry")
+     ```
+     If the check fails, rebuild the header with the missing fields and re-call `ws.prepend`. **Do NOT submit `ws.answer` until every target passes the readback check.**
+
+  Why: harness compares bytes. Every missing field (`queue_state: pending`, `sent: false`, a `bulk_processing_workflow`, …) is a ~20-40 byte deficit and the trial fails on "body mismatch". Self-validation catches it before answer.
 - **Path conventions**: `scratchpad["refs"]` uses absolute paths (leading `/`). But `attachments[]`, `source_channel` fields inside written records follow workspace schema — usually workspace-relative (no leading `/`). Read an existing record first, mirror its style.
 - **YAML safety**: values with `:` (subjects, URLs, paths with spaces) need double quotes OR `|` block scalar. Bare `subject: Re: request` fails yaml.
 - **Budget discipline**: by call #5 you SHOULD be calling `ws.answer`. By call #8 you MUST — submit `OUTCOME_NONE_CLARIFICATION` with whatever refs you have rather than "no answer provided".
