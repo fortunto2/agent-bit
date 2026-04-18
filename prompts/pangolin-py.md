@@ -31,8 +31,16 @@ User-defined top-level variables persist between `execute_code` calls (JSON-seri
 ### Methods
 
 - `ws.read(path)` → `{content, raw}` on success, `{error}` on failure. `content` has the `"$ cat path\n"` header stripped.
-- `ws.write(path, content, start_line=0, end_line=0)` → `"ok"`. `(0,0)` = full overwrite (NEW files only). `(N,M)` = replace lines N..=M.
-- `ws.prepend(path, content)` → `"ok"`. Equivalent to `ws.write(path, content, 1, 1)` — insert before line 1, preserve body byte-for-byte. **Use this for adding YAML frontmatter to existing files — never `ws.write(path, content)` which overwrites.**
+- `ws.write(path, content)` → `"ok"`. For **NEW files only**. Calling this on a file you already read raises `ValueError` — use one of the alternatives below.
+- `ws.prepend(path, header)` → `"ok"`. Inserts `header` before line 1, original body preserved byte-for-byte. **Use this for OCR / frontmatter-add / queue-tagging.**
+- `ws.overwrite(path, content)` → `"ok"`. Explicit full rewrite of existing file (bypasses guard). Rare.
+- `ws.write(path, content, N, M)` → replaces lines N..=M. Precise slice edits.
+
+**Decision tree for writes on EXISTING files:**
+- Adding header/frontmatter → `ws.prepend(path, header)`
+- Replacing specific lines → `ws.write(path, content, N, M)`
+- Genuine full rewrite → `ws.overwrite(path, content)`
+- `ws.write(path, content)` with (0,0) on a read file → **BLOCKED** with ValueError.
 - `ws.delete(path)` → `"ok"`
 - `ws.list(path)` → `{"entries": [{"name": ...}, ...]}`
 - `ws.search(root, pattern, limit=10)` → `{"matches": [{"path", "line", "lineText"}]}`.

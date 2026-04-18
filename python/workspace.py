@@ -70,7 +70,26 @@ class _Workspace:
         return r
 
     def write(self, path, content, start_line=0, end_line=0):
+        # Hard block: ws.write(path, content, 0, 0) on a file you already READ
+        # during this session is almost always a body-loss mistake. Force the agent
+        # to either ws.prepend (add header) or ws.overwrite (explicit rewrite).
+        if start_line == 0 and end_line == 0 and path in self._reads:
+            raise ValueError(
+                f"BLOCKED: ws.write('{path}', content) with range=(0,0) on a file already "
+                f"read this session would overwrite the original body. Use one of:\n"
+                f"  - ws.prepend(path, header)  ← add YAML frontmatter, preserve body\n"
+                f"  - ws.overwrite(path, content)  ← explicit full rewrite (rare)\n"
+                f"  - ws.write(path, content, N, M)  ← replace lines N..=M"
+            )
         r = _rpc("write", path=path, content=content, start_line=start_line, end_line=end_line)
+        if r == "ok" and path not in self._writes:
+            self._writes.append(path)
+        return r
+
+    def overwrite(self, path, content):
+        """Explicit full rewrite — bypass the read-before-write guard. Use when
+        the task genuinely calls for replacing the whole file (rare)."""
+        r = _rpc("write", path=path, content=content, start_line=0, end_line=0)
         if r == "ok" and path not in self._writes:
             self._writes.append(path)
         return r
