@@ -31,10 +31,8 @@ User-defined top-level variables persist between `execute_code` calls (JSON-seri
 ### Methods
 
 - `ws.read(path)` → `{content, raw}` on success, `{error}` on failure. `content` has the `"$ cat path\n"` header stripped.
-- `ws.write(path, content, start_line=0, end_line=0)` → `"ok"`.
-  - `(0, 0)` = full overwrite (NEW files only).
-  - `(1, 1)` = insert before line 1 (prepend). Preserves body byte-for-byte. Use for OCR/frontmatter.
-  - `(N, M)` = replace lines N..=M.
+- `ws.write(path, content, start_line=0, end_line=0)` → `"ok"`. `(0,0)` = full overwrite (NEW files only). `(N,M)` = replace lines N..=M.
+- `ws.prepend(path, content)` → `"ok"`. Equivalent to `ws.write(path, content, 1, 1)` — insert before line 1, preserve body byte-for-byte. **Use this for adding YAML frontmatter to existing files — never `ws.write(path, content)` which overwrites.**
 - `ws.delete(path)` → `"ok"`
 - `ws.list(path)` → `{"entries": [{"name": ...}, ...]}`
 - `ws.search(root, pattern, limit=10)` → `{"matches": [{"path", "line", "lineText"}]}`.
@@ -42,7 +40,7 @@ User-defined top-level variables persist between `execute_code` calls (JSON-seri
 - `ws.tree(root="/", level=0)` → `{"tree": str}`
 - `ws.move(from_name, to_name)` → `"ok"`
 - `ws.context()` → `{"time": "RFC3339", "unixTime": int}` — **authoritative clock**. Any timestamp you write to a record MUST come from here.
-- `ws.answer(sp)` — submits final answer. `sp` is a dict with `answer`, `outcome`, `refs`. Terminal call.
+- `ws.answer(sp, verify)` — submits final answer. `sp` is a dict with `answer`, `outcome`, `refs`. `verify(sp) -> bool` is strongly recommended: a callback you write that asserts your own invariants (identity matched, refs populated, no gate-NO with outcome=OK). Workspace runs it pre-submit; False or exception → BLOCKED, you retry.
 
 ### Efficiency — minimize execute_code calls
 
@@ -54,7 +52,7 @@ User-defined top-level variables persist between `execute_code` calls (JSON-seri
 
 After call 1, use only already-loaded data — no additional reads in call 2+.
 
-### Decision-tree pattern — `ws.answer` is terminal:
+### Decision-tree pattern with `verify`:
 
 ```python
 if gate_fires_no:
@@ -62,15 +60,24 @@ if gate_fires_no:
     scratchpad["answer"] = "..."
     scratchpad["outcome"] = "OUTCOME_NONE_CLARIFICATION"
     scratchpad["refs"] = all_paths_from_call_1
-    ws.answer(scratchpad)
+
+    def verify(sp):
+        return any(v in ("NO", "BLOCKED") for v in sp.values() if isinstance(v, str)) \
+               and sp["outcome"] != "OUTCOME_OK"
+    ws.answer(scratchpad, verify)
 else:
-    ws.write(...)
-    ws.delete(...)
+    ws.prepend(invoice_path, yaml_frontmatter)  # NOT ws.write(path, content)
+    ws.delete(inbox_path)
     scratchpad["answer"] = "..."
     scratchpad["outcome"] = "OUTCOME_OK"
-    scratchpad["refs"] = [...]
-    ws.answer(scratchpad)
+    scratchpad["refs"] = [invoice_path, inbox_path, schema_path]
+
+    def verify(sp):
+        return sp["answer"] and sp["refs"] and sp["outcome"] == "OUTCOME_OK"
+    ws.answer(scratchpad, verify)
 ```
+
+**Default to OUTCOME_OK** when the task produced real artifacts. Only return CLARIFICATION when you actually cannot proceed (not as a "safe" default).
 
 **Hard stop after gate-NO**: call `ws.answer` in the SAME execute_code block. Blocked tasks complete in exactly 2 calls.
 

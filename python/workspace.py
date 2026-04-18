@@ -47,15 +47,44 @@ def _rpc(method, **kwargs):
         return {"error": f"bad rpc reply: {line!r}"}
 
 
+_OUTCOMES = {
+    "OUTCOME_OK",
+    "OUTCOME_DENIED_SECURITY",
+    "OUTCOME_NONE_CLARIFICATION",
+    "OUTCOME_NONE_UNSUPPORTED",
+    "OUTCOME_ERR_INTERNAL",
+}
+
+
 class _Workspace:
+    def __init__(self):
+        # Track paths touched for pre-submit refs-completeness check.
+        self._reads = []
+        self._writes = []
+        self._deletes = []
+
     def read(self, path):
-        return _rpc("read", path=path)
+        r = _rpc("read", path=path)
+        if "error" not in r and path not in self._reads:
+            self._reads.append(path)
+        return r
 
     def write(self, path, content, start_line=0, end_line=0):
-        return _rpc("write", path=path, content=content, start_line=start_line, end_line=end_line)
+        r = _rpc("write", path=path, content=content, start_line=start_line, end_line=end_line)
+        if r == "ok" and path not in self._writes:
+            self._writes.append(path)
+        return r
+
+    def prepend(self, path, content):
+        """Insert `content` before line 1 — preserves original body byte-for-byte.
+        Use for frontmatter/header adds on existing files."""
+        return self.write(path, content, start_line=1, end_line=1)
 
     def delete(self, path):
-        return _rpc("delete", path=path)
+        r = _rpc("delete", path=path)
+        if r == "ok" and path not in self._deletes:
+            self._deletes.append(path)
+        return r
 
     def list(self, path="/"):
         return _rpc("list", path=path)
@@ -75,12 +104,61 @@ class _Workspace:
     def context(self):
         return _rpc("context")
 
-    def answer(self, sp):
-        """Submit final answer — sp is a dict with answer/outcome/refs."""
+    def answer(self, sp, verify=None):
+        """Submit final answer. `sp` is a dict with answer/outcome/refs.
+
+        `verify(sp) -> bool` — optional but strongly recommended. If provided,
+        it's called before submission. False or raising = BLOCKED.
+
+        Also checks automatically:
+        - outcome is a known OUTCOME_*
+        - if outcome != OUTCOME_OK AND scratchpad has any gate_key == 'NO'/'BLOCKED', OK is rejected
+        - warns about writes on blocked outcome
+        - warns about read paths missing from refs
+        """
+        outcome = sp.get("outcome", "OUTCOME_OK")
+        if outcome not in _OUTCOMES:
+            msg = f"SUBMISSION BLOCKED: unknown outcome {outcome!r}. Valid: {sorted(_OUTCOMES)}"
+            print(msg)
+            raise ValueError(msg)
+
+        # Gate-NO consistency check.
+        gates_no = [k for k, v in sp.items()
+                    if isinstance(v, str) and v in ("NO", "BLOCKED")]
+        if gates_no and outcome == "OUTCOME_OK":
+            msg = (f"SUBMISSION BLOCKED: gate(s) {gates_no} fired NO/BLOCKED "
+                   f"but outcome=OUTCOME_OK. Fix outcome or clear the gate.")
+            print(msg)
+            raise ValueError(msg)
+
+        # Run user-provided verify if any.
+        if verify is not None:
+            if not callable(verify):
+                msg = "SUBMISSION BLOCKED: verify must be callable (def verify(sp): ...)"
+                print(msg); raise ValueError(msg)
+            try:
+                ok = verify(sp)
+            except Exception as e:
+                msg = f"VERIFY ERROR: {e}. Fix verify() and retry ws.answer()."
+                print(msg); raise ValueError(msg)
+            if not ok:
+                msg = "SUBMISSION BLOCKED: verify(sp) returned False. Fix scratchpad and retry."
+                print(msg); raise ValueError(msg)
+
+        # Warnings (non-blocking) — help the model see issues in Phoenix trace.
+        refs = set(sp.get("refs") or [])
+        missing = [p for p in self._reads if p not in refs and p.lstrip("/") not in refs]
+        if missing:
+            print(f"WARNING: {len(missing)} read path(s) not in refs: {missing[:5]}")
+        if outcome != "OUTCOME_OK" and self._writes:
+            print(f"WARNING: outcome={outcome} but {len(self._writes)} write(s) happened: "
+                  f"{self._writes[:5]}. Blocked outcomes should produce zero writes.")
+
+        # Persist answer for Rust host to pick up.
         with open(_ANSWER_PATH, "w") as f:
             json.dump({
                 "message": sp.get("answer", ""),
-                "outcome": sp.get("outcome", "OUTCOME_OK"),
+                "outcome": outcome,
                 "refs": sp.get("refs", []),
             }, f)
         return "submitted"
