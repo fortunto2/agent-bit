@@ -30,12 +30,15 @@ task:
 	DUMP_TRIAL="$$RUNDIR" RUST_LOG=warn cargo run --release -- --provider $(PROVIDER) --task $(T) 2>&1 | tee -a "$$RUNDIR/run.log"; \
 	echo "Run: $$RUNDIR"
 
-# 8-task quick sample with per-task logs
+# 8-task quick sample with per-task logs.
+# Covers query / compute / delete / inbox-write across the pac1-prod (t000..t103) IDs.
+# Override with: make sample TASKS="t017 t022 t050"
+TASKS ?= t000 t005 t006 t007 t008 t017 t022 t033
 sample:
-	@for t in t01 t02 t03 t05 t09 t16 t18 t21; do \
+	@for t in $(TASKS); do \
 		mkdir -p benchmarks/tasks/$$t; \
 		LOGFILE="benchmarks/tasks/$$t/$(PROVIDER)_$$(date +%Y%m%d_%H%M%S).log"; \
-		(RUST_LOG=warn cargo run --release -- --provider $(PROVIDER) --task $$t 2>&1 | tee "$$LOGFILE" | grep "Score:" &); \
+		(RUST_LOG=warn cargo run --release -- --provider $(PROVIDER) --task $$t 2>&1 | tee "$$LOGFILE" | grep -E "Score:|Rejected write" &); \
 	done; wait
 
 # Parallel full run: make full P=3

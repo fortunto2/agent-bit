@@ -778,3 +778,34 @@ Branch pushed as reference, NOT for merge. Main agent stays 64% Gemma4 /
 78% Haiku — superior on both models. Further improvements belong in main
 ML stack (classifier retrain, skill tuning, feature-matrix calibration),
 not single-tool refactors.
+
+---
+
+### 2026-04-21: Structured-write validator — reject-with-snippet
+
+**Commit:** `e0946fe`
+
+Inspired by inozemtsev/bitgn (PAC1 winner 87/104 — "Codex-on-Rails").
+Their `vault_mcp_server` validates every write pre-RPC and returns
+`line N, col M: msg` + caret-snippet on failure so the model learns on
+retry. Our prior `fix_yaml_frontmatter` auto-quoted values with colons
+silently — model kept emitting same bad YAML run after run with no
+feedback loop.
+
+**Changes in `src/tools.rs`:**
+- Removed `fix_yaml_frontmatter` (3 tests)
+- Added `validate_structured_content(path, content)` covering
+  JSON / YAML / TOML / markdown-frontmatter (8 tests)
+- Middleware 2b now returns `ToolOutput::text(err)` with line/col +
+  caret snippet when invalid. Model sees the error, self-corrects.
+- JSON path preserved — reject only if `llm_json::repair_json` can't
+  recover. YAML / TOML / md-frontmatter are strict now.
+- Body-loss guard and outbox `sent:false` inject unchanged.
+
+**Validation:** 326/326 unit tests pass. t000 smoke = 1.00 (3 tool
+calls, no regression on read-only path).
+
+**Expected effect:** Eliminates the "invalid frontmatter" failure class
+(their #2 cluster) where model would write syntactically-broken YAML
+and we'd silently quote the wrong line. Nemotron especially benefits
+since its recovery is weakest on unchecked write failures.
