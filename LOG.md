@@ -95,6 +95,7 @@ PAC1 agent для BitGN challenge. Rust + sgr-agent + multi-model (Haiku/Gemma/N
 | 04-15 | `1dc8a8c` | gemma4 sp v3 | 59.6% (62/104) | **PROD** P=1 — outcome rules |
 | 04-15 | `ae4ffd9` | — | — | SGR adaptive planning + remaining_steps |
 | 04-15 | `1dc8a8c` | — | — | run_prefix = "rustman.org" |
+| 04-21 | `ca57781` | cf-gemma4 P=3 | 62.5% (65/104) | **PROD** — post Intent-enum refactor (PR#1+#2), Δ = −2 vs 04-18 sp-v2 67/104, within ±4 non-det. Refactor behavior-neutral as intended. |
 
 ---
 
