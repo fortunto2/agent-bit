@@ -78,24 +78,43 @@ grep -rn "AI-NOTE.*t23\|AI-NOTE.*inbox" src/
 
 ## Architecture
 
+Four-layer architecture — strict dependency direction L1 → L2 → L3 → L4.
+
 ```
-src/pipeline.rs      -- enum state machine (New→Classified→InboxScanned→SecurityChecked→Ready)
-src/main.rs          -- CLI, orchestration, guess_outcome, --probe flag
-src/prompts.rs       -- system prompt (single explicit decision tree, hot-reload from prompts/system.md)
-src/skills.rs        -- skill system: loads SKILL.md files, push-model selection via classifier
-src/scanner.rs       -- security scanning, inbox classification, domain matching
-src/pregrounding.rs  -- Codex-style context assembly + agent execution (713 lines)
-src/agent.rs         -- Pac1Agent (two-phase + single-phase modes, parallel think+action FC)
-src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
-src/pcm.rs           -- PcmRuntime client (11 file-system RPCs + read cache + ProposedAnswer)
-src/tools.rs         -- 16 Tools (13 base + read_all, search_and_read, grep_count) + trust metadata
+# L1 — Pre-LLM pipeline (deterministic, 0 LLM calls)
+src/pipeline.rs      -- typed state machine New→Classified→InboxScanned→SecurityChecked→Ready
+src/intent.rs        -- Intent enum (Inbox/Delete/Query/Edit/Email/Unclear) — typed replacement
+                        for string intent labels. Behavioral methods (forces_task_type,
+                        outbox_limit, allows_multi_write) are the single source of truth.
+src/classifier.rs    -- ONNX classifier (security + intent, intent returns Intent enum +
+                        WARNs on drift) + NliClassifier (NLI zero-shot) + OutcomeValidator (kNN)
+src/scanner.rs       -- prescan (HTML injection), sender trust, domain match, exfiltration
+src/crm_graph.rs     -- petgraph CRM graph + ONNX account embeddings + cross-account detection
+src/feature_matrix.rs -- 12-feature inbox scoring, sigmoid(features × weights), ridge calibration
+src/policy.rs        -- file protection (PROTECTED_BASENAMES, POLICY_DIRS), channel trust
+
+# L2 — Context assembly (builds 6-message pre-grounding)
+src/pregrounding.rs  -- Codex-style context: tree + AGENTS.MD + skill body + date + inbox
+src/skills.rs        -- skill registry loader + trigger validation + select_body(Intent).
+                        Triggers validated at load time (warns on typos in SKILL.md YAML).
 src/hooks.rs         -- HookRegistry: data-driven tool completion hooks from AGENTS.MD
-src/policy.rs        -- File access policy: structural guards for protected paths
+src/prompts.rs       -- system prompt, hot-reload from prompts/system.md
+src/intent_classify.rs -- LLM intent fallback (schema auto-built from Intent::wire_values)
+
+# L3 — Agent loop (LLM-driven)
+src/agent.rs         -- Pac1Agent (two-phase + single-phase, parallel think+action FC)
+src/pac1_sgr.rs      -- Pac1SgrAgent (SGR mode, 1 LLM call/step, typed by Intent)
+src/tools.rs         -- 16 Tools (13 base + read_all, search_and_read, grep_count) + trust metadata
+src/workflow.rs      -- WorkflowState SM: Reading→Acting→Cleanup→Done + pre_action guards
+src/pcm.rs           -- PcmRuntime client (11 file-system RPCs + read cache + ProposedAnswer)
+src/bitgn.rs         -- HarnessService client (Connect-RPC/JSON)
 src/config.rs        -- Provider config with temperature, sgr_mode, fallback_providers
-src/classifier.rs    -- ONNX classifier (security + intent) + NliClassifier (NLI zero-shot) + OutcomeValidator (adaptive kNN)
-src/crm_graph.rs     -- petgraph CRM knowledge graph (contacts, accounts, sender trust, ONNX embeddings)
-src/feature_matrix.rs -- 12-feature inbox scoring: sigmoid(features × weights), ridge regression calibration
+
+# L4 — Post-execution
+src/trial_dump.rs    -- pipeline.txt, inbox_*, tree.txt, contacts.txt, agents.md dumps
+src/classifier.rs::OutcomeValidator -- adaptive kNN store (.agent/outcome_store.json)
 src/dashboard.rs     -- TUI dashboard (ratatui): heatmap + log viewer (cargo run --bin pac1-dash)
+src/main.rs          -- CLI, orchestration, guess_outcome, --probe flag
 ```
 
 Depends on `sgr-agent` from `../../shared/rust-code/crates/sgr-agent` (path dep).
@@ -272,17 +291,20 @@ After fixing a task, verify with `grep "AI-NOTE" src/` that the note exists.
 ### Architecture Decision Guide
 
 Before ANY fix, check these in order:
-1. **policy.rs** — authorization/protection? → Add to policy (`is_word_match` for path guards)
-2. **hooks.rs** — "what next" guidance? → Add a hook
-3. **workflow.rs** — "when allowed" guard? → Add phase/guard (outbox limit, delete control)
-4. **feature_matrix.rs** — scoring/ranking decision? → Adjust weights or add feature
-5. **crm_graph.rs** — sender/contact/account trust? → Use graph + ONNX embeddings
-6. **pipeline.rs** — pre-LLM classification or pre-execution? → Add signal or pre-execute step
-7. **classifier.rs** — content classification? → Use ONNX (retrain via scripts/export_model.py)
-8. **skills/** — LLM workflow guidance? → Edit skill .md file (hot-reload, no rebuild)
-9. **prompts.rs** — system prompt / decision tree → LAST resort
+1. **intent.rs** — new intent-driven behavior? → Add an `Intent::foo()` method, use it everywhere. Single source of truth.
+2. **policy.rs** — authorization/protection? → Add to policy (`is_word_match` for path guards)
+3. **hooks.rs** — "what next" guidance? → Add a hook
+4. **workflow.rs** — "when allowed" guard? → Add phase/guard (outbox limit, delete control)
+5. **feature_matrix.rs** — scoring/ranking decision? → Adjust weights or add feature
+6. **crm_graph.rs** — sender/contact/account trust? → Use graph + ONNX embeddings
+7. **pipeline.rs** — pre-LLM classification or pre-execution? → Add signal or pre-execute step
+8. **classifier.rs** — content classification? → Use ONNX (retrain via scripts/export_model.py)
+9. **skills/** — LLM workflow guidance? → Edit skill .md file (hot-reload, no rebuild)
+10. **prompts.rs** — system prompt / decision tree → LAST resort
 
-**Step 7 checklist**: when fixing LLM behavior, FIRST check if the right skill is selected (grep `🎯 Skill:` in logs). If wrong skill → adjust triggers/keywords. If right skill but wrong behavior → edit the skill's SKILL.md file.
+**Step 1 check**: never write `if intent_string == "intent_X"`. The `Intent` enum has a behavioral method for every branching decision. Adding a new variant should cause a compile error at every match site that needs updating.
+
+**Step 9 checklist**: when fixing LLM behavior, FIRST check if the right skill is selected (grep `🎯 Skill:` in logs). If wrong skill → adjust triggers/keywords. If right skill but wrong behavior → edit the skill's SKILL.md file.
 
 ### Classifier Upgrade Loop (the #1 pattern for fixing failures)
 
@@ -493,13 +515,23 @@ Key file: `src/pipeline.rs` — states, transitions, assess_sender(), assess_sec
 
 ### ML Intent Classification (replaces substring heuristics)
 - `classify_intent()` in classifier.rs — 5 intent classes: `intent_delete`, `intent_edit`, `intent_query`, `intent_inbox`, `intent_email`
+- Returns `Vec<(Intent, f32)>` — typed via `src/intent.rs`. Unknown label from ONNX emits `WARN: Intent enum drift`.
 - Pre-computed centroids in `models/class_embeddings.json` (same MiniLM-L6 ONNX model, separate from security classes)
 - `classify()` returns security labels only; `classify_intent()` returns intent labels only — no contamination
-- Logged as `Instruction intent: intent_X (confidence)`
-- **Task-type forcing**: `detect_forced_task_type()` maps `intent_delete` → `"delete"` task_type override (logged as `🔒 Task-type override`)
+- Logged as `Instruction intent: intent_X (confidence)` (via `Intent::Display`)
+- **Task-type forcing**: `Intent::forces_task_type()` maps `Intent::Delete` → `"delete"` task_type override (logged as `🔒 Task-type override`)
 - **Planning phase removed** (2026-04-11): agent uses Phase 1 reasoning `plan` field instead
-- **Intent-based routing**: `intent_delete` → skip multi-inbox scaling, `intent_inbox` → skill-driven workflow
-- To add new intents: edit `INTENT_CLASSES` in `scripts/export_model.py`, run `uv run ... scripts/export_model.py` to regenerate centroids
+- **Intent-based routing**: via enum methods — `skips_inbox_scaling`, `outbox_limit`, `allows_multi_write`, `delete_from_reading`, `answer_ok_requires_write`
+- To add new intents: (1) add variant to `Intent` in `src/intent.rs` + method defaults, (2) add to `wire_values()`, (3) edit `INTENT_CLASSES` in `scripts/export_model.py`, (4) `uv run ... scripts/export_model.py` to regenerate centroids. Compiler will force handling at every match site.
+
+### Intent enum (src/intent.rs) — typed labels with drift detection
+- `Intent { Inbox, Delete, Query, Edit, Email, Unclear }` replaces scattered `intent == "intent_X"` compares
+- `Intent::parse(s)` — unknown → `Unclear`; `intent_capture` → `Inbox` (legacy alias)
+- `Intent::as_str()` / `Display` / `Serialize` — all emit `"intent_X"` (wire format preserved in dumps, JSON, YAML)
+- `Intent::wire_values()` — drives `intent_classify.rs` JSON schema, no manual sync
+- Drift detection: unknown ONNX label → WARN at runtime; unknown SKILL.md trigger → WARN at skill load
+- Behavioral methods consolidate branching: `forces_task_type`, `outbox_limit(is_capture)`, `allows_multi_write`, `answer_ok_requires_write`, `is_query`, `delete_from_reading`, `skips_inbox_scaling`, `skips_low_conf_fallback`, `expects_write_during_reading`
+- **Pattern is reusable**: copy `intent.rs` to other projects, rename variants, get drift-aware typed classifier "for free" (~80 LOC)
 
 ### Delete Routing (structural write-restriction)
 - Router "delete" task_type: restricts tools to search+read+find+list+delete+answer (NO write/mkdir/move)
