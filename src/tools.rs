@@ -148,8 +148,6 @@ async fn append_nested_agents_notice(output: &mut String, pcm: &PcmClient, path:
     }
 }
 
-/// Fix YAML frontmatter: validate with serde_yaml, auto-quote broken values.
-/// Returns Some(fixed) if changes were made, None if content is valid.
 /// Returns `Some(bytes_lost)` when `new_content` is effectively a frontmatter-only
 /// block and the on-disk file is substantially longer (agent almost certainly
 /// meant `prepend_to_file`). `None` = safe to proceed.
@@ -161,45 +159,108 @@ async fn detect_body_loss(new_content: &str, path: &str, pcm: &PcmClient) -> Opt
     (existing.len() > new_content.len() + 40).then(|| existing.len() - new_content.len())
 }
 
-fn fix_yaml_frontmatter(content: &str) -> Option<String> {
-    let rest = content.strip_prefix("---\n")?;
-    let end = rest.find("\n---")?;
-    let fm = &rest[..end];
-    let body = &rest[end..];
+// AI-NOTE: structured-content validator — inspired by inozemtsev/bitgn vault_mcp_server.
+// Pre-write validation with line/col + caret snippet. Replaces silent auto-fix:
+// model sees exact error as tool output, learns to produce valid content on retry.
+// Auto-fix lost the feedback loop — model kept emitting same bad YAML run after run.
+enum StructuredFormat { Json, Yaml, Toml, MarkdownFrontmatter, Plain }
 
-    // Try parsing — if valid, nothing to fix
-    if serde_yaml::from_str::<serde_yaml::Value>(fm).is_ok() {
-        return None;
-    }
+fn infer_format(path: &str) -> StructuredFormat {
+    let lower = path.to_lowercase();
+    if lower.ends_with(".json") { StructuredFormat::Json }
+    else if lower.ends_with(".yaml") || lower.ends_with(".yml") { StructuredFormat::Yaml }
+    else if lower.ends_with(".toml") { StructuredFormat::Toml }
+    else if lower.ends_with(".md") || lower.ends_with(".markdown") { StructuredFormat::MarkdownFrontmatter }
+    else { StructuredFormat::Plain }
+}
 
-    // Invalid YAML — fix by quoting values with colons
-    let mut lines: Vec<String> = Vec::new();
-    for line in fm.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('-') || trimmed.is_empty() {
-            lines.push(line.to_string());
-            continue;
+/// Render a `N | <line>\n      ^` snippet pointing at (1-based line, 1-based col).
+fn render_snippet(content: &str, line: usize, col: usize) -> String {
+    let lines: Vec<&str> = content.split('\n').collect();
+    if line == 0 || line > lines.len() { return String::new(); }
+    let prefix = format!("    {} | ", line);
+    let caret_pad = " ".repeat(prefix.chars().count() + col.saturating_sub(1));
+    format!("{}{}\n{}^", prefix, lines[line - 1], caret_pad)
+}
+
+fn format_rejection(path: &str, fmt: &str, line: Option<usize>, col: Option<usize>, msg: &str, content: &str) -> String {
+    let loc = match (line, col) {
+        (Some(l), Some(c)) => format!("\n  line {l}, col {c}: {msg}"),
+        (Some(l), None) => format!("\n  line {l}: {msg}"),
+        _ => format!("\n  {msg}"),
+    };
+    let snippet = match (line, col) {
+        (Some(l), Some(c)) => {
+            let s = render_snippet(content, l, c);
+            if s.is_empty() { String::new() } else { format!("\n\n{}", s) }
         }
-        if let Some((key, val)) = trimmed.split_once(':') {
-            let val = val.trim();
-            if val.contains(':') && !val.starts_with('"') && !val.starts_with('\'') {
-                let indent = &line[..line.len() - trimmed.len()];
-                lines.push(format!("{}{}: \"{}\"", indent, key, val.replace('"', "\\\"")));
-                continue;
+        _ => String::new(),
+    };
+    format!(
+        "⛔ write rejected: invalid {fmt} content in {path}{loc}{snippet}\n\nFix the content and call write again."
+    )
+}
+
+/// Validate structured content pre-write. Returns `Some(error)` if invalid, `None` if valid.
+///
+/// - JSON: strict parse, but accepts llm_json-repairable content (inner WriteTool auto-repairs).
+/// - YAML / TOML: strict parse with line/col from parser error.
+/// - Markdown: validates `---` frontmatter block as YAML if present.
+/// - Plain text / other: always passes.
+fn validate_structured_content(path: &str, content: &str) -> Option<String> {
+    match infer_format(path) {
+        StructuredFormat::Plain => None,
+        StructuredFormat::Json => {
+            if serde_json::from_str::<serde_json::Value>(content).is_ok() { return None; }
+            // Fall back to llm_json repair (matches sgr-agent-tools::WriteTool::maybe_repair_json).
+            let opts = llm_json::RepairOptions::default();
+            if let Ok(repaired) = llm_json::repair_json(content, &opts) {
+                if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() { return None; }
+            }
+            // Unrepairable — report original serde_json error.
+            match serde_json::from_str::<serde_json::Value>(content) {
+                Ok(_) => None,
+                Err(e) => Some(format_rejection(path, "json", Some(e.line()), Some(e.column()), &e.to_string(), content)),
             }
         }
-        lines.push(line.to_string());
+        StructuredFormat::Yaml => match serde_yaml::from_str::<serde_yaml::Value>(content) {
+            Ok(_) => None,
+            Err(e) => {
+                let (line, col) = e.location().map(|l| (l.line(), l.column())).unzip();
+                Some(format_rejection(path, "yaml", line, col, &e.to_string(), content))
+            }
+        },
+        StructuredFormat::Toml => match toml::from_str::<toml::Value>(content) {
+            Ok(_) => None,
+            Err(e) => {
+                let (line, col) = e.span().map(|s| byte_offset_to_line_col(content, s.start)).unzip();
+                Some(format_rejection(path, "toml", line, col, e.message(), content))
+            }
+        },
+        StructuredFormat::MarkdownFrontmatter => {
+            let Some(rest) = content.strip_prefix("---\n") else { return None; };
+            let Some(end) = rest.find("\n---") else { return None; };
+            let fm = &rest[..end];
+            match serde_yaml::from_str::<serde_yaml::Value>(fm) {
+                Ok(_) => None,
+                Err(e) => {
+                    // Frontmatter starts at line 2 of the file (after opening `---`).
+                    let (line, col) = e.location().map(|l| (l.line() + 1, l.column())).unzip();
+                    Some(format_rejection(path, "markdown-frontmatter", line, col, &e.to_string(), content))
+                }
+            }
+        }
     }
+}
 
-    let fixed_fm = lines.join("\n");
-    // Verify the fix actually works
-    if serde_yaml::from_str::<serde_yaml::Value>(&fixed_fm).is_ok() {
-        Some(format!("---\n{}{}", fixed_fm, body))
-    } else {
-        // Couldn't fix — return None, let harness report the error
-        eprintln!("    ⚠ YAML frontmatter still invalid after fix attempt");
-        None
+fn byte_offset_to_line_col(content: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1usize;
+    let mut col = 1usize;
+    for (i, ch) in content.char_indices() {
+        if i >= offset { break; }
+        if ch == '\n' { line += 1; col = 1; } else { col += 1; }
     }
+    (line, col)
 }
 
 // ─── write (middleware over sgr-agent-tools::WriteTool) ──────────────────────
@@ -265,16 +326,15 @@ impl Tool for WriteTool {
             }
         }
 
-        // Middleware 2b: YAML frontmatter auto-fix (quote values with colons)
-        if let Some(obj) = final_args.as_object_mut() {
-            if let Some(serde_json::Value::String(c)) = obj.get("content") {
-                if c.starts_with("---\n") {
-                    if let Some(fixed) = fix_yaml_frontmatter(c) {
-                        obj.insert("content".into(), serde_json::Value::String(fixed));
-                        eprintln!("    🔧 Auto-fixed YAML frontmatter in {}", path);
-                    }
-                }
-            }
+        // Middleware 2b: structured content validator (YAML/JSON/TOML/markdown-frontmatter).
+        // AI-NOTE: reject with line/col + snippet so model learns — replaced silent auto-fix.
+        // Runs on final_args (post outbox sent:false inject) to validate what hits the vault.
+        let final_content = final_args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        if start_line == 0 && end_line == 0
+            && let Some(err) = validate_structured_content(&path, final_content)
+        {
+            eprintln!("    ⛔ Rejected write to {}: {}", path, err.lines().nth(1).unwrap_or(""));
+            return Ok(ToolOutput::text(err));
         }
 
         // Base write (JSON repair handled by sgr-agent-tools)
@@ -1066,26 +1126,80 @@ mod tests {
         assert_eq!(serde_json::from_str::<serde_json::Value>(&fixed).unwrap()["to"], "alex@co.com");
     }
 
-    // ─── YAML frontmatter fix ─────────────────────────────────────────
+    // ─── structured-content validator ──────────────────────────────────
 
     #[test]
-    fn yaml_fix_colon_in_subject() {
-        let content = "---\nrecord_type: outbound_email\nsubject: Re: Could you resend the invoice?\nto: alice@co.com\n---\nBody text";
-        let fixed = super::fix_yaml_frontmatter(content).unwrap();
-        assert!(fixed.contains("subject: \"Re: Could you resend the invoice?\""), "Should quote subject with colon: {}", fixed);
-        assert!(fixed.contains("to: alice@co.com"), "Simple value should not be quoted");
-    }
-
-    #[test]
-    fn yaml_fix_no_change_needed() {
-        let content = "---\nsubject: Hello\nto: alice@co.com\n---\nBody";
-        assert!(super::fix_yaml_frontmatter(content).is_none(), "No fix needed");
-    }
-
-    #[test]
-    fn yaml_fix_already_quoted() {
+    fn validator_valid_markdown_frontmatter_passes() {
         let content = "---\nsubject: \"Re: Invoice\"\nto: alice@co.com\n---\nBody";
-        assert!(super::fix_yaml_frontmatter(content).is_none(), "Already quoted, no fix needed");
+        assert!(super::validate_structured_content("outbox/reply.md", content).is_none());
+    }
+
+    #[test]
+    fn validator_rejects_markdown_frontmatter_unquoted_colon() {
+        let content = "---\nsubject: Re: Could you resend the invoice?\nto: alice@co.com\n---\nBody";
+        let err = super::validate_structured_content("outbox/reply.md", content).unwrap();
+        assert!(err.contains("write rejected"), "{err}");
+        assert!(err.contains("markdown-frontmatter"), "{err}");
+        assert!(err.contains("line "), "should cite line: {err}");
+        assert!(err.contains("^"), "should have caret snippet: {err}");
+    }
+
+    #[test]
+    fn validator_valid_json_passes() {
+        let content = r#"{"to": "alice@co.com", "subject": "Hi", "sent": false}"#;
+        assert!(super::validate_structured_content("outbox/msg.json", content).is_none());
+    }
+
+    #[test]
+    fn validator_repairable_json_passes_via_llm_json() {
+        // trailing comma — llm_json repairs it, so we let inner WriteTool handle it
+        let content = r#"{"to": "alice@co.com", "sent": false,}"#;
+        assert!(super::validate_structured_content("outbox/msg.json", content).is_none());
+    }
+
+    #[test]
+    fn validator_rejects_unrepairable_json() {
+        // llm_json is very aggressive — nearly anything parses.
+        // Pure prose isn't a JSON value, llm_json can't invent one.
+        let content = "this is not json at all, just a sentence.";
+        match super::validate_structured_content("outbox/msg.json", content) {
+            Some(err) => {
+                assert!(err.contains("write rejected"), "{err}");
+                assert!(err.contains("json"), "{err}");
+            }
+            None => {
+                // If llm_json coerced even this, note it — silent repair is preserved behavior.
+                eprintln!("note: llm_json repaired pure prose — silent repair path");
+            }
+        }
+    }
+
+    #[test]
+    fn validator_rejects_yaml_with_bad_indent() {
+        let content = "key1: value1\n  bad_indent: true\nkey2: value2";
+        let err = super::validate_structured_content("config.yaml", content).unwrap();
+        assert!(err.contains("yaml"), "{err}");
+        assert!(err.contains("line "), "{err}");
+    }
+
+    #[test]
+    fn validator_plain_text_passes() {
+        assert!(super::validate_structured_content("notes/todo.txt", "anything goes\nno : constraints").is_none());
+    }
+
+    #[test]
+    fn validator_markdown_without_frontmatter_passes() {
+        assert!(super::validate_structured_content("docs/note.md", "# Title\n\nJust a note.").is_none());
+    }
+
+    #[test]
+    fn render_snippet_has_caret_under_column() {
+        let content = "line one\nsecond line\nthird";
+        let snip = super::render_snippet(content, 2, 8);
+        // should contain "second line" and a caret line under column 8
+        assert!(snip.contains("2 | second line"), "{snip}");
+        let caret_line = snip.lines().nth(1).unwrap();
+        assert!(caret_line.trim_end().ends_with('^'));
     }
 
     // ─── trust metadata ────────────────────────────────────────────────
