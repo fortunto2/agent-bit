@@ -43,43 +43,143 @@ cargo run --bin pac1-dash    # TUI dashboard
 
 ## Architecture
 
+Four layers, each owning one slice of responsibility:
+
 ```
-Instruction
-  → prescan (HTML injection only)
-  → Pipeline SM: New → Classified → InboxScanned → SecurityChecked → Ready
-  → CRM Graph (petgraph + ONNX embeddings from 10_entities/ or contacts/)
-  → Inbox Classifier Ensemble (ML + NLI + structural + sender trust)
-  → Feature Matrix (12 features × sigmoid → threat probability)
-  → Skill Selection (15 SKILL.md files, hot-reloadable)
-  → Agent Loop (Pac1Agent: Structured CoT → Reflexion → Router → Tools)
-  → Workflow SM: Reading → Acting → Cleanup → Done
-  → OutcomeValidator (adaptive kNN, 5-nearest-neighbor)
-  → answer() → OUTCOME_OK / DENIED / UNSUPPORTED / CLARIFICATION
+┌──────────────────────────────────────────────────────────────────┐
+│  L1: Pre-LLM Pipeline (deterministic, no model calls)            │
+│  prescan → classify (security+intent) → scan inbox → check → ready
+│  Files: pipeline.rs, scanner.rs, classifier.rs, intent.rs,       │
+│         crm_graph.rs, feature_matrix.rs, policy.rs               │
+├──────────────────────────────────────────────────────────────────┤
+│  L2: Context Assembly (builds 6-message pre-grounding)           │
+│  tree + AGENTS.MD + skill body + date + inbox-with-annotations   │
+│  + instruction. Files: pregrounding.rs, skills.rs, hooks.rs      │
+├──────────────────────────────────────────────────────────────────┤
+│  L3: Agent Loop (LLM-driven, tool-calling)                       │
+│  Pac1Agent: Structured CoT → Reflexion → Router → Tools          │
+│  Enforced by Workflow SM guards at each tool call                │
+│  Files: agent.rs, pac1_sgr.rs, tools.rs, workflow.rs             │
+├──────────────────────────────────────────────────────────────────┤
+│  L4: Post-execution (validation, learning, dumps)                │
+│  OutcomeValidator kNN → adaptive store → trial dumps             │
+│  Files: classifier.rs (OutcomeValidator), trial_dump.rs          │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+Dependencies flow one way: **L1 → L2 → L3 → L4**. Nothing in L1 imports L3.
 
 ### Key Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Pipeline SM | `src/pipeline.rs` | Pre-LLM classification, security signals |
-| Agent | `src/agent.rs` | Two-phase FC: reasoning → action, router, reflexion |
-| Skills | `skills/*.md` | 15 domain skills, hot-reload without rebuild |
-| System Prompt | `prompts/system.md` | Hot-reload, evolved via ShinkaEvolve |
-| CRM Graph | `src/crm_graph.rs` | Entity graph, ONNX embeddings, cross-account detection |
-| Classifier | `src/classifier.rs` | ONNX MiniLM-L6 + NLI DeBERTa + adaptive kNN |
-| Feature Matrix | `src/feature_matrix.rs` | 12-feature sigmoid scoring |
-| Scanner | `src/scanner.rs` | Security signals, domain matching, sender trust |
-| Policy | `src/policy.rs` | File protection, channel trust |
-| Workflow SM | `src/workflow.rs` | Runtime guards: budget, write limits, delete control |
-| Hooks | `src/hooks.rs` | Data-driven tool completion hooks from AGENTS.MD |
-| Tools | `src/tools.rs` | 16 tools + JSON auto-repair (llm_json fork) |
-| Dashboard | `src/dashboard.rs` | TUI: model columns, history panel, full diagnostics |
+| **L1 — Pre-LLM** | | |
+| Pipeline SM | `src/pipeline.rs` | Typed state machine `New→Classified→InboxScanned→SecurityChecked→Ready`. Pre-LLM classification + security signals. |
+| Intent | `src/intent.rs` | Typed enum (`Inbox/Delete/Query/Edit/Email/Unclear`) with behavioral methods. Single source of truth replacing scattered string compares. |
+| Classifier | `src/classifier.rs` | ONNX MiniLM-L6 (security + intent) + NLI DeBERTa (zero-shot) + OutcomeValidator (adaptive kNN, 5-nearest). Returns typed `Intent`, WARNs on drift. |
+| Scanner | `src/scanner.rs` | Prescan (HTML injection), sender assessment, domain matching, exfiltration detection. |
+| CRM Graph | `src/crm_graph.rs` | petgraph entity graph + ONNX account embeddings + cross-account detection (cosine sim, gap > 0.1). |
+| Feature Matrix | `src/feature_matrix.rs` | 12-feature × sigmoid → threat probability per inbox message. Ridge-regression calibration. |
+| Policy | `src/policy.rs` | File protection (`PROTECTED_BASENAMES`, `POLICY_DIRS`), channel trust registry, exfiltration scan. |
+| **L2 — Context** | | |
+| Pregrounding | `src/pregrounding.rs` | Codex-style 6-message assembly. Tree + AGENTS.MD + skill + inbox with classification headers. |
+| Skills | `skills/*.md` + `src/skills.rs` | 15 hot-reload `.md` skills, push-model selection via classifier label + intent. Trigger validation at load. |
+| Hooks | `src/hooks.rs` | Data-driven tool completion hooks parsed from AGENTS.MD (`path_contains` patterns). |
+| System Prompt | `prompts/system.md` | Hot-reload, evolved via ShinkaEvolve. |
+| **L3 — Agent** | | |
+| Pac1Agent | `src/agent.rs` | Single- or two-phase LLM loop, Structured CoT, parallel think+action, router, reflexion. |
+| Pac1SgrAgent | `src/pac1_sgr.rs` | SGR-mode (1 LLM call/step) alternative to Pac1Agent. |
+| Tools | `src/tools.rs` | 16 tools: read/write/delete/search/list/tree/grep_count/read_all/search_and_read + trust metadata. |
+| Workflow SM | `src/workflow.rs` | Runtime guards (`Reading→Acting→Cleanup→Done`): budget nudges, write limits, delete control, capture-write ordering. |
+| PcmClient | `src/pcm.rs` | Harness FS RPCs + read cache + `ProposedAnswer`. |
+| **L4 — Post** | | |
+| Outcome kNN | `src/classifier.rs::OutcomeValidator` | Score-gated adaptive store (`.agent/outcome_store.json`), 5-NN voting, confidence-gated block/warn. |
+| Trial Dumps | `src/trial_dump.rs` | `pipeline.txt`, `inbox_*`, `tree.txt`, `contacts.txt` for offline debug. |
+| Dashboard | `src/dashboard.rs` | TUI: model columns, heatmap, log viewer (`cargo run --bin pac1-dash`). |
 
 ### Hot-Reload (zero rebuild)
 
 - `prompts/system.md` — system prompt
 - `skills/*.md` — 15 domain-specific skills
 - `config.toml` — temperatures, providers, parallelism
+
+## Reusable Patterns for Other Projects
+
+Every agent-bit layer is a transplantable pattern. Most code is project-specific (domain labels, CRM schema, PAC1 outcomes) but the *shape* generalizes.
+
+### Pattern 1 — Typed classifier labels with drift detection
+
+**File:** `src/intent.rs` (83 LOC). Pure enum with `parse` / `as_str` / `Display` / `Serialize`, plus behavioral methods (`forces_task_type`, `outbox_limit(is_capture)`, `allows_multi_write`).
+
+**How to reuse:** copy `intent.rs`, rename variants to your domain, list wire-format strings in `wire_values()`. Wire the enum into:
+- Classifier return type: `Vec<(YourLabel, f32)>` — emits WARN on unknown labels (catches ONNX/embedding drift)
+- LLM JSON-schema: `"enum": YourLabel::wire_values()` — no manual sync on enum changes
+- Skill YAML triggers: `validate_triggers()` warns on typos at load
+
+Eliminates ~50 string compares per enum + ~3 latent bug classes. See PR [#1](https://github.com/fortunto2/agent-bit/pull/1).
+
+### Pattern 2 — Pre-LLM pipeline state machine
+
+**File:** `src/pipeline.rs` (typed `New→Classified→InboxScanned→SecurityChecked→Ready`).
+
+**How to reuse:** each transition returns `Result<NextState, BlockReason>`. First block short-circuits → deterministic outcome without wasting LLM tokens. Compiler enforces ordering (can't skip security check). Use for any agent with pre-validation (auth, content moderation, classification gates).
+
+### Pattern 3 — Runtime workflow state machine
+
+**File:** `src/workflow.rs` (`Reading→Acting→Cleanup→Done` + per-tool guards).
+
+**How to reuse:** replaces scattered `if`-guards across 5+ files with one SM. `pre_action(tool, path) → Guard::{Block, Warn, Allow}` runs before each tool executes. `post_action` advances phase + fires hooks. Agent can't misbehave — guards return string responses the LLM sees instead of executing.
+
+Key rule: **Block > Warn**. Weak models ignore warnings, obey blocks (messages injected as tool output).
+
+### Pattern 4 — Skill-based prompt injection (hot-reload)
+
+**Files:** `skills/*/SKILL.md` + `src/skills.rs` + `sgr-agent::skills`.
+
+**How to reuse:** YAML-frontmatter Markdown files with `triggers` + `keywords` + `priority`. Push-model: classifier label + intent → skill body injected into `{examples}` prompt placeholder. Hybrid fallback: agent can `list_skills()` / `get_skill()` mid-task. Validation warns on typos. Works for any domain where you want "domain-specific examples without rebuild".
+
+### Pattern 5 — Feature matrix for classification
+
+**File:** `src/feature_matrix.rs` (12 features × sigmoid → probability).
+
+**How to reuse:** batch scoring over N items with hand-tuned weights (`threat_weights()`) that ridge regression can calibrate from labels (`calibrate_ridge()` — Gauss-Seidel solver, R²=0.999). Correlation matrix exposes feature importance. Decision gate: `sigmoid < 0.5 → safe`. Works for any ensemble decision (spam, fraud, content quality).
+
+### Pattern 6 — Data-driven hooks from AGENTS.MD
+
+**File:** `src/hooks.rs` (`HookRegistry::from_agents_md`).
+
+**How to reuse:** parses natural-language rules (`"When adding to {path}, also {action}"`) into typed `ToolHook{tool, path_contains, message}`. Triggered by tool name + path match. Lets domain docs drive agent behavior without code changes.
+
+### Pattern 7 — Adaptive outcome validation (kNN on past trials)
+
+**File:** `src/classifier.rs::OutcomeValidator`.
+
+**How to reuse:** stores past outcomes by embedding in `.agent/outcome_store.json`. On new trial, k-NN vote (k=5) against store. Score-gated learning (only confirmed correct trials enter store). Confidence-gated block/warn. Self-improves without retraining a model.
+
+### Pattern 8 — Tool trust metadata
+
+**File:** `src/tools.rs` (read annotations like `[path | trusted/untrusted]`).
+
+**How to reuse:** every read adds a header indicating whether the source is trusted (system file) or untrusted (inbox message). Prompt instructs model to treat differently. Prevents injection by making provenance visible in context.
+
+### What you CAN'T transplant directly
+
+- `src/prompts.rs` / `prompts/system.md` — PAC1 decision tree, rewrite for your domain
+- `skills/*/SKILL.md` — CRM-specific examples
+- `src/bitgn.rs` / `src/pcm.rs` — harness-specific RPC clients
+- `models/*.onnx` + `models/class_embeddings.json` — trained on PAC1 task wordings
+
+### Minimal transplant recipe
+
+For a new agent using this pattern:
+
+1. **L1 skeleton**: `pipeline.rs` + `intent.rs` + thin `classifier.rs` stub
+2. **L2 skeleton**: `pregrounding.rs` assembling your domain context + `skills.rs` pointing at your `skills/` dir
+3. **L3 skeleton**: pick `Pac1Agent` (two-phase, stronger) or `Pac1SgrAgent` (single-phase, 3× faster) as starting point
+4. **L4**: trial dumps are literally 30 LOC, copy as-is
+5. **Domain**: write `skills/*/SKILL.md`, adjust `Intent` variants, train your ONNX classifier via `scripts/export_model.py`
+
+Expect 80% of `agent-bit` code to transplant; 20% is domain-specific.
 
 ### Ensemble Fallback
 
