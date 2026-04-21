@@ -6,23 +6,26 @@ Built on [sgr-agent](https://github.com/fortunto2/rust-code) framework.
 
 ## Score
 
-### Prod benchmark (pac1-prod, 104 tasks)
+### Prod benchmark (pac1-prod, 104 tasks) — current
 
-| Model | Score | Run |
-|-------|-------|-----|
-| GPT-5.4 | **74/104** | [run-22J8DDkgwCuT9GeGCXRk8WPHw](https://eu.bitgn.com/runs/run-22J8DDkgwCuT9GeGCXRk8WPHw) |
-| GPT-5.4-mini | **63/104** | [run-22J81JoKy5HTbPvMgmjtUZqTi](https://eu.bitgn.com/runs/run-22J81JoKy5HTbPvMgmjtUZqTi) |
-| Nemotron-120B | **51/104** | [run-22J6rVNqum58YKMhA3pUiTS6N](https://eu.bitgn.com/runs/run-22J6rVNqum58YKMhA3pUiTS6N) |
+| Model | Score | Cost | Run |
+|-------|-------|------|-----|
+| **Haiku 4.5** (OpenRouter) | **81/104 (78%)** | ~$5 | [run-22JoCuyLMFd2z735su2bWbF4V](https://eu.bitgn.com/runs/run-22JoCuyLMFd2z735su2bWbF4V) |
+| Nemotron 3 Super 120b (OR) | 67/104 (65%) | FREE | 2026-04-17 three-way |
+| Gemma 4 26b (CF Workers) | 67/104 (64%) | FREE | [run-22Jxp5aALc71xiAaCgRxpDoBc](https://eu.bitgn.com/runs/run-22Jxp5aALc71xiAaCgRxpDoBc) |
+| GPT-5.4 (OpenAI) | 74/104 (74%) | $$$$ | [run-22J8DDkgwCuT9GeGCXRk8WPHw](https://eu.bitgn.com/runs/run-22J8DDkgwCuT9GeGCXRk8WPHw) |
+
+**Current best: Haiku 4.5 at 78%.** Free-tier ceiling ≈ 64-65% (Nemotron/Gemma). Haiku adds +13-15pp for $5/run. GPT-5.4 projected ~93% after t09+t18+t20+t23+t29 fixes (not re-run at that spend).
 
 ### Dev benchmark (pac1-dev, 43 tasks)
 
 | Model | Score | Notes |
 |-------|-------|-------|
-| Nemotron-120B (CF) | **95.3%** (41/43) | FREE model, primary |
-| Seed-2.0-pro | **90.7%** (39/43) | Best paid alternative |
-| GPT-5.4 | **95.3%** (41/43) | Expensive, final validation |
+| Nemotron 120B (CF) | **95.3%** (41/43) | FREE, primary for development |
+| Seed-2.0-pro | 90.7% (39/43) | Best paid alternative |
+| GPT-5.4 | 95.3% (41/43) | Expensive, final validation only |
 
-30+ models tested across 6 providers (DeepInfra, CF Workers AI, Cerebras, OpenRouter, Modal, OpenAI).
+30+ models tested across 6 providers (DeepInfra, CF Workers AI, Cerebras, OpenRouter, Modal, OpenAI). See `LOG.md` Benchmark History for full chronology.
 
 ## Quick Start
 
