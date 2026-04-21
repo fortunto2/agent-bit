@@ -72,7 +72,7 @@ pub struct New {
 #[derive(Debug)]
 pub struct Classified {
     pub instruction: String,
-    pub intent: String,
+    pub intent: crate::intent::Intent,
     pub intent_confidence: f32,
     pub instruction_label: String,
 }
@@ -80,7 +80,7 @@ pub struct Classified {
 /// Inbox scanned — files read and classified with sender trust.
 pub struct InboxScanned {
     pub instruction: String,
-    pub intent: String,
+    pub intent: crate::intent::Intent,
     pub intent_confidence: f32,
     pub instruction_label: String,
     pub inbox_files: Vec<InboxFile>,
@@ -89,14 +89,14 @@ pub struct InboxScanned {
 impl std::fmt::Debug for InboxScanned {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InboxScanned").field("instruction", &self.instruction)
-            .field("intent", &self.intent).field("inbox_files", &self.inbox_files.len()).finish()
+            .field("intent", &self.intent.as_str()).field("inbox_files", &self.inbox_files.len()).finish()
     }
 }
 
 /// Security checked — all pre-LLM guards passed.
 pub struct SecurityChecked {
     pub instruction: String,
-    pub intent: String,
+    pub intent: crate::intent::Intent,
     pub intent_confidence: f32,
     pub instruction_label: String,
     pub inbox_files: Vec<InboxFile>,
@@ -105,7 +105,7 @@ pub struct SecurityChecked {
 impl std::fmt::Debug for SecurityChecked {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SecurityChecked").field("instruction", &self.instruction)
-            .field("intent", &self.intent).finish()
+            .field("intent", &self.intent.as_str()).finish()
     }
 }
 
@@ -113,7 +113,7 @@ impl std::fmt::Debug for SecurityChecked {
 /// This state is consumed by the caller to run sgr_agent::run_loop().
 pub struct Ready {
     pub instruction: String,
-    pub intent: String,
+    pub intent: crate::intent::Intent,
     #[allow(dead_code)]
     pub intent_confidence: f32,
     #[allow(dead_code)]
@@ -124,7 +124,7 @@ pub struct Ready {
 impl std::fmt::Debug for Ready {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Ready").field("instruction", &self.instruction)
-            .field("intent", &self.intent).finish()
+            .field("intent", &self.intent.as_str()).finish()
     }
 }
 
@@ -252,23 +252,23 @@ pub async fn run_pipeline(
         if let Some(clf) = guard.as_mut() {
             match clf.classify_intent(instruction) {
                 Ok(scores) if !scores.is_empty() => {
-                    let (label, conf) = &scores[0];
-                    eprintln!("  [STAGE:classify] Instruction intent: {} ({:.2})", label, conf);
-                    (label.clone(), *conf)
+                    let (intent, conf) = scores[0];
+                    eprintln!("  [STAGE:classify] Instruction intent: {} ({:.2})", intent, conf);
+                    (intent, conf)
                 }
-                _ => (String::new(), 0.0),
+                _ => (crate::intent::Intent::Unclear, 0.0),
             }
         } else {
-            (String::new(), 0.0)
+            (crate::intent::Intent::Unclear, 0.0)
         }
     };
 
     // Question-word override: "What is the email of..." is a query, not an email task
     let first_word = instruction.split_whitespace().next().unwrap_or("").to_lowercase();
     let is_question = matches!(first_word.as_str(), "what" | "who" | "which" | "how" | "where" | "when" | "list" | "return" | "find" | "look" | "show");
-    let intent = if is_question && intent != "intent_query" && intent != "intent_delete" {
+    let intent = if is_question && intent != crate::intent::Intent::Query && intent != crate::intent::Intent::Delete {
         eprintln!("  [STAGE:classify] question-word override: {} -> intent_query", intent);
-        "intent_query".to_string()
+        crate::intent::Intent::Query
     } else {
         intent
     };
@@ -340,7 +340,7 @@ pub async fn run_pipeline(
     // Structural guarantee: if ALL inbox files are non_work -> CLARIFICATION
     if !inbox_files.is_empty()
         && inbox_files.iter().all(|f| f.security.ml_label == "non_work")
-        && intent == "intent_inbox"
+        && intent == crate::intent::Intent::Inbox
     {
         eprintln!("  [STAGE:security] All {} inbox files are non_work -> CLARIFICATION", inbox_files.len());
         return Err(BlockReason {
@@ -422,23 +422,23 @@ impl New {
             if let Some(clf) = guard.as_mut() {
                 match clf.classify_intent(&self.instruction) {
                     Ok(scores) if !scores.is_empty() => {
-                        let (label, conf) = &scores[0];
-                        eprintln!("  [STAGE:classify] Instruction intent: {} ({:.2})", label, conf);
-                        (label.clone(), *conf)
+                        let (intent, conf) = scores[0];
+                        eprintln!("  [STAGE:classify] Instruction intent: {} ({:.2})", intent, conf);
+                        (intent, conf)
                     }
-                    _ => (String::new(), 0.0),
+                    _ => (crate::intent::Intent::Unclear, 0.0),
                 }
             } else {
-                (String::new(), 0.0)
+                (crate::intent::Intent::Unclear, 0.0)
             }
         };
 
         // Question-word override: "What is the email of..." is a query, not an email task
         let first_word = self.instruction.split_whitespace().next().unwrap_or("").to_lowercase();
         let is_question = matches!(first_word.as_str(), "what" | "who" | "which" | "how" | "where" | "when" | "list" | "return" | "find" | "look" | "show");
-        let intent = if is_question && intent != "intent_query" && intent != "intent_delete" {
+        let intent = if is_question && intent != crate::intent::Intent::Query && intent != crate::intent::Intent::Delete {
             eprintln!("  [STAGE:classify] ↳ question-word override: {} → intent_query", intent);
-            "intent_query".to_string()
+            crate::intent::Intent::Query
         } else {
             intent
         };
@@ -560,7 +560,7 @@ impl InboxScanned {
         // No point running LLM on math/trivia/jokes — deterministic outcome
         if !self.inbox_files.is_empty()
             && self.inbox_files.iter().all(|f| f.security.ml_label == "non_work")
-            && self.intent == "intent_inbox"
+            && self.intent == crate::intent::Intent::Inbox
         {
             eprintln!("  [STAGE:security] ⛔ All {} inbox files are non_work → CLARIFICATION", self.inbox_files.len());
             return Err(BlockReason {
@@ -796,7 +796,7 @@ mod tests {
         let trial = New { instruction: "process the inbox".into() };
         let classified = trial.classify(&clf).unwrap();
         assert_eq!(classified.instruction, "process the inbox");
-        assert!(!classified.intent.is_empty());
+        assert_ne!(classified.intent, crate::intent::Intent::Unclear);
     }
 
     #[test]
@@ -812,7 +812,7 @@ mod tests {
     fn inbox_scanned_security_check_passes_clean() {
         let scanned = InboxScanned {
             instruction: "test".into(),
-            intent: "intent_inbox".into(),
+            intent: crate::intent::Intent::Inbox,
             intent_confidence: 0.5,
             instruction_label: "crm".into(),
             inbox_files: vec![InboxFile {
@@ -833,7 +833,7 @@ mod tests {
     fn inbox_scanned_security_check_blocks_threat() {
         let scanned = InboxScanned {
             instruction: "test".into(),
-            intent: "intent_inbox".into(),
+            intent: crate::intent::Intent::Inbox,
             intent_confidence: 0.5,
             instruction_label: "crm".into(),
             inbox_files: vec![InboxFile {

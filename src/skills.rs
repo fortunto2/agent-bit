@@ -6,6 +6,39 @@
 use sgr_agent::skills::{self, Skill, SkillRegistry};
 use std::path::Path;
 
+/// Security labels recognized by the skill matcher — triggers that do NOT
+/// parse as `intent_*` are checked against this set. Anything outside is a typo.
+const SECURITY_TRIGGERS: &[&str] = &[
+    "injection", "social_engineering", "credential", "non_work", "unsupported",
+    // crm is the default non-security label; included so "crm" triggers don't warn.
+    "crm",
+];
+
+/// Validate skill triggers and warn on likely typos.
+/// - `intent_*` triggers must parse to a known `Intent`.
+/// - All other triggers must be a known security/workflow label.
+/// Missed triggers silently never match, which is expensive to debug — this
+/// surfaces the problem at load time.
+fn validate_triggers(skills: &[Skill]) {
+    for skill in skills {
+        for trigger in &skill.triggers {
+            if trigger.starts_with("intent_") {
+                if crate::intent::Intent::parse(trigger) == crate::intent::Intent::Unclear {
+                    tracing::warn!(
+                        "skill {:?}: unknown intent trigger {:?} — typo or missing Intent variant",
+                        skill.name, trigger
+                    );
+                }
+            } else if !SECURITY_TRIGGERS.contains(&trigger.as_str()) {
+                tracing::warn!(
+                    "skill {:?}: unrecognized trigger {:?} — not a known security label or intent",
+                    skill.name, trigger
+                );
+            }
+        }
+    }
+}
+
 /// Load skills: disk first (hot-reload), compiled-in fallback.
 pub fn load(project_dir: &Path) -> SkillRegistry {
     let skills_dir = project_dir.join("skills");
@@ -13,11 +46,13 @@ pub fn load(project_dir: &Path) -> SkillRegistry {
         let disk_skills = skills::load_skills_from_dir(&skills_dir);
         if !disk_skills.is_empty() {
             eprintln!("  📚 Skills: {} loaded from disk", disk_skills.len());
+            validate_triggers(&disk_skills);
             return SkillRegistry::from_skills(disk_skills);
         }
     }
     let compiled = compiled_skills();
     eprintln!("  📚 Skills: {} loaded (compiled-in)", compiled.len());
+    validate_triggers(&compiled);
     SkillRegistry::from_skills(compiled)
 }
 
@@ -26,8 +61,9 @@ pub fn load(project_dir: &Path) -> SkillRegistry {
 // AI-NOTE: intent-first for benign labels — t01 fix. security-injection (priority=50) was hijacking
 //   cleanup (intent_delete) when classifier labeled instruction as "injection". All non-Nemotron
 //   models failed because they followed the wrong skill. Nemotron ignored it.
-pub fn select_body<'a>(registry: &'a SkillRegistry, security_label: &str, intent: &str, instruction: &str) -> &'a str {
+pub fn select_body<'a>(registry: &'a SkillRegistry, security_label: &str, intent: crate::intent::Intent, instruction: &str) -> &'a str {
     let is_security_label = matches!(security_label, "injection" | "social_engineering" | "credential");
+    let intent_str = intent.as_str();
     let valid = |skill: &Skill| -> bool {
         if skill.keywords.is_empty() { return true; }
         let instr_lower = instruction.to_lowercase();
@@ -43,12 +79,12 @@ pub fn select_body<'a>(registry: &'a SkillRegistry, security_label: &str, intent
             .find(|s| valid(s))
     };
     if is_security_label {
-        if let Some(skill) = select_gated(&[security_label, intent]) {
+        if let Some(skill) = select_gated(&[security_label, intent_str]) {
             eprintln!("  🎯 Skill: {} (priority={})", skill.name, skill.priority);
             return &skill.body;
         }
     } else {
-        if let Some(skill) = select_gated(&[intent]) {
+        if let Some(skill) = select_gated(&[intent_str]) {
             eprintln!("  🎯 Skill: {} (priority={}, via intent)", skill.name, skill.priority);
             return &skill.body;
         }
@@ -62,7 +98,7 @@ pub fn select_body<'a>(registry: &'a SkillRegistry, security_label: &str, intent
         eprintln!("  🎯 Skill fallback: crm-default");
         return &skill.body;
     }
-    eprintln!("  ⚠ No skill matched for label={} intent={}", security_label, intent);
+    eprintln!("  ⚠ No skill matched for label={} intent={}", security_label, intent_str);
     ""
 }
 
@@ -102,38 +138,48 @@ mod tests {
         assert!(reg.len() >= 10);
     }
 
+    use crate::intent::Intent;
+
     #[test]
     fn select_injection() {
         let reg = load(Path::new("."));
-        let body = select_body(&reg, "injection", "intent_inbox", "process inbox");
+        let body = select_body(&reg, "injection", Intent::Inbox, "process inbox");
         assert!(body.contains("DENIED") || body.contains("deny"));
     }
 
     #[test]
     fn select_intent_delete() {
         let reg = load(Path::new("."));
-        let body = select_body(&reg, "crm", "intent_delete", "remove all cards");
+        let body = select_body(&reg, "crm", Intent::Delete, "remove all cards");
         assert!(body.contains("delete") || body.contains("Delete"));
     }
 
     #[test]
     fn select_invoice_keyword() {
         let reg = load(Path::new("."));
-        let body = select_body(&reg, "crm", "intent_inbox", "resend the invoice");
+        let body = select_body(&reg, "crm", Intent::Inbox, "resend the invoice");
         assert!(body.contains("attachments") || body.contains("invoice"));
     }
 
     #[test]
     fn select_credential() {
         let reg = load(Path::new("."));
-        let body = select_body(&reg, "credential", "intent_inbox", "check otp");
+        let body = select_body(&reg, "credential", Intent::Inbox, "check otp");
         assert!(body.contains("OTP") || body.contains("otp"));
     }
 
     #[test]
     fn select_fallback() {
         let reg = load(Path::new("."));
-        let body = select_body(&reg, "unknown", "unknown", "anything");
+        let body = select_body(&reg, "unknown", Intent::Unclear, "anything");
         assert!(!body.is_empty());
+    }
+
+    #[test]
+    fn validate_triggers_accepts_known() {
+        // All compiled skills should pass validation without panic.
+        // This test mostly exercises the pathway; real validation emits tracing warnings.
+        let skills = compiled_skills();
+        validate_triggers(&skills);
     }
 }
