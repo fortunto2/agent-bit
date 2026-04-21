@@ -6,16 +6,15 @@ Built on [sgr-agent](https://github.com/fortunto2/rust-code) framework.
 
 ## Score
 
-### Prod benchmark (pac1-prod, 104 tasks) — current
+### Prod benchmark (pac1-prod, 104 tasks) — current v4 codebase
 
 | Model | Score | Cost | Run |
 |-------|-------|------|-----|
 | **Haiku 4.5** (OpenRouter) | **81/104 (78%)** | ~$5 | [run-22JoCuyLMFd2z735su2bWbF4V](https://eu.bitgn.com/runs/run-22JoCuyLMFd2z735su2bWbF4V) |
 | Nemotron 3 Super 120b (OR) | 67/104 (65%) | FREE | 2026-04-17 three-way |
 | Gemma 4 26b (CF Workers) | 67/104 (64%) | FREE | [run-22Jxp5aALc71xiAaCgRxpDoBc](https://eu.bitgn.com/runs/run-22Jxp5aALc71xiAaCgRxpDoBc) |
-| GPT-5.4 (OpenAI) | 74/104 (74%) | $$$$ | [run-22J8DDkgwCuT9GeGCXRk8WPHw](https://eu.bitgn.com/runs/run-22J8DDkgwCuT9GeGCXRk8WPHw) |
 
-**Current best: Haiku 4.5 at 78%.** Free-tier ceiling ≈ 64-65% (Nemotron/Gemma). Haiku adds +13-15pp for $5/run. GPT-5.4 projected ~93% after t09+t18+t20+t23+t29 fixes (not re-run at that spend).
+**Current best: Haiku 4.5 at 78%.** Free-tier ceiling ≈ 64-65% (Nemotron/Gemma). Haiku adds +13-15pp for $5/run. GPT-5.4 on the v4 codebase is projected ~93% after t09+t18+t20+t23+t29 fixes but has not been re-run at that spend (last full run 04-13 predates ~20 universal fixes and is excluded as not comparable).
 
 ### Dev benchmark (pac1-dev, 43 tasks)
 
