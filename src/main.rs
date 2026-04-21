@@ -31,6 +31,7 @@ mod config;
 mod crm_graph;
 mod pcm;
 mod hooks;
+mod intent;
 mod intent_classify;
 mod llm_config;
 mod pipeline;

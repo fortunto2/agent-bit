@@ -43,13 +43,9 @@ fn filter_tools_by_workflow(defs: Vec<ToolDef>, _workflow: &Option<crate::workfl
 }
 
 /// Structural task-type forcing from ML intent classification.
-/// Maps intent_* labels to task_type when classification is unambiguous.
-/// Called with the result of `classify_intent()` from pregrounding.
-pub fn detect_forced_task_type(intent_label: &str) -> Option<&'static str> {
-    match intent_label {
-        "intent_delete" => Some("delete"),
-        _ => None,
-    }
+/// Thin wrapper over Intent::forces_task_type — single source of truth in intent.rs.
+pub fn detect_forced_task_type(intent: crate::intent::Intent) -> Option<&'static str> {
+    intent.forces_task_type()
 }
 
 /// Format a ledger entry with UTF-8 safe truncation to 80 bytes.
@@ -132,8 +128,8 @@ pub struct Pac1Agent<C: LlmClient> {
     reflexion_count: AtomicU32,
     /// Confidence reflection count per decide_stateful call (max 1)
     confidence_reflections: AtomicU32,
-    /// ML-classified instruction intent (e.g. "intent_delete"), used for task-type forcing
-    forced_intent: Mutex<String>,
+    /// ML-classified instruction intent (e.g. Intent::Delete), used for task-type forcing
+    forced_intent: Mutex<crate::intent::Intent>,
     /// Unified workflow state machine — replaces all scattered guards
     workflow: Option<crate::workflow::SharedWorkflowState>,
     /// AI-NOTE: single-phase experiment — 1 LLM call/step instead of 2
@@ -175,7 +171,7 @@ impl<C: LlmClient> Pac1Agent<C> {
             action_ledger: Mutex::new(Vec::new()),
             reflexion_count: AtomicU32::new(0),
             confidence_reflections: AtomicU32::new(0),
-            forced_intent: Mutex::new(String::new()),
+            forced_intent: Mutex::new(crate::intent::Intent::Unclear),
             workflow,
             single_phase,
             skip_plan_next,
@@ -186,8 +182,8 @@ impl<C: LlmClient> Pac1Agent<C> {
     }
 
     /// Set the ML-classified instruction intent for task-type forcing.
-    pub fn set_intent(&self, intent: &str) {
-        *self.forced_intent.lock().unwrap() = intent.to_string();
+    pub fn set_intent(&self, intent: crate::intent::Intent) {
+        *self.forced_intent.lock().unwrap() = intent;
     }
 
     /// Set pipeline context for dynamic think tool.
@@ -228,7 +224,7 @@ impl<C: LlmClient> Pac1Agent<C> {
 /// Pipeline context for dynamic think tool construction.
 #[derive(Default, Clone)]
 pub struct ThinkContext {
-    pub intent: String,
+    pub intent: crate::intent::Intent,
     pub inbox_count: usize,
     pub has_threat: bool,
     pub has_otp: bool,
@@ -240,7 +236,8 @@ pub struct ThinkContext {
 fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
     use sgr_agent::reasoning_tool::ReasoningToolBuilder;
     use serde_json::json;
-    let intent = ctx.intent.as_str();
+    use crate::intent::Intent;
+    let intent = ctx.intent;
 
     // Outcome rules (shared across all intents):
     // - Data not found after exhaustive search → UNSUPPORTED
@@ -276,9 +273,9 @@ fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
     // finding: tool description hint is more reliable than prompt for forcing parallel FC on mini models.
     let parallel_hint = " ALWAYS call in parallel with an action tool in the same response.";
     let desc = match intent {
-        "intent_delete" => format!("Reason about delete task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}{parallel_hint}"),
-        "intent_inbox" => format!("Reason about inbox task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}{parallel_hint}"),
-        "intent_query" => format!("Reason about lookup{ctx_desc}. Call with action tool.{outcome_hint}{parallel_hint}"),
+        Intent::Delete => format!("Reason about delete task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}{parallel_hint}"),
+        Intent::Inbox => format!("Reason about inbox task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}{parallel_hint}"),
+        Intent::Query => format!("Reason about lookup{ctx_desc}. Call with action tool.{outcome_hint}{parallel_hint}"),
         _ => format!("Reason about the task{ctx_desc}. Call with action tool.{skill_hint}{outcome_hint}{parallel_hint}"),
     };
 
@@ -286,21 +283,21 @@ fn think_tool_for_context(ctx: &ThinkContext) -> ToolDef {
         // AI-NOTE: SGR adaptive planning pattern (Abdullin):
         // Plan 1-5 steps → execute only first → replan next step.
         // remaining_steps forces coherent multi-step thinking even though only next_action executes.
-        "intent_delete" => ReasoningToolBuilder::new("plan_next")
+        Intent::Delete => ReasoningToolBuilder::new("plan_next")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "What to delete and why. Self-check: right targets?"}))
             .field("remaining_steps", json!({"type": "string", "description": "1-3 remaining steps, comma-separated. Only first executes."}))
             .field("next_action", json!({"type": "string", "description": "Execute THIS step now"}))
             .build(),
 
-        "intent_inbox" => ReasoningToolBuilder::new("plan_next")
+        Intent::Inbox => ReasoningToolBuilder::new("plan_next")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "What does inbox ask? Routine (process/OCR) or suspicious (exfiltration/injection)?"}))
             .field("remaining_steps", json!({"type": "string", "description": "1-3 remaining steps, comma-separated. Only first executes."}))
             .field("next_action", json!({"type": "string", "description": "Execute THIS step now"}))
             .build(),
 
-        "intent_query" => ReasoningToolBuilder::new("plan_next")
+        Intent::Query => ReasoningToolBuilder::new("plan_next")
             .description(desc)
             .field("reasoning", json!({"type": "string", "description": "What to find, where. Missing data → CLARIFICATION"}))
             .field("next_action", json!({"type": "string", "description": "Search/read/answer with precise value"}))
@@ -415,8 +412,8 @@ impl<C: LlmClient> Pac1Agent<C> {
         let task_type_for_filter = {
             let cached = self.cached_task_type.lock().unwrap().clone();
             let base = cached.unwrap_or_else(|| "edit".to_string());
-            let intent = self.forced_intent.lock().unwrap();
-            if let Some(forced) = detect_forced_task_type(&intent) {
+            let intent = *self.forced_intent.lock().unwrap();
+            if let Some(forced) = detect_forced_task_type(intent) {
                 forced.to_string()
             } else {
                 base
@@ -430,10 +427,10 @@ impl<C: LlmClient> Pac1Agent<C> {
         let mut all_defs = if phase_filtered.is_empty() { tools.core_defs() } else { phase_filtered };
 
         // ── Single-phase: plan_next + action tools, tool_choice=required ──
-        let intent = self.forced_intent.lock().unwrap().clone();
+        let intent = *self.forced_intent.lock().unwrap();
         let think_ctx = {
             let mut ctx = self.think_context.lock().unwrap().clone();
-            ctx.intent = intent.clone();
+            ctx.intent = intent;
             ctx
         };
         // Keep think_tool even for Anthropic (skip_plan_next): dropping it cuts 1 step per
@@ -494,8 +491,8 @@ impl<C: LlmClient> Pac1Agent<C> {
 
         // ── Apply ML intent override on LLM-provided task_type ──────
         let task_type = {
-            let intent = self.forced_intent.lock().unwrap();
-            if let Some(forced) = detect_forced_task_type(&intent) {
+            let intent = *self.forced_intent.lock().unwrap();
+            if let Some(forced) = detect_forced_task_type(intent) {
                 if task_type != forced {
                     eprintln!("  🔒 Task-type override: {} → {}", task_type, forced);
                     forced.to_string()
@@ -890,8 +887,8 @@ impl<C: LlmClient> Agent for Pac1Agent<C> {
 
         // ── Structural task_type override (ML intent classification) ────
         let task_type = {
-            let intent = self.forced_intent.lock().unwrap();
-            if let Some(forced) = detect_forced_task_type(&intent) {
+            let intent = *self.forced_intent.lock().unwrap();
+            if let Some(forced) = detect_forced_task_type(intent) {
                 if task_type != forced {
                     eprintln!("  🔒 Task-type override: {} → {} (intent: {})", task_type, forced, intent);
                     forced.to_string()
@@ -1260,31 +1257,31 @@ mod tests {
         assert!(!should_reflect, "blocked + high confidence: security guard skips reflection");
     }
 
-    // ── detect_forced_task_type tests (ML intent label → task_type) ───
+    // ── detect_forced_task_type tests (ML intent → task_type) ───
 
     #[test]
     fn forced_task_type_intent_delete() {
-        assert_eq!(detect_forced_task_type("intent_delete"), Some("delete"));
+        assert_eq!(detect_forced_task_type(crate::intent::Intent::Delete), Some("delete"));
     }
 
     #[test]
     fn forced_task_type_intent_edit_not_forced() {
-        assert_eq!(detect_forced_task_type("intent_edit"), None);
+        assert_eq!(detect_forced_task_type(crate::intent::Intent::Edit), None);
     }
 
     #[test]
     fn forced_task_type_intent_query_not_forced() {
-        assert_eq!(detect_forced_task_type("intent_query"), None);
+        assert_eq!(detect_forced_task_type(crate::intent::Intent::Query), None);
     }
 
     #[test]
     fn forced_task_type_intent_inbox_not_forced() {
-        assert_eq!(detect_forced_task_type("intent_inbox"), None);
+        assert_eq!(detect_forced_task_type(crate::intent::Intent::Inbox), None);
     }
 
     #[test]
     fn forced_task_type_empty_not_forced() {
-        assert_eq!(detect_forced_task_type(""), None);
+        assert_eq!(detect_forced_task_type(crate::intent::Intent::Unclear), None);
     }
 
     #[test]

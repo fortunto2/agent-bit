@@ -32,7 +32,7 @@ pub(crate) async fn classify_intent_via_llm(
             "properties": {
                 "intent": {
                     "type": "string",
-                    "enum": ["intent_inbox", "intent_email", "intent_delete", "intent_query", "intent_edit", "intent_capture"],
+                    "enum": crate::intent::Intent::wire_values(),
                     "description": "inbox=process/review/handle inbox messages or queue, email=send/write/compose email, delete=remove/discard/clean up files, query=lookup/find/count/list data, edit=update/create/modify files, capture=capture/distill from inbox into cards"
                 }
             },

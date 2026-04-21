@@ -154,7 +154,7 @@ pub struct Pac1SgrAgent {
     pub pcm: Arc<PcmClient>,
     pub llm: sgr_agent::llm::Llm,
     pub system_prompt: String,
-    pub intent: String,
+    pub intent: crate::intent::Intent,
     step_count: AtomicU32,
     /// Data-driven tool hooks (parsed from AGENTS.MD)
     pub hooks: crate::hooks::SharedHookRegistry,
@@ -163,7 +163,7 @@ pub struct Pac1SgrAgent {
 impl Pac1SgrAgent {
     pub fn new(
         pcm: Arc<PcmClient>, llm: sgr_agent::llm::Llm,
-        system_prompt: String, intent: String,
+        system_prompt: String, intent: crate::intent::Intent,
     ) -> Self {
         Self {
             pcm, llm, system_prompt, intent,
@@ -178,8 +178,8 @@ impl Pac1SgrAgent {
     }
 
     fn tool_names(&self) -> Vec<&str> {
-        match self.intent.as_str() {
-            "intent_delete" => vec!["read", "search", "find", "list", "delete", "answer"],
+        match self.intent {
+            crate::intent::Intent::Delete => vec!["read", "search", "find", "list", "delete", "answer"],
             _ => vec!["read", "write", "delete", "search", "find", "list", "tree",
                        "mkdir", "move_file", "answer"],
         }

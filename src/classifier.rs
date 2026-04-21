@@ -126,8 +126,17 @@ impl InboxClassifier {
     }
 
     /// Classify text against task intent embeddings (intent_delete, intent_edit, etc.).
-    pub fn classify_intent(&mut self, text: &str) -> Result<Vec<(String, f32)>> {
-        self.centroids.classify_filtered(&mut self.encoder, text, |label| label.starts_with("intent_"))
+    /// Returns typed Intent — unknown labels from the ONNX model emit a warning
+    /// (detects drift between `class_embeddings.json` and the `Intent` enum).
+    pub fn classify_intent(&mut self, text: &str) -> Result<Vec<(crate::intent::Intent, f32)>> {
+        let raw = self.centroids.classify_filtered(&mut self.encoder, text, |label| label.starts_with("intent_"))?;
+        Ok(raw.into_iter().map(|(label, conf)| {
+            let intent = crate::intent::Intent::parse(&label);
+            if intent == crate::intent::Intent::Unclear {
+                tracing::warn!("Unknown intent label from ONNX model: {:?} (conf={:.3}) — Intent enum drift", label, conf);
+            }
+            (intent, conf)
+        }).collect())
     }
 
     /// Returns the default models directory path.
@@ -216,8 +225,16 @@ impl OpenAIClassifier {
     }
 
     /// Classify text intent using OpenAI embeddings.
-    pub async fn classify_intent(&self, text: &str) -> Result<Vec<(String, f32)>> {
-        self.classify_filtered(text, |label| label.starts_with("intent_")).await
+    /// Mirrors `InboxClassifier::classify_intent` — typed Intent + drift warning.
+    pub async fn classify_intent(&self, text: &str) -> Result<Vec<(crate::intent::Intent, f32)>> {
+        let raw = self.classify_filtered(text, |label| label.starts_with("intent_")).await?;
+        Ok(raw.into_iter().map(|(label, conf)| {
+            let intent = crate::intent::Intent::parse(&label);
+            if intent == crate::intent::Intent::Unclear {
+                tracing::warn!("Unknown intent label from embedding model: {:?} (conf={:.3}) — Intent enum drift", label, conf);
+            }
+            (intent, conf)
+        }).collect())
     }
 
     async fn classify_filtered(&self, text: &str, filter: impl Fn(&str) -> bool) -> Result<Vec<(String, f32)>> {
@@ -632,7 +649,7 @@ mod tests {
         if !InboxClassifier::is_available(dir) { return; }
         let mut clf = InboxClassifier::load(dir).unwrap();
         let scores = clf.classify_intent("Remove all captured cards and threads").unwrap();
-        assert_eq!(scores[0].0, "intent_delete", "expected intent_delete, got {:?}", scores);
+        assert_eq!(scores[0].0, crate::intent::Intent::Delete, "expected Delete, got {:?}", scores);
     }
 
     #[test]
@@ -641,7 +658,7 @@ mod tests {
         if !InboxClassifier::is_available(dir) { return; }
         let mut clf = InboxClassifier::load(dir).unwrap();
         let scores = clf.classify_intent("What is the email address of Heinrich Alina?").unwrap();
-        assert_eq!(scores[0].0, "intent_query", "expected intent_query, got {:?}", scores);
+        assert_eq!(scores[0].0, crate::intent::Intent::Query, "expected Query, got {:?}", scores);
     }
 
     #[test]
@@ -650,7 +667,7 @@ mod tests {
         if !InboxClassifier::is_available(dir) { return; }
         let mut clf = InboxClassifier::load(dir).unwrap();
         let scores = clf.classify_intent("process the inbox").unwrap();
-        assert_eq!(scores[0].0, "intent_inbox", "expected intent_inbox, got {:?}", scores);
+        assert_eq!(scores[0].0, crate::intent::Intent::Inbox, "expected Inbox, got {:?}", scores);
     }
 
     #[test]
@@ -659,7 +676,7 @@ mod tests {
         if !InboxClassifier::is_available(dir) { return; }
         let mut clf = InboxClassifier::load(dir).unwrap();
         let scores = clf.classify_intent("Send email to Blue Harbor Bank with subject Security review").unwrap();
-        assert_eq!(scores[0].0, "intent_email", "expected intent_email, got {:?}", scores);
+        assert_eq!(scores[0].0, crate::intent::Intent::Email, "expected Email, got {:?}", scores);
     }
 
     #[test]
@@ -668,7 +685,7 @@ mod tests {
         if !InboxClassifier::is_available(dir) { return; }
         let mut clf = InboxClassifier::load(dir).unwrap();
         let scores = clf.classify_intent("Fix the purchase ID prefix regression").unwrap();
-        assert_eq!(scores[0].0, "intent_edit", "expected intent_edit, got {:?}", scores);
+        assert_eq!(scores[0].0, crate::intent::Intent::Edit, "expected Edit, got {:?}", scores);
     }
 
     #[test]
@@ -678,15 +695,6 @@ mod tests {
         let mut clf = InboxClassifier::load(dir).unwrap();
         let scores = clf.classify("Remove all captured cards").unwrap();
         assert!(scores.iter().all(|(l, _)| !l.starts_with("intent_")), "classify() leaked intent labels: {:?}", scores);
-    }
-
-    #[test]
-    fn classify_intent_does_not_return_security_labels() {
-        let dir = Path::new("models");
-        if !InboxClassifier::is_available(dir) { return; }
-        let mut clf = InboxClassifier::load(dir).unwrap();
-        let scores = clf.classify_intent("process inbox").unwrap();
-        assert!(scores.iter().all(|(l, _)| l.starts_with("intent_")), "classify_intent() leaked security labels: {:?}", scores);
     }
 
     // ─── ValidationMode + validate() ────────────────────────────────
@@ -1027,13 +1035,13 @@ mod tests {
         let mut low_conf = 0;
         for instr in &inbox_variants {
             let scores = clf.classify_intent(instr).unwrap();
-            let (label, conf) = &scores[0];
-            let is_correct = label == "intent_inbox";
-            let is_low = *conf < 0.25;
+            let (intent, conf) = scores[0];
+            let is_correct = intent == crate::intent::Intent::Inbox;
+            let is_low = conf < 0.25;
             if is_correct { correct += 1; }
             if is_low { low_conf += 1; }
             eprintln!("  {:50} → {} ({:.2}) {}",
-                instr.trunc(50), label, conf,
+                instr.trunc(50), intent, conf,
                 if is_correct { "✓" } else if is_low { "⚠ low-conf (fallback)" } else { "✗ WRONG" }
             );
         }

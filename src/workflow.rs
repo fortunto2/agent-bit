@@ -46,7 +46,7 @@ pub enum Guard {
 /// Runtime workflow state — created per trial, tracks agent progress.
 pub struct WorkflowState {
     pub phase: Phase,
-    pub intent: String,
+    pub intent: crate::intent::Intent,
     step: usize,
     max_steps: usize,
     read_paths: Vec<String>,
@@ -73,7 +73,7 @@ pub struct WorkflowState {
 }
 
 impl WorkflowState {
-    pub fn new(intent: &str, max_steps: usize, hooks: hooks::SharedHookRegistry, instruction: &str) -> Self {
+    pub fn new(intent: crate::intent::Intent, max_steps: usize, hooks: hooks::SharedHookRegistry, instruction: &str) -> Self {
         let instr_lower = instruction.to_lowercase();
         let is_capture = (instr_lower.contains("capture") || instr_lower.contains("distill"))
             && !instr_lower.contains("delete all")
@@ -87,11 +87,11 @@ impl WorkflowState {
 
         // Inbox tasks: limit outbox emails to prevent over-processing
         // Most inbox tasks expect 1 email; multi-inbox with 5+ files may need 2
-        let outbox_limit = if intent == "intent_inbox" && !is_capture { 2 } else { 0 };
+        let outbox_limit = intent.outbox_limit(is_capture);
 
         Self {
             phase: Phase::Reading,
-            intent: intent.to_string(),
+            intent,
             step: 0,
             max_steps,
             read_paths: Vec::new(),
@@ -147,8 +147,7 @@ impl WorkflowState {
         if self.phase == Phase::Reading
             && self.read_paths.len() >= 3
             && self.write_paths.is_empty()
-            && self.intent != "intent_delete"
-            && self.intent != "intent_query"
+            && self.intent.expects_write_during_reading()
             && self.is_capture
         {
             msgs.push("✏️ You have read multiple files but written nothing. Start writing NOW.".into());
@@ -161,7 +160,7 @@ impl WorkflowState {
 
         // Analysis-paralysis: 3+ reads with zero writes on edit/inbox tasks → force action.
         if self.reads_since_write >= 3 && self.write_paths.is_empty() && self.delete_paths.is_empty()
-            && matches!(self.intent.as_str(), "intent_edit" | "intent_inbox")
+            && self.intent.allows_multi_write()
         {
             msgs.push("✏️ You have read enough. STOP reading. Call prepend_to_file or write NOW for each target file. Further reads will cause auto-answer with no writes (Score 0.00).".into());
         }
@@ -249,7 +248,7 @@ impl WorkflowState {
             if outcome.contains("ok") || outcome.is_empty() {
                 // Don't block if verification_only (OTP oracle — no writes expected)
                 // AI-NOTE: also skip when no inbox files — query tasks with wrong ML intent shouldn't be forced to write
-                if !self.verification_only && self.has_inbox_files && self.intent != "intent_query" && self.intent != "intent_delete" && self.intent != "intent_unclear" {
+                if !self.verification_only && self.has_inbox_files && self.intent.answer_ok_requires_write() {
                     return Guard::Block(
                         "⛔ You haven't written any files yet. Execute the task FIRST \
                          (write email, update contact, etc), THEN call answer(). \
@@ -294,7 +293,7 @@ impl WorkflowState {
         // Query result guard: if query task found no content files → suggest CLARIFICATION
         if tool == "answer" && self.phase == Phase::Reading {
             let outcome = path.to_lowercase();
-            if outcome.contains("ok") && self.intent == "intent_query" {
+            if outcome.contains("ok") && self.intent.is_query() {
                 // Check if agent read any content files (not just system files like AGENTS.md)
                 let read_content = self.read_paths.iter().any(|p| crate::policy::is_auto_ref_path(p));
                 if !read_content {
@@ -350,7 +349,7 @@ impl WorkflowState {
                 self.delete_paths.push(norm.clone());
                 self.reads_since_write = 0;
                 if self.phase == Phase::Acting
-                    || (self.intent == "intent_delete" && self.phase == Phase::Reading)
+                    || (self.intent.delete_from_reading() && self.phase == Phase::Reading)
                 {
                     self.phase = Phase::Cleanup;
                 }
@@ -390,9 +389,11 @@ mod tests {
         Arc::new(hooks::HookRegistry::new())
     }
 
+    use crate::intent::Intent;
+
     #[test]
     fn delete_task_skips_capture_guard() {
-        let wf = WorkflowState::new("intent_delete", 20, empty_hooks(), "Remove all captured cards");
+        let wf = WorkflowState::new(Intent::Delete, 20, empty_hooks(), "Remove all captured cards");
         assert!(!wf.is_capture);
         let guard = wf.pre_action("delete", "02_distill/cards/article.md");
         assert!(matches!(guard, Guard::Allow));
@@ -400,7 +401,7 @@ mod tests {
 
     #[test]
     fn capture_task_blocks_delete_before_write() {
-        let wf = WorkflowState::new("intent_inbox", 20, empty_hooks(), "capture into 'influential' folder");
+        let wf = WorkflowState::new(Intent::Inbox, 20, empty_hooks(), "capture into 'influential' folder");
         assert!(wf.is_capture);
         let guard = wf.pre_action("delete", "00_inbox/article.md");
         assert!(matches!(guard, Guard::Block(_)));
@@ -408,7 +409,7 @@ mod tests {
 
     #[test]
     fn capture_task_allows_delete_after_write() {
-        let mut wf = WorkflowState::new("intent_inbox", 20, empty_hooks(), "capture into 'influential'");
+        let mut wf = WorkflowState::new(Intent::Inbox, 20, empty_hooks(), "capture into 'influential'");
         wf.post_action("write", "01_capture/influential/article.md");
         assert_eq!(wf.phase, Phase::Acting);
         let guard = wf.pre_action("delete", "00_inbox/article.md");
@@ -417,14 +418,14 @@ mod tests {
 
     #[test]
     fn policy_blocks_protected_files() {
-        let wf = WorkflowState::new("intent_inbox", 20, empty_hooks(), "process inbox");
+        let wf = WorkflowState::new(Intent::Inbox, 20, empty_hooks(), "process inbox");
         let guard = wf.pre_action("delete", "AGENTS.md");
         assert!(matches!(guard, Guard::Block(_)));
     }
 
     #[test]
     fn phase_transitions() {
-        let mut wf = WorkflowState::new("intent_inbox", 20, empty_hooks(), "capture task");
+        let mut wf = WorkflowState::new(Intent::Inbox, 20, empty_hooks(), "capture task");
         assert_eq!(wf.phase, Phase::Reading);
 
         wf.post_action("read", "inbox/msg.md");
@@ -442,7 +443,7 @@ mod tests {
 
     #[test]
     fn delete_task_transitions() {
-        let mut wf = WorkflowState::new("intent_delete", 20, empty_hooks(), "delete all cards");
+        let mut wf = WorkflowState::new(Intent::Delete, 20, empty_hooks(), "delete all cards");
         assert_eq!(wf.phase, Phase::Reading);
 
         wf.post_action("delete", "cards/article.md");
@@ -451,7 +452,7 @@ mod tests {
 
     #[test]
     fn budget_nudge_at_60pct() {
-        let mut wf = WorkflowState::new("intent_inbox", 10, empty_hooks(), "process inbox");
+        let mut wf = WorkflowState::new(Intent::Inbox, 10, empty_hooks(), "process inbox");
         for _ in 0..5 {
             wf.advance_step();
         }
@@ -470,14 +471,14 @@ mod tests {
         });
         let hooks = Arc::new(reg);
 
-        let mut wf = WorkflowState::new("intent_inbox", 20, hooks, "capture task");
+        let mut wf = WorkflowState::new(Intent::Inbox, 20, hooks, "capture task");
         let msgs = wf.post_action("write", "02_distill/cards/article.md");
         assert!(msgs.iter().any(|m| m.contains("Update thread")));
     }
 
     #[test]
     fn otp_with_task_allows_deny_while_reading() {
-        let mut wf = WorkflowState::new("intent_inbox", 20, empty_hooks(), "process inbox");
+        let mut wf = WorkflowState::new(Intent::Inbox, 20, empty_hooks(), "process inbox");
         wf.otp_with_task = true;
 
         // In Reading phase, DENIED allowed (agent still verifying OTP)
@@ -487,7 +488,7 @@ mod tests {
 
     #[test]
     fn otp_with_task_blocks_non_ok_after_write() {
-        let mut wf = WorkflowState::new("intent_inbox", 20, empty_hooks(), "process inbox");
+        let mut wf = WorkflowState::new(Intent::Inbox, 20, empty_hooks(), "process inbox");
         wf.otp_with_task = true;
         wf.post_action("write", "outbox/email.json"); // now in Acting phase
 

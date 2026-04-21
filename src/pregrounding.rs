@@ -60,7 +60,7 @@ pub(crate) async fn run_agent(
         }
     };
     let instruction_label = classified.instruction_label.clone();
-    let instruction_intent = classified.intent.clone();
+    let instruction_intent: crate::intent::Intent = classified.intent;
     let intent_confidence = classified.intent_confidence;
 
     // ── Context assembly (tree, agents.md, nested AGENTS.md, date) — parallel IO ──
@@ -112,7 +112,7 @@ pub(crate) async fn run_agent(
 
     // Low-confidence intent: ML unsure → OpenAI embedding classify → LLM fallback → structural
     // Skip fallback for intent_delete — structural forcing already handles it via detect_forced_task_type
-    if intent_confidence < 0.30 && ready.intent != "intent_delete" {
+    if intent_confidence < 0.30 && !ready.intent.skips_low_conf_fallback() {
         // AI-NOTE: Layer 2: embedding classify (default: CF bge-m3, FREE + multilingual)
         let embed_config = crate::config::EmbeddingsSection::default();
         let openai_clf = classifier::OpenAIClassifier::try_load(
@@ -122,15 +122,14 @@ pub(crate) async fn run_agent(
         if let Some(ref clf) = openai_clf {
             match clf.classify_intent(instruction).await {
                 Ok(scores) if !scores.is_empty() && scores[0].1 > 0.30 => {
-                    let (label, conf) = &scores[0];
-                    let normalized = if label == "intent_capture" { "intent_inbox".to_string() } else { label.clone() };
+                    let (intent, conf) = scores[0];
                     // AI-NOTE: accept multilingual bge-m3 intent — monolingual ONNX `non_work`
                     // label is unreliable on arabic/chinese/japanese. Trust the multilingual signal.
-                    eprintln!("  ↳ OpenAI intent classify: {} ({:.2}) → {} ({:.3})", ready.intent, intent_confidence, normalized, conf);
-                    if *conf > 0.7 {
-                        save_teacher_label(instruction, &normalized, *conf, "intent");
+                    eprintln!("  ↳ OpenAI intent classify: {} ({:.2}) → {} ({:.3})", ready.intent, intent_confidence, intent, conf);
+                    if conf > 0.7 {
+                        save_teacher_label(instruction, intent.as_str(), conf, "intent");
                     }
-                    ready.intent = normalized;
+                    ready.intent = intent;
                     resolved = true;
                 }
                 Ok(_) => eprintln!("  ↳ OpenAI intent: low confidence, falling through"),
@@ -160,17 +159,17 @@ pub(crate) async fn run_agent(
             ).await;
 
             if let Some(ref llm_label) = llm_intent {
-                let normalized = if llm_label == "intent_capture" { "intent_inbox".to_string() } else { llm_label.clone() };
+                let normalized = crate::intent::Intent::parse(llm_label);
                 eprintln!("  ↳ LLM intent classify: {} ({:.2}) → {}", ready.intent, intent_confidence, normalized);
                 ready.intent = normalized;
             // AI-NOTE: structural inbox fallback applies regardless of label.
             // Non-English instructions (arabic/chinese/japanese/russian) get misclassified
             // as non_work by English-only MiniLM; but if inbox_files exist, this IS a CRM
             // inbox task. Trust the structural signal over the monolingual ML label.
-            } else if !ready.inbox_files.is_empty() && ready.intent != "intent_inbox" {
+            } else if !ready.inbox_files.is_empty() && ready.intent != crate::intent::Intent::Inbox {
                 eprintln!("  ↳ Structural intent fallback: {} ({:.2}) → intent_inbox (inbox_files={}, label={})",
                     ready.intent, intent_confidence, ready.inbox_files.len(), instruction_label);
-                ready.intent = "intent_inbox".to_string();
+                ready.intent = crate::intent::Intent::Inbox;
             }
         }
     }
@@ -197,7 +196,7 @@ pub(crate) async fn run_agent(
     let effective_label = if instruction_label == "non_work" && !ready.inbox_files.is_empty() {
         eprintln!("  ↳ Skill override: non_work → crm (inbox_files present — multilingual inbox task)");
         "crm"
-    } else if ready.intent == "intent_query" && instruction_label == "non_work" && !is_non_english {
+    } else if ready.intent == crate::intent::Intent::Query && instruction_label == "non_work" && !is_non_english {
         eprintln!("  ↳ Skill override: non_work → crm (intent_query, English)");
         "crm"
     } else {
@@ -205,7 +204,7 @@ pub(crate) async fn run_agent(
     };
     // Wrap in Arc early — needed for both prompt injection and agent tools
     let skill_registry = std::sync::Arc::new(skill_registry);
-    let skill_body = crate::skills::select_body(&skill_registry, effective_label, &instruction_intent, instruction);
+    let skill_body = crate::skills::select_body(&skill_registry, effective_label, instruction_intent, instruction);
     let hint = std::env::var("HINT").unwrap_or_default();
     // System prompt is now STATIC (cacheable) — dynamic parts go into user messages
     let mut system_prompt = template.to_string();
@@ -401,7 +400,7 @@ pub(crate) async fn run_agent(
     // Create workflow state machine (unified guards: budget, write, capture-delete, policy, hooks)
     let workflow: crate::workflow::SharedWorkflowState = std::sync::Arc::new(
         std::sync::Mutex::new(crate::workflow::WorkflowState::new(
-            &instruction_intent, max_steps, hook_registry.clone(), instruction,
+            instruction_intent, max_steps, hook_registry.clone(), instruction,
         ))
     );
 
@@ -470,9 +469,9 @@ pub(crate) async fn run_agent(
 
     let single_phase = agent::SinglePhaseMode::resolve(overrides.single_phase.as_deref(), model);
     let agent = agent::Pac1Agent::with_config(llm, &system_prompt, max_steps as u32, prompt_mode, config.rejects_prefill(), model, Some(workflow.clone()), single_phase);
-    agent.set_intent(&instruction_intent);
+    agent.set_intent(instruction_intent);
     agent.set_think_context(agent::ThinkContext {
-        intent: instruction_intent.clone(),
+        intent: instruction_intent,
         inbox_count: ready.inbox_files.len(),
         has_threat: ready.inbox_files.iter().any(|f| f.security.ml_label == "injection" || f.security.ml_label == "social_engineering"),
         has_otp: ready.inbox_files.iter().any(|f| f.security.ml_label == "credential"),
@@ -494,7 +493,7 @@ pub(crate) async fn run_agent(
 
     // Scale max_steps for multi-inbox: 5+ messages need more room
     // AI-NOTE: skip scaling for intent_delete — t01 delete tasks ignore inbox, don't need extra steps
-    let effective_max_steps = if ready.inbox_files.len() > 3 && ready.intent != "intent_delete" {
+    let effective_max_steps = if ready.inbox_files.len() > 3 && !ready.intent.skips_inbox_scaling() {
         let scaled = max_steps + (ready.inbox_files.len() * 4);
         eprintln!("  📬 Multi-inbox ({} files): max_steps {}→{}", ready.inbox_files.len(), max_steps, scaled);
         scaled
@@ -511,7 +510,7 @@ pub(crate) async fn run_agent(
     if sgr_mode {
         let sgr_llm = sgr_agent::llm::Llm::new(&config);
         let sgr_agent = crate::pac1_sgr::Pac1SgrAgent::new(
-            pcm.clone(), sgr_llm, system_prompt.clone(), instruction_intent.clone(),
+            pcm.clone(), sgr_llm, system_prompt.clone(), instruction_intent,
         ).with_hooks(hook_registry.clone());
         let sgr_config = sgr_agent::app_loop::LoopConfig {
             max_steps: effective_max_steps,
