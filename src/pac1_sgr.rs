@@ -254,7 +254,8 @@ impl SgrAgent for Pac1SgrAgent {
             Ok(StepDecision {
                 situation: state, task: remaining, completed,
                 actions, hints,
-                call_ids: vec![call.id.clone()],
+                tool_calls: vec![call.clone()],
+                ..Default::default()
             })
         }
     }
