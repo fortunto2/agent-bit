@@ -2620,7 +2620,9 @@ dependencies = [
 
 [[package]]
 name = "openai-oxide"
-version = "0.13.0"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c947f02cd590a2b92d4896817d0ba5562951dd18357bbb7bbcdf36e04e897774"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2643,7 +2645,9 @@ dependencies = [
 
 [[package]]
 name = "openai-types"
-version = "0.1.2"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccd49725c15c844ac5fe351eb15febe55674a7e1a0a83924704e2a9e20cb7c55"
 dependencies = [
  "serde",
  "serde_json",
@@ -3852,7 +3856,7 @@ dependencies = [
 
 [[package]]
 name = "sgr-agent"
-version = "0.7.5"
+version = "0.7.12"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3887,7 +3891,7 @@ dependencies = [
 
 [[package]]
 name = "sgr-agent-core"
-version = "0.2.3"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3899,7 +3903,7 @@ dependencies = [
 
 [[package]]
 name = "sgr-agent-ml"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "ndarray 0.16.1",
@@ -3912,7 +3916,7 @@ dependencies = [
 
 [[package]]
 name = "sgr-agent-tools"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5778,3 +5782,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "openai-oxide"
+version = "0.17.0"
