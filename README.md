@@ -4,6 +4,8 @@ Rust agent for [BitGN PAC1 Challenge](https://bitgn.com) — Personal & Trustwor
 
 Built on [sgr-agent](https://github.com/fortunto2/rust-code) framework.
 
+**Write-ups:** [building a PAC1 agent in Rust](https://rustman.org/posts/agent-bit-pac1/) · [what the competition taught, and what it cost](https://rustman.org/posts/pac1-competition-retrospective/)
+
 ![agent-bit architectural overview](docs/images/architecture.png)
 
 *Typed · Structured · Hybrid Intelligence · Local-First — state machine pipeline, on-device ML (ONNX), pluggable tools.*
