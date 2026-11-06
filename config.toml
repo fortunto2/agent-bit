@@ -76,7 +76,7 @@ cf-aig-request-timeout = "300000"
 cf-aig-cache-ttl = "3600"
 
 [providers.cf-kimi]
-model = "workers-ai/@cf/moonshotai/kimi-k2.5"
+model = "workers-ai/@cf/zai-org/glm-5.3"
 base_url = "https://gateway.ai.cloudflare.com/v1/33dec9645c443eef5859b1e10ce71e01/superapi/compat"
 api_key_env = "CF_AI_API_KEY"
 [providers.cf-kimi.headers]
